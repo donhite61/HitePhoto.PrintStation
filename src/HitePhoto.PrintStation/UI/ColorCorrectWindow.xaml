@@ -1,0 +1,285 @@
+<Window x:Class="HitePhoto.PrintStation.UI.ColorCorrectWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:HitePhoto.PrintStation.UI.ViewModels"
+        xmlns:local="clr-namespace:HitePhoto.PrintStation.UI"
+        Title="Color Correction"
+        Width="1900" Height="1160"
+        MinWidth="900" MinHeight="600"
+        Background="#B8B8B8"
+        Foreground="#303030"
+        WindowStartupLocation="CenterScreen"
+        WindowState="Maximized"
+        KeyDown="Window_KeyDown">
+
+    <Window.Resources>
+
+        <vm:FileNameConverter x:Key="FileNameConv"/>
+
+        <!-- ── Slot templates ──────────────────────────────────────────────── -->
+
+        <!-- Correction: label tab + colored value box -->
+        <DataTemplate x:Key="CorrectionSlotTemplate">
+            <DockPanel Margin="0" HorizontalAlignment="Stretch">
+                <TextBlock DockPanel.Dock="Left"
+                           Text="{Binding Definition.Label}"
+                           FontSize="9"
+                           Foreground="{Binding Definition.LabelBrush}"
+                           VerticalAlignment="Center" Margin="2,0,3,0"/>
+                <Border Background="{Binding CurrentValueBgBrush}"
+                        CornerRadius="2" Margin="0,1" MinHeight="22"
+                        Cursor="Hand"
+                        MouseLeftButtonDown="Slot_LeftClick"
+                        MouseRightButtonDown="Slot_RightClick">
+                    <TextBlock Text="{Binding DisplayValue}"
+                               FontSize="13" FontWeight="Bold"
+                               Foreground="{Binding CurrentValueFgBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+            </DockPanel>
+        </DataTemplate>
+
+        <!-- Preset: colored button (click=apply, hold=save) -->
+        <DataTemplate x:Key="PresetSlotTemplate">
+            <Border Background="{Binding Definition.ButtonBgBrush}"
+                    CornerRadius="3" Margin="1" MinHeight="24"
+                    Cursor="Hand"
+                    MouseLeftButtonDown="Preset_MouseDown"
+                    MouseLeftButtonUp="Preset_MouseUp">
+                <TextBlock Text="{Binding Definition.Label}"
+                           FontSize="11" FontWeight="SemiBold"
+                           Foreground="{Binding CurrentButtonFgBrush}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+        </DataTemplate>
+
+        <!-- Action: colored button (toggle bg for on/off) -->
+        <DataTemplate x:Key="ActionSlotTemplate">
+            <Border Background="{Binding CurrentButtonBgBrush}"
+                    CornerRadius="3" Margin="1" MinHeight="24"
+                    Cursor="Hand"
+                    MouseLeftButtonDown="Action_Click">
+                <TextBlock Text="{Binding Definition.Label}"
+                           FontSize="11" FontWeight="SemiBold"
+                           Foreground="{Binding Definition.ButtonFgBrush}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+        </DataTemplate>
+
+        <!-- Empty: invisible spacer -->
+        <DataTemplate x:Key="EmptySlotTemplate">
+            <Border Margin="2"/>
+        </DataTemplate>
+
+        <!-- Template selector -->
+        <local:SlotTemplateSelector x:Key="SlotSelector"
+            CorrectionTemplate="{StaticResource CorrectionSlotTemplate}"
+            PresetTemplate="{StaticResource PresetSlotTemplate}"
+            ActionTemplate="{StaticResource ActionSlotTemplate}"
+            EmptyTemplate="{StaticResource EmptySlotTemplate}"/>
+
+    </Window.Resources>
+
+    <DockPanel>
+
+        <!-- ── Header ──────────────────────────────────────────────────────── -->
+        <Border DockPanel.Dock="Top" Background="#A0A0A0" Padding="14,7">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding PageLabel}" FontSize="13" Foreground="#303030"/>
+                    <TextBlock Text="  ·  " Foreground="#707070" FontSize="13"/>
+                    <TextBlock Text="{Binding StatusText}" Foreground="#505050" FontSize="11"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Content="✓  Confirm Page  (Enter)"
+                            Command="{Binding ConfirmPageCommand}"
+                            Background="#467846" Width="190" Margin="0,0,8,0"/>
+                    <Button Content="Pass Page  (PgDn)"
+                            Command="{Binding PassPageCommand}"
+                            Background="#686846" Width="140" Margin="0,0,8,0"/>
+                    <Button Content="F12  Skip Rest"
+                            Command="{Binding SkipRestCommand}"
+                            Background="#684646" Width="120"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ── Keyboard legend ─────────────────────────────────────────────── -->
+        <Border DockPanel.Dock="Bottom" Background="#A0A0A0" Padding="10,4">
+            <TextBlock FontSize="10" Foreground="#505050" TextWrapping="Wrap">
+                <Run Text="← → Move focus  |  "/>
+                <Run Text="Alt+1–6 Select image  |  "/>
+                <Run Text="Alt+C Cyan  Alt+M Magenta  Alt+Y Yellow  Alt+W Warmth  |  "/>
+                <Run Text="Alt+E Exposure  Alt+K Contrast  Alt+S Saturation  |  "/>
+                <Run Text="Alt+B Brightness  Alt+D Shadows  Alt+H Highlights  |  "/>
+                <Run Text="Alt+↑/↓ ±1  Alt+Shift+↑/↓ ±5  |  "/>
+                <Run Text="Alt+X Skip  |  Double-click Full Screen  |  Enter Confirm  |  PgDn Pass Page  |  F12 Skip Rest"/>
+            </TextBlock>
+        </Border>
+
+        <!-- ── 2×3 image grid ──────────────────────────────────────────────── -->
+        <ItemsControl ItemsSource="{Binding PageCards}" Margin="4">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <UniformGrid Rows="2" Columns="3"/>
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+
+            <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:ImageCorrectionCard}">
+
+                    <!-- Card border — blue when focused, red when skipped -->
+                    <Border Margin="2" CornerRadius="3" BorderThickness="2">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background"   Value="#A8A8A8"/>
+                                <Setter Property="BorderBrush"  Value="#999999"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding State.IsFocused}" Value="True">
+                                        <Setter Property="BorderBrush" Value="#558BAF"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding State.Skip}" Value="True">
+                                        <Setter Property="BorderBrush" Value="#AA5555"/>
+                                        <Setter Property="Background"  Value="#B09090"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+
+                        <DockPanel>
+
+                            <!-- ── Top metadata strip ───────────────────────── -->
+                            <Border DockPanel.Dock="Top" Background="#9C9C9C" Padding="4,1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="{Binding State.ImagePath,
+                                                      Converter={StaticResource FileNameConv}}"
+                                               FontSize="10" Foreground="#505050"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <TextBlock Text="{Binding PrintSizeLabel}"
+                                                   FontSize="10" Foreground="#606060" Margin="8,0,0,0"/>
+                                        <TextBlock Text=" · " FontSize="10" Foreground="#888888"/>
+                                        <TextBlock Text="{Binding DimensionLabel}"
+                                                   FontSize="10" Foreground="#707070"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- ── Bottom row 1 ──────────────────────────────── -->
+                            <Border DockPanel.Dock="Bottom" Background="#9C9C9C" Padding="1,0">
+                                <ItemsControl ItemsSource="{Binding BottomRow1Slots}"
+                                              ItemTemplateSelector="{StaticResource SlotSelector}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <UniformGrid Rows="1" Columns="7"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
+                            </Border>
+
+                            <!-- ── Fill: image + sidebars ────────────────────── -->
+                            <DockPanel>
+
+                                <!-- Left sidebar: 9 slots (vertical) -->
+                                <Border DockPanel.Dock="Left" Background="#9C9C9C" Width="38">
+                                    <ItemsControl ItemsSource="{Binding BottomRow2Slots}"
+                                                  ItemTemplateSelector="{StaticResource SlotSelector}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <UniformGrid Rows="9" Columns="1"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                </Border>
+
+                                <!-- Right sidebar: 7 slots (vertical) -->
+                                <Border DockPanel.Dock="Right" Background="#9C9C9C" Width="38">
+                                    <ItemsControl ItemsSource="{Binding TopSlots}"
+                                                  ItemTemplateSelector="{StaticResource SlotSelector}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <UniformGrid Rows="7" Columns="1"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                </Border>
+
+                                <!-- Preview image with crop box overlay -->
+                                <Grid x:Name="ImageArea"
+                                      Background="#B0B0B0"
+                                      MouseRightButtonDown="Image_RightClick"
+                                      MouseLeftButtonDown="Image_LeftClick">
+
+                                    <!-- Corrected preview — WriteableBitmap updated live -->
+                                    <Image Source="{Binding PreviewBitmap, NotifyOnTargetUpdated=True}"
+                                           Stretch="Uniform"
+                                           x:Name="PreviewImage"
+                                           SizeChanged="PreviewImage_SizeChanged"
+                                           TargetUpdated="PreviewImage_BitmapUpdated"/>
+
+                                    <!-- Crop box overlay -->
+                                    <Rectangle Stroke="#FFD700"
+                                               StrokeThickness="1.5"
+                                               Fill="Transparent"
+                                               IsHitTestVisible="False"
+                                               HorizontalAlignment="Left"
+                                               VerticalAlignment="Top"
+                                               Visibility="Collapsed"/>
+
+                                    <!-- Skip overlay -->
+                                    <Border Background="#88FFFFFF">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding State.Skip}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="SKIP" FontSize="32" FontWeight="Bold"
+                                                   Foreground="#CC0000"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                                    </Border>
+
+                                    <!-- Rendering spinner -->
+                                    <Border Background="#66FFFFFF" HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" CornerRadius="4" Padding="8,4">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsRendering}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="⟳" FontSize="18" Foreground="#505050"/>
+                                    </Border>
+
+                                </Grid>
+
+                            </DockPanel>
+
+                        </DockPanel>
+                    </Border>
+
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+    </DockPanel>
+</Window>

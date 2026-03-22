@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>HitePhoto.PrintStation</AssemblyName>
+    <RootNamespace>HitePhoto.PrintStation</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\HitePhoto.LabApi\src\HitePhoto.Shared\HitePhoto.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="MailKit" Version="4.9.0" />
+    <PackageReference Include="Magick.NET-Q16-AnyCPU" Version="14.10.3" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
+    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+    <PackageReference Include="SSH.NET" Version="2024.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="UI\Themes\Dark.xaml" />
+    <Resource Include="UI\Themes\Dark.xaml" />
+    <None Remove="UI\Themes\Light.xaml" />
+    <Resource Include="UI\Themes\Light.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Remove="UI\App.xaml" />
+    <ApplicationDefinition Include="UI\App.xaml" />
+  </ItemGroup>
+
+</Project>

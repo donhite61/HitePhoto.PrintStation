@@ -1,0 +1,88 @@
+using System.Text.Json.Serialization;
+using HitePhoto.PrintStation.Core.Models;
+
+namespace HitePhoto.PrintStation;
+
+public class RoutingEntry
+{
+    public int     ChannelNumber { get; set; }
+    public string? LayoutName    { get; set; }
+    public string  Source        { get; set; } = "";
+}
+
+public class AppSettings
+{
+    // ── Database (MariaDB on Dell server) ──
+    public string DbHost     { get; set; } = "192.168.1.149";
+    public int    DbPort     { get; set; } = 3306;
+    public string DbName     { get; set; } = "hitephoto";
+    public string DbUser     { get; set; } = "labapi";
+    public string DbPassword { get; set; } = "SlantedPeanuts2026";
+
+    /// <summary>This store's ID in the stores table (BH=1, WB=2).</summary>
+    public int StoreId { get; set; } = 2;
+
+    // ── Noritsu output ──
+    public string NoritsuOutputRoot { get; set; } = "";
+    public string ChannelsCsvPath   { get; set; } = "";
+
+    // ── Refresh ──
+    public int RefreshIntervalSeconds { get; set; } = 30;
+
+    // ── Display ──
+    public string Theme          { get; set; } = "Light";
+    public string TreeFontFamily { get; set; } = "Segoe UI";
+    public int    OrderFontSize  { get; set; } = 14;
+    public int    SizeFontSize   { get; set; } = 13;
+
+    // ── Logging ──
+    public bool EnableLogging { get; set; } = true;
+
+    // ── Routing ──
+    public Dictionary<string, RoutingEntry> RoutingMap { get; set; } = new();
+    public List<LayoutDefinition> Layouts { get; set; } = new();
+
+    // ── Color correction ──
+    public List<string>? CorrectionSlotLayout { get; set; }
+    public CorrectionStrengths CorrectionStrengths { get; set; } = new();
+    public ExposureRatios ExposureRatios { get; set; } = new();
+    public ControlParameters ControlParameters { get; set; } = new();
+    public Dictionary<string, PresetDefinition> Presets { get; set; } = new();
+    public List<CorrectionSettingsProfile> CorrectionProfiles { get; set; } = new();
+
+    // ── Email notifications ──
+    public bool   NotificationsEnabled     { get; set; } = false;
+    public string SmtpHost                 { get; set; } = "mail.hitephoto.com";
+    public int    SmtpPort                 { get; set; } = 465;
+    public string SmtpUsername             { get; set; } = "";
+    public string SmtpPassword             { get; set; } = "";
+    public string NotificationFromEmail    { get; set; } = "noreply@hitephoto.com";
+    public string NotificationSubject      { get; set; } = "Your photos are ready for pickup!";
+    public string NotificationBodyTemplate { get; set; } =
+        "Hi {CustomerName},\n\nYour photo order is ready for pickup at {StoreName}.\n\nThank you!\nHite Photo";
+    public List<Core.Processing.EmailTemplate> EmailTemplates { get; set; } = new();
+
+    // ── Pixfizz notification ──
+    public string PixfizzApiUrl          { get; set; } = "";
+    public string PixfizzApiKey          { get; set; } = "";
+    public string PixfizzOrganizationId  { get; set; } = "";
+    public string PixfizzLocationId      { get; set; } = "";
+    public string PixfizzNotifyMode      { get; set; } = "Pixfizz"; // "Pixfizz" or "Email"
+
+    // ── Auto-update ──
+    public string UpdateLocalFolder   { get; set; } = "";
+    public string UpdateSftpHost      { get; set; } = "";
+    public int    UpdateSftpPort      { get; set; } = 22;
+    public string UpdateSftpUsername  { get; set; } = "";
+    public string UpdateSftpPassword  { get; set; } = "";
+    public string UpdateSftpFolder    { get; set; } = "";
+
+    // ── Developer mode ──
+    public bool DeveloperMode { get; set; } = false;
+
+    /// <summary>Build a MySqlConnector connection string from the settings.</summary>
+    [JsonIgnore]
+    public string ConnectionString =>
+        $"Server={DbHost};Port={DbPort};Database={DbName};User={DbUser};Password={DbPassword};" +
+        "SslMode=None;AllowPublicKeyRetrieval=true;ConnectionTimeout=5";
+}
