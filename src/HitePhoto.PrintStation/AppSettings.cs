@@ -62,12 +62,27 @@ public class AppSettings
         "Hi {CustomerName},\n\nYour photo order is ready for pickup at {StoreName}.\n\nThank you!\nHite Photo";
     public List<Core.Processing.EmailTemplate> EmailTemplates { get; set; } = new();
 
-    // ── Pixfizz notification ──
-    public string PixfizzApiUrl          { get; set; } = "";
+    // ── Pixfizz ──
+    public bool   PixfizzEnabled         { get; set; } = true;
+    public string PixfizzApiUrl          { get; set; } = "https://nazkcvruighrhpgcarxg.supabase.co/functions/v1";
     public string PixfizzApiKey          { get; set; } = "";
     public string PixfizzOrganizationId  { get; set; } = "";
     public string PixfizzLocationId      { get; set; } = "";
     public string PixfizzNotifyMode      { get; set; } = "Pixfizz"; // "Pixfizz" or "Email"
+    public string PixfizzFtpServer       { get; set; } = "ftp.pixfizz.com";
+    public int    PixfizzFtpPort         { get; set; } = 21;
+    public string PixfizzFtpUsername     { get; set; } = "";
+    public string PixfizzFtpPassword     { get; set; } = "";
+    public string PixfizzFtpArtworkFolder  { get; set; } = "/Artwork";
+    public string PixfizzFtpDarkroomFolder { get; set; } = "/Darkroom";
+
+    // ── Dakis ──
+    public bool   DakisEnabled           { get; set; } = true;
+    public string DakisWatchFolder       { get; set; } = "";
+
+    // ── Ingest ──
+    public string OrderOutputPath        { get; set; } = "";
+    public int    PollIntervalSeconds    { get; set; } = 30;
 
     // ── Auto-update ──
     public string UpdateLocalFolder   { get; set; } = "";
