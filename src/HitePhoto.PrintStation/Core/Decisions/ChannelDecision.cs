@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Data;
 
 namespace HitePhoto.PrintStation.Core.Decisions;
@@ -14,7 +15,7 @@ public class ChannelDecision : IChannelDecision
 
     public ChannelResult Resolve(string sizeLabel, string mediaType)
     {
-        var routingKey = BuildRoutingKey(sizeLabel, mediaType);
+        var routingKey = OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
 
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -33,14 +34,4 @@ public class ChannelDecision : IChannelDecision
         return new ChannelResult(0, null, routingKey);
     }
 
-    /// <summary>
-    /// Builds a deterministic routing key from size and media.
-    /// Must match the key used when learning/saving mappings.
-    /// </summary>
-    public static string BuildRoutingKey(string sizeLabel, string mediaType)
-    {
-        var size = (sizeLabel ?? "").Trim().ToLowerInvariant();
-        var media = (mediaType ?? "").Trim().ToLowerInvariant();
-        return $"{size}|{media}";
-    }
 }

@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using HitePhoto.PrintStation.Core.Decisions;
 using HitePhoto.PrintStation.Data;
 
@@ -23,7 +22,6 @@ public class HoldService : IHoldService
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
 
-        // Update hold state
         using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = "UPDATE orders SET is_held = @held, updated_at = datetime('now') WHERE id = @id";
@@ -32,19 +30,8 @@ public class HoldService : IHoldService
             cmd.ExecuteNonQuery();
         }
 
-        // Add history note
-        using (var cmd = conn.CreateCommand())
-        {
-            var action = newState ? "Held" : "Released";
-            cmd.CommandText = """
-                INSERT INTO order_history (order_id, note, created_by, created_at)
-                VALUES (@id, @note, @by, datetime('now'))
-                """;
-            cmd.Parameters.AddWithValue("@id", orderId);
-            cmd.Parameters.AddWithValue("@note", $"{action} by {operatorName}");
-            cmd.Parameters.AddWithValue("@by", operatorName);
-            cmd.ExecuteNonQuery();
-        }
+        var action = newState ? "Held" : "Released";
+        OrderHelpers.AddHistoryNote(conn, orderId, $"{action} by {operatorName}", operatorName);
 
         transaction.Commit();
         return newState;

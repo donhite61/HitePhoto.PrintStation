@@ -35,12 +35,11 @@ public class TransferService : ITransferService
         // Write transfer marker file
         WriteTransferMarker(conn, orderId, targetStoreId, operatorName, comment, itemIds: null);
 
-        // History note
-        var storeName = GetStoreName(conn, targetStoreId);
+        var storeName = OrderHelpers.GetStoreName(conn, targetStoreId);
         var note = string.IsNullOrEmpty(comment)
             ? $"Transferred to {storeName} by {operatorName}"
             : $"Transferred to {storeName} by {operatorName}: {comment}";
-        AddHistoryNote(conn, orderId, note);
+        OrderHelpers.AddHistoryNote(conn, orderId, note, operatorName);
 
         transaction.Commit();
 
@@ -55,12 +54,11 @@ public class TransferService : ITransferService
         // Write transfer marker file listing specific items
         WriteTransferMarker(conn, orderId, targetStoreId, operatorName, comment, itemIds);
 
-        // History note
-        var storeName = GetStoreName(conn, targetStoreId);
+        var storeName = OrderHelpers.GetStoreName(conn, targetStoreId);
         var note = $"Transferred {itemIds.Count} item(s) to {storeName} by {operatorName}";
         if (!string.IsNullOrEmpty(comment))
             note += $": {comment}";
-        AddHistoryNote(conn, orderId, note);
+        OrderHelpers.AddHistoryNote(conn, orderId, note, operatorName);
 
         transaction.Commit();
 
@@ -85,7 +83,7 @@ public class TransferService : ITransferService
         var metadataDir = Path.Combine(folderPath, "metadata");
         Directory.CreateDirectory(metadataDir);
 
-        var storeName = GetStoreName(conn, targetStoreId);
+        var storeName = OrderHelpers.GetStoreName(conn, targetStoreId);
         var lines = new List<string>
         {
             $"transferred_at: {DateTime.UtcNow:O}",
@@ -120,23 +118,4 @@ public class TransferService : ITransferService
         File.WriteAllLines(Path.Combine(metadataDir, "transfer.txt"), lines);
     }
 
-    private static string GetStoreName(SqliteConnection conn, int storeId)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT short_name FROM stores WHERE id = @id";
-        cmd.Parameters.AddWithValue("@id", storeId);
-        return (string?)cmd.ExecuteScalar() ?? $"store {storeId}";
-    }
-
-    private static void AddHistoryNote(SqliteConnection conn, int orderId, string note)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO order_history (order_id, note, created_at)
-            VALUES (@id, @note, datetime('now'))
-            """;
-        cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.Parameters.AddWithValue("@note", note);
-        cmd.ExecuteNonQuery();
-    }
 }

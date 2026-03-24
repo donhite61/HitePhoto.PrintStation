@@ -38,7 +38,6 @@ public class PrintService : IPrintService
 
         using var conn = _db.OpenConnection();
 
-        // Load order for short ID
         string externalOrderId;
         using (var cmd = conn.CreateCommand())
         {
@@ -47,7 +46,6 @@ public class PrintService : IPrintService
             externalOrderId = (string)cmd.ExecuteScalar()!;
         }
 
-        // Load noritsu items grouped by size/media
         var sizeGroups = LoadNoritsuSizeGroups(conn, orderId);
 
         foreach (var group in sizeGroups)
@@ -61,9 +59,8 @@ public class PrintService : IPrintService
                 continue;
             }
 
-            // Write MRK folder — staging (p) then rename to ready (o)
             // TODO: align with MrkWriter signature once it's refactored for SQLite models
-            var folderName = $"o{PrintServiceHelpers.GetShortId(externalOrderId)}_{group.SizeLabel}";
+            var folderName = $"o{OrderHelpers.GetShortId(externalOrderId)}_{group.SizeLabel}";
 
             foreach (var item in group.Items)
             {
@@ -72,13 +69,12 @@ public class PrintService : IPrintService
             }
         }
 
-        // History note for what was sent
         if (sent.Count > 0)
         {
             var sizes = string.Join(", ", sent
                 .Select(s => s.SizeLabel)
                 .Distinct());
-            AddHistoryNote(conn, orderId, $"Sent to printer: {sizes}");
+            OrderHelpers.AddHistoryNote(conn, orderId, $"Sent to printer: {sizes}");
         }
 
         return new SendResult(sent, skipped);
@@ -89,13 +85,11 @@ public class PrintService : IPrintService
         if (!Directory.Exists(_noritsuOutputRoot))
             return;
 
-        // Scan for success folders (e prefix)
         foreach (var dir in Directory.GetDirectories(_noritsuOutputRoot, $"{SuccessPrefix}*"))
         {
             HandleCompletedFolder(dir, success: true);
         }
 
-        // Scan for error folders (q prefix)
         foreach (var dir in Directory.GetDirectories(_noritsuOutputRoot, $"{ErrorPrefix}*"))
         {
             HandleCompletedFolder(dir, success: false);
@@ -104,18 +98,13 @@ public class PrintService : IPrintService
 
     private void HandleCompletedFolder(string folderPath, bool success)
     {
-        // Folder name format: e{shortId}_{sizeLabel} or q{shortId}_{sizeLabel}
         var folderName = Path.GetFileName(folderPath);
-        var baseName = folderName.Substring(1); // strip prefix
 
-        // Find matching order and items by folder name pattern
-        // The ready folder was o{baseName}, now it's e{baseName} or q{baseName}
         using var conn = _db.OpenConnection();
 
         if (success)
         {
-            // TODO: match baseName to order+size, set is_printed = 1, add history note
-            // For now just log it
+            // TODO: match folder name to order+size, set is_printed = 1, add history note
             AppLog.Info($"Noritsu completed: {folderName}");
         }
         else
@@ -128,7 +117,6 @@ public class PrintService : IPrintService
 
     private static List<SizeGroup> LoadNoritsuSizeGroups(SqliteConnection conn, int orderId)
     {
-        var groups = new List<SizeGroup>();
         var items = new List<PrintItem>();
 
         using var cmd = conn.CreateCommand();
@@ -151,39 +139,12 @@ public class PrintService : IPrintService
                 Quantity: reader.GetInt32(4)));
         }
 
-        // Group by size + media
-        foreach (var g in items.GroupBy(i => new { i.SizeLabel, i.MediaType }))
-        {
-            groups.Add(new SizeGroup(g.Key.SizeLabel, g.Key.MediaType, g.ToList()));
-        }
-
-        return groups;
-    }
-
-    private static void AddHistoryNote(SqliteConnection conn, int orderId, string note)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO order_history (order_id, note, created_at)
-            VALUES (@id, @note, datetime('now'))
-            """;
-        cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.Parameters.AddWithValue("@note", note);
-        cmd.ExecuteNonQuery();
+        return items
+            .GroupBy(i => new { i.SizeLabel, i.MediaType })
+            .Select(g => new SizeGroup(g.Key.SizeLabel, g.Key.MediaType, g.ToList()))
+            .ToList();
     }
 }
 
 internal record PrintItem(int Id, string SizeLabel, string MediaType, string ImageFilepath, int Quantity);
 internal record SizeGroup(string SizeLabel, string MediaType, List<PrintItem> Items);
-
-file class PrintServiceHelpers
-{
-    // Reuse same short ID logic as MrkWriter
-    public static string GetShortId(string externalOrderId)
-    {
-        const string prefix = "HITEPHOTO-";
-        return externalOrderId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            ? externalOrderId.Substring(prefix.Length)
-            : externalOrderId;
-    }
-}
