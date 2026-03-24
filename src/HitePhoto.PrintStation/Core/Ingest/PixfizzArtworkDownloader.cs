@@ -147,8 +147,8 @@ public class PixfizzArtworkDownloader
             rewrittenItems.Add(item with { ImageFilepath = dakisPath });
         }
 
-        // ── Step 5: Merge TXT data into order ──
-        order = PixfizzOrderParser.MergeWithTxt(order, txtResult) with
+        // ── Step 5: Fill order from TXT (source of truth — no API data used) ──
+        order = PixfizzOrderParser.FillFromTxt(order, txtResult) with
         {
             FolderPath = localFolder,
             Items = rewrittenItems,
