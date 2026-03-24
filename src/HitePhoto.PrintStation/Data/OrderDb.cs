@@ -1,0 +1,389 @@
+using System;
+using System.IO;
+using Microsoft.Data.Sqlite;
+using HitePhoto.PrintStation.Core;
+
+namespace HitePhoto.PrintStation.Data;
+
+/// <summary>
+/// Local SQLite database for all PrintStation order data.
+/// This is the SINGLE source of truth for the running app.
+/// MariaDB sync happens separately via SyncConnector.
+/// </summary>
+public class OrderDb
+{
+    private readonly string _dbPath;
+
+    public OrderDb()
+    {
+        var dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "HitePhoto.PrintStation");
+        Directory.CreateDirectory(dir);
+        _dbPath = Path.Combine(dir, "orders.db");
+        Initialize();
+    }
+
+    /// <summary>For testing: pass an explicit path.</summary>
+    public OrderDb(string dbPath)
+    {
+        _dbPath = dbPath;
+        var dir = Path.GetDirectoryName(dbPath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        Initialize();
+    }
+
+    public SqliteConnection OpenConnection()
+    {
+        var conn = new SqliteConnection($"Data Source={_dbPath}");
+        conn.Open();
+        // Enable WAL mode for better concurrent read/write performance
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;";
+        cmd.ExecuteNonQuery();
+        return conn;
+    }
+
+    public string DbPath => _dbPath;
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Schema initialization
+    // ══════════════════════════════════════════════════════════════════════
+
+    private void Initialize()
+    {
+        try
+        {
+            using var conn = OpenConnection();
+            using var transaction = conn.BeginTransaction();
+
+            Execute(conn, CreateLookupTables);
+            Execute(conn, CreateStoresTable);
+            Execute(conn, CreateVendorsTable);
+            Execute(conn, CreateProductCategoriesTable);
+            Execute(conn, CreateServicesTable);
+            Execute(conn, CreateOrdersTable);
+            Execute(conn, CreateOrderItemsTable);
+            Execute(conn, CreateOrderHistoryTable);
+            Execute(conn, CreateColorCorrectionsTable);
+            Execute(conn, CreateChannelMappingsTable);
+            Execute(conn, CreateSyncOutboxTable);
+            Execute(conn, CreateSyncMetadataTable);
+
+            SeedLookups(conn);
+
+            transaction.Commit();
+
+            AppLog.Info($"OrderDb initialized at {_dbPath}");
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to initialize OrderDb",
+                detail: $"Attempted: create/verify SQLite schema at '{_dbPath}'. " +
+                        $"Expected: all tables created successfully. " +
+                        $"Found: {ex.Message}. " +
+                        $"Context: app startup. " +
+                        $"State: database may be incomplete.",
+                ex: ex);
+        }
+    }
+
+    private static void Execute(SqliteConnection conn, string sql)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
+
+    // ── Lookup tables ─────────────────────────────────────────────────────
+
+    private const string CreateLookupTables = """
+        CREATE TABLE IF NOT EXISTS order_statuses (
+            id           INTEGER PRIMARY KEY,
+            status_code  TEXT NOT NULL,
+            display_name TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS order_sources (
+            id           INTEGER PRIMARY KEY,
+            source_code  TEXT NOT NULL,
+            display_name TEXT NOT NULL
+        );
+        """;
+
+    // ── Stores ────────────────────────────────────────────────────────────
+
+    private const string CreateStoresTable = """
+        CREATE TABLE IF NOT EXISTS stores (
+            id         INTEGER PRIMARY KEY,
+            store_name TEXT NOT NULL,
+            short_name TEXT DEFAULT '',
+            is_local   INTEGER NOT NULL DEFAULT 0
+        );
+        """;
+
+    // ── Vendors ───────────────────────────────────────────────────────────
+
+    private const string CreateVendorsTable = """
+        CREATE TABLE IF NOT EXISTS vendors (
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            vendor_name                TEXT NOT NULL,
+            vendor_type                TEXT NOT NULL DEFAULT 'external',
+            store_id                   INTEGER DEFAULT NULL,
+            contact_name               TEXT DEFAULT '',
+            contact_phone              TEXT DEFAULT '',
+            contact_email              TEXT DEFAULT '',
+            account_number             TEXT DEFAULT '',
+            default_turnaround_minutes INTEGER DEFAULT NULL,
+            default_urgency_minutes    INTEGER DEFAULT NULL,
+            default_needs_files        INTEGER NOT NULL DEFAULT 1,
+            notes                      TEXT DEFAULT '',
+            is_active                  INTEGER NOT NULL DEFAULT 1,
+            created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at                 TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """;
+
+    // ── Product categories ────────────────────────────────────────────────
+
+    private const string CreateProductCategoriesTable = """
+        CREATE TABLE IF NOT EXISTS product_categories (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_name TEXT NOT NULL UNIQUE,
+            sort_order    INTEGER NOT NULL DEFAULT 0,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """;
+
+    // ── Services (product catalog) ────────────────────────────────────────
+
+    private const string CreateServicesTable = """
+        CREATE TABLE IF NOT EXISTS services (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            service_name       TEXT NOT NULL,
+            category_id        INTEGER NOT NULL REFERENCES product_categories(id),
+            vendor_id          INTEGER NOT NULL REFERENCES vendors(id),
+            cost_price         REAL DEFAULT NULL,
+            retail_price       REAL DEFAULT NULL,
+            minimum_price      REAL DEFAULT NULL,
+            employee_price     REAL DEFAULT NULL,
+            price_to_us        REAL DEFAULT NULL,
+            turnaround_minutes INTEGER DEFAULT NULL,
+            urgency_minutes    INTEGER DEFAULT NULL,
+            needs_files        INTEGER DEFAULT NULL,
+            match_key_dakis    TEXT DEFAULT NULL,
+            match_key_pixfizz  TEXT DEFAULT NULL,
+            is_active          INTEGER NOT NULL DEFAULT 1,
+            created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """;
+
+    // ── Orders ────────────────────────────────────────────────────────────
+
+    private const string CreateOrdersTable = """
+        CREATE TABLE IF NOT EXISTS orders (
+            id                        INTEGER PRIMARY KEY,
+            external_order_id         TEXT NOT NULL,
+            order_source_id           INTEGER NOT NULL DEFAULT 1,
+            source_code               TEXT NOT NULL DEFAULT '',
+            customer_first_name       TEXT DEFAULT '',
+            customer_last_name        TEXT DEFAULT '',
+            customer_email            TEXT DEFAULT '',
+            customer_phone            TEXT DEFAULT '',
+            order_status_id           INTEGER NOT NULL DEFAULT 1,
+            status_code               TEXT NOT NULL DEFAULT 'new',
+            is_held                   INTEGER NOT NULL DEFAULT 0,
+            hold_reason               TEXT DEFAULT NULL,
+            pickup_store_id           INTEGER NOT NULL,
+            current_location_store_id INTEGER,
+            total_amount              REAL DEFAULT 0,
+            payment_status            TEXT DEFAULT '',
+            special_instructions      TEXT DEFAULT '',
+            order_type                TEXT DEFAULT '',
+            is_rush                   INTEGER NOT NULL DEFAULT 0,
+            is_test                   INTEGER NOT NULL DEFAULT 0,
+            ordered_at                TEXT NOT NULL,
+            folder_path               TEXT DEFAULT '',
+            download_status           TEXT DEFAULT 'pending',
+            is_transfer               INTEGER NOT NULL DEFAULT 0,
+            transfer_store_id         INTEGER DEFAULT NULL,
+            is_notified               INTEGER NOT NULL DEFAULT 0,
+            notified_at               TEXT DEFAULT NULL,
+            created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at                TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(external_order_id, pickup_store_id)
+        );
+        """;
+
+    // ── Order items ───────────────────────────────────────────────────────
+
+    private const string CreateOrderItemsTable = """
+        CREATE TABLE IF NOT EXISTS order_items (
+            id                      INTEGER PRIMARY KEY,
+            order_id                INTEGER NOT NULL REFERENCES orders(id),
+            size_label              TEXT NOT NULL,
+            media_type              TEXT DEFAULT '',
+            quantity                INTEGER NOT NULL DEFAULT 1,
+            image_filename          TEXT DEFAULT '',
+            image_filepath          TEXT DEFAULT '',
+            original_image_filepath TEXT DEFAULT '',
+            channel_number          INTEGER NOT NULL DEFAULT 0,
+            options_json            TEXT DEFAULT '[]',
+            is_noritsu              INTEGER NOT NULL DEFAULT 1,
+            is_printed              INTEGER NOT NULL DEFAULT 0,
+            is_test                 INTEGER NOT NULL DEFAULT 0,
+            service_id              INTEGER DEFAULT NULL REFERENCES services(id),
+            fulfillment_vendor_id   INTEGER DEFAULT NULL REFERENCES vendors(id),
+            fulfillment_status      TEXT DEFAULT 'pending',
+            sent_at                 TEXT DEFAULT NULL,
+            sent_by                 TEXT DEFAULT NULL,
+            due_at                  TEXT DEFAULT NULL,
+            received_at             TEXT DEFAULT NULL,
+            match_key               TEXT DEFAULT NULL,
+            files_expected          INTEGER DEFAULT NULL,
+            created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """;
+
+    // ── Order history (notes, status changes, repairs, prints — never overwritten by sync) ──
+
+    private const string CreateOrderHistoryTable = """
+        CREATE TABLE IF NOT EXISTS order_history (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id   INTEGER NOT NULL REFERENCES orders(id),
+            note       TEXT NOT NULL,
+            created_by TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """;
+
+    // ── Color corrections (consolidate from separate corrections.db) ─────
+
+    private const string CreateColorCorrectionsTable = """
+        CREATE TABLE IF NOT EXISTS color_corrections (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id           INTEGER NOT NULL,
+            image_path         TEXT NOT NULL,
+            corrected_path     TEXT DEFAULT '',
+            exposure           INTEGER DEFAULT 0,
+            brightness         INTEGER DEFAULT 0,
+            contrast           INTEGER DEFAULT 0,
+            shadows            INTEGER DEFAULT 0,
+            highlights         INTEGER DEFAULT 0,
+            saturation         INTEGER DEFAULT 0,
+            color_temp         INTEGER DEFAULT 0,
+            red                INTEGER DEFAULT 0,
+            green              INTEGER DEFAULT 0,
+            blue               INTEGER DEFAULT 0,
+            sigmoidal_contrast INTEGER DEFAULT 0,
+            clahe              INTEGER DEFAULT 0,
+            contrast_stretch   INTEGER DEFAULT 0,
+            levels             INTEGER DEFAULT 0,
+            auto_level         INTEGER DEFAULT 0,
+            auto_gamma         INTEGER DEFAULT 0,
+            white_balance      INTEGER DEFAULT 0,
+            normalize          INTEGER DEFAULT 0,
+            grayscale          INTEGER DEFAULT 0,
+            sepia              INTEGER DEFAULT 0,
+            created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(order_id, image_path)
+        );
+        """;
+
+    // ── Channel mappings (routing rules) ──────────────────────────────────
+
+    private const string CreateChannelMappingsTable = """
+        CREATE TABLE IF NOT EXISTS channel_mappings (
+            routing_key    TEXT PRIMARY KEY,
+            channel_number INTEGER NOT NULL DEFAULT 0,
+            layout_name    TEXT DEFAULT NULL,
+            source         TEXT DEFAULT '',
+            updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """;
+
+    // ── Sync outbox ───────────────────────────────────────────────────────
+
+    private const string CreateSyncOutboxTable = """
+        CREATE TABLE IF NOT EXISTS sync_outbox (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name   TEXT NOT NULL,
+            record_id    INTEGER NOT NULL,
+            operation    TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            pushed_at    TEXT DEFAULT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_outbox_pending
+            ON sync_outbox(pushed_at) WHERE pushed_at IS NULL;
+        """;
+
+    // ── Sync metadata ─────────────────────────────────────────────────────
+
+    private const string CreateSyncMetadataTable = """
+        CREATE TABLE IF NOT EXISTS sync_metadata (
+            table_name   TEXT NOT NULL,
+            direction    TEXT NOT NULL,
+            last_sync_at TEXT NOT NULL,
+            PRIMARY KEY (table_name, direction)
+        );
+        """;
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Seed data — lookup values that match MariaDB
+    // ══════════════════════════════════════════════════════════════════════
+
+    private static void SeedLookups(SqliteConnection conn)
+    {
+        // Order statuses — match MariaDB IDs exactly
+        Execute(conn, """
+            INSERT OR IGNORE INTO order_statuses (id, status_code, display_name) VALUES
+                (1, 'new',           'New'),
+                (2, 'in_progress',   'In Progress'),
+                (3, 'on_hold',       'On Hold'),
+                (4, 'ready',         'Ready'),
+                (5, 'notified',      'Notified'),
+                (6, 'picked_up',     'Picked Up'),
+                (7, 'cancelled',     'Cancelled'),
+                (8, 'sent_to_store', 'Sent to Store'),
+                (9, 'shipped',       'Shipped');
+            """);
+
+        // Order sources — match MariaDB IDs exactly
+        Execute(conn, """
+            INSERT OR IGNORE INTO order_sources (id, source_code, display_name) VALUES
+                (1, 'pixfizz',   'Pixfizz'),
+                (2, 'dakis',     'Dakis'),
+                (3, 'dashboard', 'Dashboard');
+            """);
+
+        // Stores — match MariaDB IDs exactly
+        Execute(conn, """
+            INSERT OR IGNORE INTO stores (id, store_name, short_name) VALUES
+                (1, 'Bloomfield Hills', 'BH'),
+                (2, 'West Bloomfield',  'WB');
+            """);
+
+        // In-house vendors (one per store)
+        Execute(conn, """
+            INSERT OR IGNORE INTO vendors (id, vendor_name, vendor_type, store_id, default_needs_files)
+            VALUES
+                (1, 'BH In-House', 'in_house', 1, 0),
+                (2, 'WB In-House', 'in_house', 2, 0);
+            """);
+
+        // Default product categories
+        Execute(conn, """
+            INSERT OR IGNORE INTO product_categories (id, category_name, sort_order) VALUES
+                (1, 'Prints',  1),
+                (2, 'Metals',  2),
+                (3, 'Canvas',  3),
+                (4, 'Gifts',   4),
+                (5, 'Statues', 5);
+            """);
+    }
+}
