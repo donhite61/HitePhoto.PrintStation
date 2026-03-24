@@ -1,25 +1,19 @@
-using Microsoft.Data.Sqlite;
-using HitePhoto.PrintStation.Data;
+using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Decisions;
 
 public class HoldDecision : IHoldDecision
 {
-    private readonly OrderDb _db;
+    private readonly IOrderRepository _orders;
 
-    public HoldDecision(OrderDb db)
+    public HoldDecision(IOrderRepository orders)
     {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
     }
 
     public bool IsHeld(int orderId)
     {
-        using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT is_held FROM orders WHERE id = @id";
-        cmd.Parameters.AddWithValue("@id", orderId);
-
-        var result = cmd.ExecuteScalar();
-        return result is not null && Convert.ToInt32(result) == 1;
+        var order = _orders.GetOrder(orderId);
+        return order?.IsHeld ?? false;
     }
 }

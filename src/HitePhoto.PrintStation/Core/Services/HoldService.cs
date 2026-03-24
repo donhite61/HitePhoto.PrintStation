@@ -1,16 +1,18 @@
 using HitePhoto.PrintStation.Core.Decisions;
-using HitePhoto.PrintStation.Data;
+using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Services;
 
 public class HoldService : IHoldService
 {
-    private readonly OrderDb _db;
+    private readonly IOrderRepository _orders;
+    private readonly IHistoryRepository _history;
     private readonly IHoldDecision _holdDecision;
 
-    public HoldService(OrderDb db, IHoldDecision holdDecision)
+    public HoldService(IOrderRepository orders, IHistoryRepository history, IHoldDecision holdDecision)
     {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _history = history ?? throw new ArgumentNullException(nameof(history));
         _holdDecision = holdDecision ?? throw new ArgumentNullException(nameof(holdDecision));
     }
 
@@ -19,21 +21,11 @@ public class HoldService : IHoldService
         var currentlyHeld = _holdDecision.IsHeld(orderId);
         var newState = !currentlyHeld;
 
-        using var conn = _db.OpenConnection();
-        using var transaction = conn.BeginTransaction();
-
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "UPDATE orders SET is_held = @held, updated_at = datetime('now') WHERE id = @id";
-            cmd.Parameters.AddWithValue("@held", newState ? 1 : 0);
-            cmd.Parameters.AddWithValue("@id", orderId);
-            cmd.ExecuteNonQuery();
-        }
+        _orders.SetHold(orderId, newState);
 
         var action = newState ? "Held" : "Released";
-        OrderHelpers.AddHistoryNote(conn, orderId, $"{action} by {operatorName}", operatorName);
+        _history.AddNote(orderId, $"{action} by {operatorName}", operatorName);
 
-        transaction.Commit();
         return newState;
     }
 }

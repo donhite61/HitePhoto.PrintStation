@@ -1,33 +1,29 @@
 using System.IO;
-using Microsoft.Data.Sqlite;
 using HitePhoto.PrintStation.Core.Decisions;
-using HitePhoto.PrintStation.Core.Processing;
-using HitePhoto.PrintStation.Data;
+using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Services;
 
 public class PrintService : IPrintService
 {
-    private readonly OrderDb _db;
+    private readonly IOrderRepository _orders;
+    private readonly IHistoryRepository _history;
     private readonly IChannelDecision _channel;
-    private readonly NoritsuMrkWriter _mrkWriter;
     private readonly string _noritsuOutputRoot;
 
     // TODO: confirm these codes from Noritsu
-    private const char StagingPrefix = 'p';   // writing in progress
-    private const char ReadyPrefix = 'o';     // ready for Noritsu
-    private const char SuccessPrefix = 'e';   // Noritsu accepted and printed
-    private const char ErrorPrefix = 'q';     // Noritsu rejected
+    private const char SuccessPrefix = 'e';
+    private const char ErrorPrefix = 'q';
 
     public PrintService(
-        OrderDb db,
+        IOrderRepository orders,
+        IHistoryRepository history,
         IChannelDecision channel,
-        NoritsuMrkWriter mrkWriter,
         string noritsuOutputRoot)
     {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _history = history ?? throw new ArgumentNullException(nameof(history));
         _channel = channel ?? throw new ArgumentNullException(nameof(channel));
-        _mrkWriter = mrkWriter ?? throw new ArgumentNullException(nameof(mrkWriter));
         _noritsuOutputRoot = noritsuOutputRoot;
     }
 
@@ -36,45 +32,42 @@ public class PrintService : IPrintService
         var sent = new List<SentItem>();
         var skipped = new List<SkippedItem>();
 
-        using var conn = _db.OpenConnection();
+        var order = _orders.GetOrder(orderId);
+        if (order is null)
+            throw new InvalidOperationException($"Order {orderId} not found.");
 
-        string externalOrderId;
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT external_order_id FROM orders WHERE id = @id";
-            cmd.Parameters.AddWithValue("@id", orderId);
-            externalOrderId = (string)cmd.ExecuteScalar()!;
-        }
+        var items = _orders.GetNoritsuItems(orderId);
 
-        var sizeGroups = LoadNoritsuSizeGroups(conn, orderId);
+        // Group by size/media
+        var sizeGroups = items
+            .GroupBy(i => new { i.SizeLabel, i.MediaType })
+            .ToList();
 
         foreach (var group in sizeGroups)
         {
-            var channelResult = _channel.Resolve(group.SizeLabel, group.MediaType);
+            var channelResult = _channel.Resolve(group.Key.SizeLabel, group.Key.MediaType);
             if (channelResult.ChannelNumber == 0)
             {
                 skipped.Add(new SkippedItem(
-                    $"{group.SizeLabel} {group.MediaType}",
+                    $"{group.Key.SizeLabel} {group.Key.MediaType}",
                     "No channel assigned."));
                 continue;
             }
 
-            // TODO: align with MrkWriter signature once it's refactored for SQLite models
-            var folderName = $"o{OrderHelpers.GetShortId(externalOrderId)}_{group.SizeLabel}";
+            // TODO: call IPrinterWriter.WriteMrk() once interface is created
+            var folderName = $"o{OrderHelpers.GetShortId(order.ExternalOrderId)}_{group.Key.SizeLabel}";
 
-            foreach (var item in group.Items)
+            foreach (var item in group)
             {
-                sent.Add(new SentItem(item.Id, group.SizeLabel,
+                sent.Add(new SentItem(item.Id, group.Key.SizeLabel,
                     channelResult.ChannelNumber, folderName));
             }
         }
 
         if (sent.Count > 0)
         {
-            var sizes = string.Join(", ", sent
-                .Select(s => s.SizeLabel)
-                .Distinct());
-            OrderHelpers.AddHistoryNote(conn, orderId, $"Sent to printer: {sizes}");
+            var sizes = string.Join(", ", sent.Select(s => s.SizeLabel).Distinct());
+            _history.AddNote(orderId, $"Sent to printer: {sizes}");
         }
 
         return new SendResult(sent, skipped);
@@ -100,11 +93,9 @@ public class PrintService : IPrintService
     {
         var folderName = Path.GetFileName(folderPath);
 
-        using var conn = _db.OpenConnection();
-
         if (success)
         {
-            // TODO: match folder name to order+size, set is_printed = 1, add history note
+            // TODO: match folder name to order+size, call _orders.SetItemsPrinted(), add history note
             AppLog.Info($"Noritsu completed: {folderName}");
         }
         else
@@ -114,37 +105,4 @@ public class PrintService : IPrintService
                 detail: $"Folder: {folderPath}. Check Noritsu for error details.");
         }
     }
-
-    private static List<SizeGroup> LoadNoritsuSizeGroups(SqliteConnection conn, int orderId)
-    {
-        var items = new List<PrintItem>();
-
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT id, size_label, media_type, image_filepath, quantity
-            FROM order_items
-            WHERE order_id = @id AND is_noritsu = 1
-            ORDER BY size_label, media_type
-            """;
-        cmd.Parameters.AddWithValue("@id", orderId);
-
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            items.Add(new PrintItem(
-                Id: reader.GetInt32(0),
-                SizeLabel: reader.GetString(1),
-                MediaType: reader.IsDBNull(2) ? "" : reader.GetString(2),
-                ImageFilepath: reader.IsDBNull(3) ? "" : reader.GetString(3),
-                Quantity: reader.GetInt32(4)));
-        }
-
-        return items
-            .GroupBy(i => new { i.SizeLabel, i.MediaType })
-            .Select(g => new SizeGroup(g.Key.SizeLabel, g.Key.MediaType, g.ToList()))
-            .ToList();
-    }
 }
-
-internal record PrintItem(int Id, string SizeLabel, string MediaType, string ImageFilepath, int Quantity);
-internal record SizeGroup(string SizeLabel, string MediaType, List<PrintItem> Items);

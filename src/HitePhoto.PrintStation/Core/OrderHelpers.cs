@@ -1,41 +1,13 @@
 using System.IO;
-using Microsoft.Data.Sqlite;
 
 namespace HitePhoto.PrintStation.Core;
 
 /// <summary>
-/// Shared functions used by multiple services and decision makers.
-/// Each function lives here once — no copies in individual services.
+/// Pure utility functions with no dependencies. Stateless string/file operations only.
+/// Database operations belong in repositories. Decision logic belongs in decision makers.
 /// </summary>
 public static class OrderHelpers
 {
-    /// <summary>
-    /// Add a note to order_history. Called by every service that changes order state.
-    /// </summary>
-    public static void AddHistoryNote(SqliteConnection conn, int orderId, string note, string createdBy = "")
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO order_history (order_id, note, created_by, created_at)
-            VALUES (@id, @note, @by, datetime('now'))
-            """;
-        cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.Parameters.AddWithValue("@note", note);
-        cmd.Parameters.AddWithValue("@by", createdBy);
-        cmd.ExecuteNonQuery();
-    }
-
-    /// <summary>
-    /// Get a store's short name by ID.
-    /// </summary>
-    public static string GetStoreName(SqliteConnection conn, int storeId)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT short_name FROM stores WHERE id = @id";
-        cmd.Parameters.AddWithValue("@id", storeId);
-        return (string?)cmd.ExecuteScalar() ?? $"store {storeId}";
-    }
-
     /// <summary>
     /// Strip "HITEPHOTO-" prefix from external order ID for folder naming.
     /// </summary>

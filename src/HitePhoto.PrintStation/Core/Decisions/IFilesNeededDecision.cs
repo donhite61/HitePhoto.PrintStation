@@ -1,3 +1,5 @@
+using HitePhoto.PrintStation.Core.Models;
+
 namespace HitePhoto.PrintStation.Core.Decisions;
 
 /// <summary>
@@ -7,5 +9,5 @@ namespace HitePhoto.PrintStation.Core.Decisions;
 /// </summary>
 public interface IFilesNeededDecision
 {
-    bool AreFilesRequired(string source, int orderStoreId, int localStoreId);
+    bool AreFilesRequired(OrderSource source, int orderStoreId, int localStoreId);
 }
