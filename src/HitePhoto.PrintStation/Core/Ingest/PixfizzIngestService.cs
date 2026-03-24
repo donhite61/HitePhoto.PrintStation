@@ -1,5 +1,4 @@
 using System.IO;
-using HitePhoto.PrintStation.Data;
 using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Ingest;
@@ -22,7 +21,6 @@ public class PixfizzIngestService
     private readonly OhdReceivedPusher _receivedPusher;
     private readonly IOrderRepository _orders;
     private readonly IHistoryRepository _history;
-    private readonly OrderDb _db;
     private readonly AppSettings _settings;
 
     public PixfizzIngestService(
@@ -32,7 +30,6 @@ public class PixfizzIngestService
         OhdReceivedPusher receivedPusher,
         IOrderRepository orders,
         IHistoryRepository history,
-        OrderDb db,
         AppSettings settings)
     {
         _apiSource = apiSource ?? throw new ArgumentNullException(nameof(apiSource));
@@ -41,7 +38,6 @@ public class PixfizzIngestService
         _receivedPusher = receivedPusher ?? throw new ArgumentNullException(nameof(receivedPusher));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _history = history ?? throw new ArgumentNullException(nameof(history));
-        _db = db ?? throw new ArgumentNullException(nameof(db));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
@@ -150,121 +146,24 @@ public class PixfizzIngestService
         // Don't overwrite history. Add "Repaired at" note if changes made.
     }
 
-    /// <summary>
-    /// Write a verified order to SQLite. Insert new or compare-and-repair existing.
-    /// Never overwrites history.
-    /// </summary>
     private void WriteToSqlite(UnifiedOrder order)
     {
-        using var conn = _db.OpenConnection();
-
-        // Check if order already exists
-        int? existingId;
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT id FROM orders WHERE external_order_id = @eid AND pickup_store_id = @store";
-            cmd.Parameters.AddWithValue("@eid", order.ExternalOrderId);
-            cmd.Parameters.AddWithValue("@store", _settings.StoreId);
-            var result = cmd.ExecuteScalar();
-            existingId = result != null ? Convert.ToInt32(result) : null;
-        }
+        var existingId = _orders.FindOrderId(order.ExternalOrderId, _settings.StoreId);
 
         if (existingId == null)
         {
-            InsertOrder(conn, order);
+            var orderId = _orders.InsertOrder(order, _settings.StoreId);
+            _history.AddNote(orderId, $"Order received at {DateTime.Now:g}");
+            AppLog.Info($"Inserted Pixfizz order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
         }
         else
         {
-            CompareAndRepair(conn, existingId.Value, order);
+            // TODO: compare TXT data against existing DB record
+            // Overwrite source fields (customer, items, total) if they don't match TXT
+            // Never overwrite: history, hold state, printed state
+            // Add "Repaired at {timestamp}" note if changes were made
+            AppLog.Info($"Order {order.ExternalOrderId} already exists (id={existingId}) — verify/repair not yet implemented");
         }
-    }
-
-    private void InsertOrder(Microsoft.Data.Sqlite.SqliteConnection conn, UnifiedOrder order)
-    {
-        using var transaction = conn.BeginTransaction();
-
-        int orderId;
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = """
-                INSERT INTO orders (
-                    external_order_id, order_source_id, source_code,
-                    customer_first_name, customer_last_name, customer_email, customer_phone,
-                    order_status_id, status_code, pickup_store_id,
-                    total_amount, payment_status, special_instructions,
-                    order_type, is_rush, ordered_at, folder_path, download_status
-                ) VALUES (
-                    @eid, 1, 'pixfizz',
-                    @fname, @lname, @email, @phone,
-                    1, 'new', @store,
-                    @total, 'paid', @notes,
-                    @type, @rush, @ordered, @folder, @status
-                );
-                SELECT last_insert_rowid();
-                """;
-            cmd.Parameters.AddWithValue("@eid", order.ExternalOrderId);
-            cmd.Parameters.AddWithValue("@fname", order.CustomerFirstName ?? "");
-            cmd.Parameters.AddWithValue("@lname", order.CustomerLastName ?? "");
-            cmd.Parameters.AddWithValue("@email", order.CustomerEmail ?? "");
-            cmd.Parameters.AddWithValue("@phone", order.CustomerPhone ?? "");
-            cmd.Parameters.AddWithValue("@store", _settings.StoreId);
-            cmd.Parameters.AddWithValue("@total", order.OrderTotal ?? 0m);
-            cmd.Parameters.AddWithValue("@notes", order.Notes ?? "");
-            cmd.Parameters.AddWithValue("@type", order.OrderType ?? "");
-            cmd.Parameters.AddWithValue("@rush", order.IsRush ? 1 : 0);
-            cmd.Parameters.AddWithValue("@ordered", order.OrderedAt?.ToString("O") ?? DateTime.Now.ToString("O"));
-            cmd.Parameters.AddWithValue("@folder", order.FolderPath ?? "");
-            cmd.Parameters.AddWithValue("@status", order.DownloadStatus);
-            orderId = Convert.ToInt32(cmd.ExecuteScalar()!);
-        }
-
-        // Insert items
-        foreach (var item in order.Items)
-        {
-            InsertItem(conn, orderId, item);
-        }
-
-        _history.AddNote(orderId, $"Order received at {DateTime.Now:g}");
-        transaction.Commit();
-
-        AppLog.Info($"Inserted Pixfizz order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
-    }
-
-    private static void InsertItem(Microsoft.Data.Sqlite.SqliteConnection conn, int orderId, UnifiedOrderItem item)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO order_items (
-                order_id, size_label, media_type, quantity,
-                image_filename, image_filepath, original_image_filepath,
-                is_noritsu, options_json
-            ) VALUES (
-                @oid, @size, @media, @qty,
-                @fname, @fpath, @orig,
-                @noritsu, @options
-            )
-            """;
-        cmd.Parameters.AddWithValue("@oid", orderId);
-        cmd.Parameters.AddWithValue("@size", item.SizeLabel ?? "");
-        cmd.Parameters.AddWithValue("@media", item.MediaType ?? "");
-        cmd.Parameters.AddWithValue("@qty", item.Quantity);
-        cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
-        cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
-        cmd.Parameters.AddWithValue("@orig", item.OriginalImageFilepath ?? item.ImageFilepath ?? "");
-        cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
-        cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
-            ? System.Text.Json.JsonSerializer.Serialize(item.Options)
-            : "[]");
-        cmd.ExecuteNonQuery();
-    }
-
-    private void CompareAndRepair(Microsoft.Data.Sqlite.SqliteConnection conn, int existingId, UnifiedOrder order)
-    {
-        // TODO: compare TXT data against existing DB record
-        // Overwrite source fields (customer, items, total) if they don't match TXT
-        // Never overwrite: history, hold state, printed state, notes added by operator
-        // Add "Repaired at {timestamp}" note if changes were made
-        AppLog.Info($"Order {order.ExternalOrderId} already exists (id={existingId}) — verify/repair not yet implemented");
     }
 
     /// <summary>

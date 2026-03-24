@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Core.Models;
 
 namespace HitePhoto.PrintStation.Data.Repositories;
@@ -118,5 +119,94 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = "SELECT short_name FROM stores WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", storeId);
         return (string?)cmd.ExecuteScalar() ?? $"store {storeId}";
+    }
+
+    public int? FindOrderId(string externalOrderId, int storeId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id FROM orders WHERE external_order_id = @eid AND pickup_store_id = @store";
+        cmd.Parameters.AddWithValue("@eid", externalOrderId);
+        cmd.Parameters.AddWithValue("@store", storeId);
+        var result = cmd.ExecuteScalar();
+        return result != null ? Convert.ToInt32(result) : null;
+    }
+
+    public int InsertOrder(UnifiedOrder order, int storeId)
+    {
+        using var conn = _db.OpenConnection();
+        using var transaction = conn.BeginTransaction();
+
+        int orderId;
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                INSERT INTO orders (
+                    external_order_id, order_source_id, source_code,
+                    customer_first_name, customer_last_name, customer_email, customer_phone,
+                    order_status_id, status_code, pickup_store_id,
+                    total_amount, payment_status, special_instructions,
+                    order_type, is_rush, ordered_at, folder_path, download_status
+                ) VALUES (
+                    @eid, @srcId, @srcCode,
+                    @fname, @lname, @email, @phone,
+                    1, 'new', @store,
+                    @total, @paid, @notes,
+                    @type, @rush, @ordered, @folder, @status
+                );
+                SELECT last_insert_rowid();
+                """;
+            var srcCode = (order.ExternalSource ?? "").ToLowerInvariant();
+            var srcId = srcCode == "dakis" ? 2 : srcCode == "dashboard" ? 3 : 1;
+
+            cmd.Parameters.AddWithValue("@eid", order.ExternalOrderId);
+            cmd.Parameters.AddWithValue("@srcId", srcId);
+            cmd.Parameters.AddWithValue("@srcCode", srcCode);
+            cmd.Parameters.AddWithValue("@fname", order.CustomerFirstName ?? "");
+            cmd.Parameters.AddWithValue("@lname", order.CustomerLastName ?? "");
+            cmd.Parameters.AddWithValue("@email", order.CustomerEmail ?? "");
+            cmd.Parameters.AddWithValue("@phone", order.CustomerPhone ?? "");
+            cmd.Parameters.AddWithValue("@store", storeId);
+            cmd.Parameters.AddWithValue("@total", order.OrderTotal ?? 0m);
+            cmd.Parameters.AddWithValue("@paid", order.Paid ? "paid" : "unpaid");
+            cmd.Parameters.AddWithValue("@notes", order.Notes ?? "");
+            cmd.Parameters.AddWithValue("@type", order.OrderType ?? "");
+            cmd.Parameters.AddWithValue("@rush", order.IsRush ? 1 : 0);
+            cmd.Parameters.AddWithValue("@ordered", order.OrderedAt?.ToString("O") ?? DateTime.Now.ToString("O"));
+            cmd.Parameters.AddWithValue("@folder", order.FolderPath ?? "");
+            cmd.Parameters.AddWithValue("@status", order.DownloadStatus);
+            orderId = Convert.ToInt32(cmd.ExecuteScalar()!);
+        }
+
+        foreach (var item in order.Items)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO order_items (
+                    order_id, size_label, media_type, quantity,
+                    image_filename, image_filepath, original_image_filepath,
+                    is_noritsu, options_json
+                ) VALUES (
+                    @oid, @size, @media, @qty,
+                    @fname, @fpath, @orig,
+                    @noritsu, @options
+                )
+                """;
+            cmd.Parameters.AddWithValue("@oid", orderId);
+            cmd.Parameters.AddWithValue("@size", item.SizeLabel ?? "");
+            cmd.Parameters.AddWithValue("@media", item.MediaType ?? "");
+            cmd.Parameters.AddWithValue("@qty", item.Quantity);
+            cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
+            cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
+            cmd.Parameters.AddWithValue("@orig", item.OriginalImageFilepath ?? item.ImageFilepath ?? "");
+            cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
+            cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
+                ? System.Text.Json.JsonSerializer.Serialize(item.Options)
+                : "[]");
+            cmd.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return orderId;
     }
 }
