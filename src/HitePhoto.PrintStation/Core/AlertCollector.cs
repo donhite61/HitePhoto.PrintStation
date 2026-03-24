@@ -11,10 +11,11 @@ public enum AlertSeverity { Error, Warning, Info }
 
 public enum AlertCategory
 {
+    Parsing,      // YML, TXT, JSON parsing errors
     DataQuality,  // Missing/invalid fields on orders
     Printing,     // Noritsu MRK, printer output, layout
     Network,      // SFTP, HTTP — any remote connection
-    Database,     // MariaDB queries
+    Database,     // MariaDB/SQLite queries
     Settings,     // Config issues, missing paths
     Update,       // Auto-updater
     General       // Catch-all
