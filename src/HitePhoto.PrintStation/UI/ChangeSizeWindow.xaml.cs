@@ -42,7 +42,7 @@ public partial class ChangeSizeWindow : Window
         _settings = settings;
         _db = db;
 
-        Title = $"Preview — Order {order.ExternalOrderId}  ({order.CustomerName})";
+        Title = $"Preview — Order {order.ExternalOrderId}  ({order.CustomerFirstName} {order.CustomerLastName})";
         SizeTitleText.Text = sizeLabel;
 
         PopulateChannelCombo();

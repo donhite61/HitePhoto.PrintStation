@@ -65,7 +65,7 @@ public class EmailService
                 orderId: order.ExternalOrderId,
                 detail: $"Attempted: send email to '{order.CustomerEmail}' via {_settings.SmtpHost}:{_settings.SmtpPort}. " +
                         $"Expected: email sent. Found: exception. " +
-                        $"State: order {order.ExternalOrderId}, customer {order.CustomerName}.",
+                        $"State: order {order.ExternalOrderId}, customer {order.CustomerFirstName} {order.CustomerLastName}.",
                 ex: ex);
             return new EmailResult { Success = false, ErrorMessage = $"{ex.GetType().Name}: {ex.Message}" };
         }
@@ -95,7 +95,7 @@ public class EmailService
             shortId = shortId[(dash + 1)..];
 
         return template
-            .Replace("{CustomerName}", order.CustomerName ?? "")
+            .Replace("{CustomerName}", $"{order.CustomerFirstName} {order.CustomerLastName}".Trim())
             .Replace("{StoreName}", order.StoreName ?? "")
             .Replace("{OrderId}", shortId)
             .Replace("{OrderDate}", order.OrderedAt?.ToString("MM/dd/yyyy") ?? "")
