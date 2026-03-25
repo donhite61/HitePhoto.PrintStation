@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _vm;
     private readonly AppSettings _settings;
     private readonly SettingsManager _settingsManager;
+    private readonly Data.Repositories.IOrderRepository _orders;
 
     // Timers
     private readonly DispatcherTimer _refreshTimer;
@@ -39,7 +40,8 @@ public partial class MainWindow : Window
     private OrderTreeItem? _selectedOrderItem;
     private SizeTreeItem? _selectedSizeItem;
 
-    public MainWindow(MainViewModel vm, AppSettings settings, SettingsManager settingsManager)
+    public MainWindow(MainViewModel vm, AppSettings settings, SettingsManager settingsManager,
+        Data.Repositories.IOrderRepository orders)
     {
         InitializeComponent();
 
@@ -48,6 +50,7 @@ public partial class MainWindow : Window
         _vm = vm;
         _settings = settings;
         _settingsManager = settingsManager;
+        _orders = orders;
 
         PendingTree.ItemsSource = _vm.PendingOrders;
         PrintedTree.ItemsSource = _vm.PrintedOrders;
@@ -489,7 +492,7 @@ public partial class MainWindow : Window
             items,
             channels,
             _settings,
-            null); // TODO: replace null with IOrderRepository once ChangeSizeWindow is updated
+            _orders);
         win.Owner = this;
         win.ShowDialog();
 

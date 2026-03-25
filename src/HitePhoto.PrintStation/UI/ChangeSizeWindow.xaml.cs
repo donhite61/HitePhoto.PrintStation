@@ -10,7 +10,7 @@ using System.Windows.Media.Imaging;
 using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Models;
 using HitePhoto.PrintStation.Core.Processing;
-using HitePhoto.PrintStation.Data;
+using HitePhoto.PrintStation.Data.Repositories;
 using HitePhoto.Shared.Models;
 
 namespace HitePhoto.PrintStation.UI;
@@ -22,7 +22,7 @@ public partial class ChangeSizeWindow : Window
     private readonly List<OrderItem> _items;
     private readonly List<ChannelInfo> _allChannels;
     private readonly AppSettings _settings;
-    private readonly PrintStationDb? _db;
+    private readonly IOrderRepository _orders;
 
     private readonly List<ImageCard> _cards = new();
 
@@ -32,7 +32,7 @@ public partial class ChangeSizeWindow : Window
         List<OrderItem> items,
         List<ChannelInfo> allChannels,
         AppSettings settings,
-        PrintStationDb? db)
+        IOrderRepository orders)
     {
         InitializeComponent();
         _sizeLabel = sizeLabel;
@@ -40,7 +40,7 @@ public partial class ChangeSizeWindow : Window
         _items = items;
         _allChannels = allChannels;
         _settings = settings;
-        _db = db;
+        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
 
         Title = $"Preview — Order {order.ExternalOrderId}  ({order.CustomerFirstName} {order.CustomerLastName})";
         SizeTitleText.Text = sizeLabel;
@@ -161,7 +161,7 @@ public partial class ChangeSizeWindow : Window
 
     // ── Print ─────────────────────────────────────────────────────────────
 
-    private async void PrintBtn_Click(object sender, RoutedEventArgs e)
+    private void PrintBtn_Click(object sender, RoutedEventArgs e)
     {
         if (_settings.DeveloperMode)
         {
@@ -248,15 +248,13 @@ public partial class ChangeSizeWindow : Window
             }
 
             // Mark items as printed in DB
-            if (_db != null)
+            var printedIds = toPrint.Select(c => c.Item.Id).ToList();
+            _orders.SetItemsPrinted(printedIds);
+            var now = DateTime.Now;
+            foreach (var card in toPrint)
             {
-                var now = DateTime.Now;
-                foreach (var card in toPrint)
-                {
-                    await _db.UpdateItemPrintedAsync(card.Item.Id, now);
-                    card.Item.IsPrinted = true;
-                    card.Item.PrintedAt = now;
-                }
+                card.Item.IsPrinted = true;
+                card.Item.PrintedAt = now;
             }
 
             if (CloseWhenPrintedBox.IsChecked == true)
