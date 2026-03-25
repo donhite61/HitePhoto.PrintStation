@@ -85,6 +85,9 @@ public partial class App : Application
         services.AddSingleton<DakisOrderParser>();
         services.AddSingleton<DakisIngestService>();
 
+        // Color correction
+        services.AddSingleton<CorrectionStore>();
+
         // Processing (ported from PrintRouter — stateless, reuse instances)
         services.AddSingleton(new Core.Processing.NoritsuMrkWriter(settings.NoritsuOutputRoot));
         services.AddSingleton<IPrinterWriter>(sp =>

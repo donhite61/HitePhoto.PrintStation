@@ -13,6 +13,7 @@ using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Models;
+using HitePhoto.PrintStation.Core.Models;
 using HitePhoto.PrintStation.Core.Processing;
 using HitePhoto.PrintStation.Data;
 using HitePhoto.PrintStation.UI.ViewModels;
@@ -25,6 +26,7 @@ public partial class MainWindow : Window
     private readonly AppSettings _settings;
     private readonly SettingsManager _settingsManager;
     private readonly Data.Repositories.IOrderRepository _orders;
+    private readonly Data.CorrectionStore _correctionStore;
 
     // Timers
     private readonly DispatcherTimer _refreshTimer;
@@ -41,7 +43,7 @@ public partial class MainWindow : Window
     private SizeTreeItem? _selectedSizeItem;
 
     public MainWindow(MainViewModel vm, AppSettings settings, SettingsManager settingsManager,
-        Data.Repositories.IOrderRepository orders)
+        Data.Repositories.IOrderRepository orders, Data.CorrectionStore correctionStore)
     {
         InitializeComponent();
 
@@ -51,6 +53,7 @@ public partial class MainWindow : Window
         _settings = settings;
         _settingsManager = settingsManager;
         _orders = orders;
+        _correctionStore = correctionStore;
 
         PendingTree.ItemsSource = _vm.PendingOrders;
         PrintedTree.ItemsSource = _vm.PrintedOrders;
@@ -503,9 +506,62 @@ public partial class MainWindow : Window
 
     private void ColorCorrectButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedOrderItem == null || _selectedSizeItem == null) return;
-        // TODO: open color correct window with ViewModel data
-        MessageBox.Show("Color correct not yet wired.", "TODO", MessageBoxButton.OK, MessageBoxImage.Information);
+        if (_selectedOrderItem == null) return;
+
+        var order = _selectedOrderItem.Order;
+        if (order == null)
+        {
+            MessageBox.Show("Order data not loaded.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Build list of sizes to process: single size if selected, all sizes if order selected
+        var sizesToProcess = _selectedSizeItem != null
+            ? new List<SizeTreeItem> { _selectedSizeItem }
+            : _selectedOrderItem.Sizes.ToList();
+
+        if (sizesToProcess.Count == 0)
+        {
+            MessageBox.Show("No sizes found.", "Nothing to Correct", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var completedSizes = new List<SizeTreeItem>();
+
+        foreach (var sz in sizesToProcess)
+        {
+            var imagePaths = sz.Items
+                .Where(i => !string.IsNullOrEmpty(i.ImageFilepath) && File.Exists(i.ImageFilepath))
+                .Select(i => i.ImageFilepath!)
+                .ToList();
+
+            if (imagePaths.Count == 0) continue;
+
+            var vm = new ColorCorrectWindowViewModel(
+                order.ExternalOrderId,
+                order.FolderPath ?? "",
+                sz.SizeLabel,
+                imagePaths,
+                _correctionStore,
+                _settings,
+                processed => { /* corrections saved to CorrectionStore by the VM */ });
+
+            var win = new ColorCorrectWindow
+            {
+                DataContext = vm,
+                Owner = this,
+                Title = $"Color Correction — {order.CustomerFirstName} {order.CustomerLastName} — {sz.DisplayLabel} ({sizesToProcess.IndexOf(sz) + 1}/{sizesToProcess.Count})"
+            };
+
+            StopTimers();
+            try { win.ShowDialog(); }
+            finally { StartTimers(); }
+
+            if (vm.IsComplete)
+                completedSizes.Add(sz);
+            else
+                break; // User cancelled — stop processing remaining sizes
+        }
     }
 
     private void OpenFolderButton_Click(object sender, RoutedEventArgs e)
@@ -514,6 +570,22 @@ public partial class MainWindow : Window
         var folder = _selectedOrderItem.FolderPath;
         if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
             Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true });
+    }
+
+    // ── Timer helpers ──────────────────────────────────────────────────────
+
+    private void StopTimers()
+    {
+        _refreshTimer.Stop();
+        _pixfizzPollTimer.Stop();
+        _dakisScanTimer.Stop();
+    }
+
+    private void StartTimers()
+    {
+        _refreshTimer.Start();
+        _pixfizzPollTimer.Start();
+        _dakisScanTimer.Start();
     }
 }
 
