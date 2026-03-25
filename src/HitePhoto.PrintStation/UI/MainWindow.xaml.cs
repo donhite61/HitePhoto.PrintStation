@@ -43,6 +43,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        Title = $"HitePhoto Print Station — build {BuildInfo.BuildTimestamp}";
+
         _vm = vm;
         _settings = settings;
         _settingsManager = settingsManager;

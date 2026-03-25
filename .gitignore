@@ -19,3 +19,6 @@ publish/
 ## OS
 Thumbs.db
 .DS_Store
+
+## Salvage (old-extraction reference code)
+salvage/
