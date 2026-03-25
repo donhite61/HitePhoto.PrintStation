@@ -313,12 +313,20 @@ public class OrderVerifier : IOrderVerifier
             Items = items
         };
 
+        // Check if already in DB (may exist outside the verify date range)
+        var existingId = _orders.FindOrderId(order.ExternalOrderId, _settings.StoreId);
+        if (existingId != null) return;
+
         var orderId = _orders.InsertOrder(order, _settings.StoreId);
         _history.AddNote(orderId, $"Order received at {DateTime.Now:g} (discovered by verify)");
     }
 
     private void InsertDakisFromDisk(string externalOrderId, string dir)
     {
+        // Check if already in DB (may exist outside the verify date range)
+        var existingId = _orders.FindOrderId(externalOrderId, _settings.StoreId);
+        if (existingId != null) return;
+
         var ymlContent = File.ReadAllText(Path.Combine(dir, "order.yml"));
         var raw = new RawOrder(externalOrderId, "dakis", ymlContent,
             new Dictionary<string, string> { ["folder_path"] = dir });
