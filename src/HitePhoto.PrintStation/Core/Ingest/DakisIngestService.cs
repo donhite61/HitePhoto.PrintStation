@@ -126,7 +126,10 @@ public class DakisIngestService : IDisposable
         if (!IngestConstants.MarkerExists(folderPath, IngestConstants.MarkerDownloadComplete))
             return;
 
-        var orderId = Path.GetFileName(folderPath);
+        var folderName = Path.GetFileName(folderPath);
+        var orderId = folderName.StartsWith("order ", StringComparison.OrdinalIgnoreCase)
+            ? folderName[6..].Trim()
+            : folderName;
 
         var ymlPath = Path.Combine(folderPath, "order.yml");
         if (!File.Exists(ymlPath))

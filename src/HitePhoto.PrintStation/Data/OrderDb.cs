@@ -401,5 +401,13 @@ public class OrderDb
             WHERE source_code NOT IN ('pixfizz', 'dakis', 'dashboard')
               AND source_code != '';
             """);
+
+        // Migration 002: Strip "order " prefix from Dakis external_order_id.
+        // DakisIngestService used full folder name instead of just the number.
+        Execute(conn, """
+            UPDATE orders
+            SET external_order_id = SUBSTR(external_order_id, 7)
+            WHERE external_order_id LIKE 'order %';
+            """);
     }
 }
