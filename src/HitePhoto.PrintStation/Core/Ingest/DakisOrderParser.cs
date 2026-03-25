@@ -30,7 +30,7 @@ public class DakisOrderParser
             return new UnifiedOrder
             {
                 ExternalOrderId = raw.ExternalOrderId,
-                ExternalSource = info.StoreName,
+                ExternalSource = "dakis",
                 OrderedAt = info.OrderedAt,
                 CustomerFirstName = customerFirstName,
                 CustomerLastName = customerLastName,
@@ -182,7 +182,7 @@ public class DakisOrderParser
         return new UnifiedOrder
         {
             ExternalOrderId = raw.ExternalOrderId,
-            ExternalSource = info.StoreName,
+            ExternalSource = "dakis",
             OrderedAt = info.OrderedAt,
             CustomerFirstName = customerFirstName,
             CustomerLastName = customerLastName,

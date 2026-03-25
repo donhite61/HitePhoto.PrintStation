@@ -13,7 +13,6 @@ using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Models;
-using HitePhoto.PrintStation.Core.Models;
 using HitePhoto.PrintStation.Core.Processing;
 using HitePhoto.PrintStation.Data;
 using HitePhoto.PrintStation.UI.ViewModels;

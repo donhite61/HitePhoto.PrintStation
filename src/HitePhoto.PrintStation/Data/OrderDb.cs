@@ -71,6 +71,7 @@ public class OrderDb
             Execute(conn, CreateSyncMetadataTable);
 
             SeedLookups(conn);
+            RunMigrations(conn);
 
             transaction.Commit();
 
@@ -384,6 +385,21 @@ public class OrderDb
                 (3, 'Canvas',  3),
                 (4, 'Gifts',   4),
                 (5, 'Statues', 5);
+            """);
+    }
+
+    // ── Migrations ────────────────────────────────────────────────────────
+
+    private static void RunMigrations(SqliteConnection conn)
+    {
+        // Migration 001: Fix Dakis orders that got store name as source_code
+        // instead of "dakis". Any source_code not in (pixfizz, dakis, dashboard)
+        // is a store name from the DakisOrderParser bug.
+        Execute(conn, """
+            UPDATE orders
+            SET source_code = 'dakis', order_source_id = 2
+            WHERE source_code NOT IN ('pixfizz', 'dakis', 'dashboard')
+              AND source_code != '';
             """);
     }
 }
