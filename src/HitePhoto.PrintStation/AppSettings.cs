@@ -83,6 +83,7 @@ public class AppSettings
     // ── Ingest ──
     public string OrderOutputPath        { get; set; } = "";
     public int    PollIntervalSeconds    { get; set; } = 30;
+    public int    DaysToLoad             { get; set; } = 14;
 
     // ── Auto-update ──
     public string UpdateLocalFolder   { get; set; } = "";

@@ -88,9 +88,9 @@ public partial class App : Application
         services.AddSingleton<Core.Processing.NoritsuMrkWriter>();
         // ImageProcessor is static — no DI registration needed
 
-        // TODO: wire these when implementations are ready
-        // services.AddSingleton<IEmailSender, EmailSenderAdapter>();
-        // services.AddSingleton<IPixfizzNotifier, PixfizzNotifierAdapter>();
+        // TODO: wire real implementations when ready
+        services.AddSingleton<IEmailSender, StubEmailSender>();
+        services.AddSingleton<IPixfizzNotifier, StubPixfizzNotifier>();
         // services.AddSingleton<IPrinterWriter, NoritsuMrkWriterAdapter>();
         // services.AddSingleton<IPrintService, PrintService>();
         // services.AddSingleton<ITransferService, TransferService>();
@@ -104,7 +104,15 @@ public partial class App : Application
         Services = services.BuildServiceProvider();
 
         // Show main window
-        var mainWindow = Services.GetRequiredService<MainWindow>();
-        mainWindow.Show();
+        try
+        {
+            var mainWindow = Services.GetRequiredService<MainWindow>();
+            mainWindow.Show();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.ToString(), "Startup Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+        }
     }
 }

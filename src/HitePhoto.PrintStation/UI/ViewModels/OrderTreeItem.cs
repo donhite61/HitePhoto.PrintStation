@@ -109,6 +109,7 @@ public class OrderTreeItem : INotifyPropertyChanged
     private bool _hasUnmapped;
     private bool _hasMissingFiles;
     private int _totalImages;
+    private string _folderPath = "";
 
     public int DbId
     {
@@ -192,6 +193,12 @@ public class OrderTreeItem : INotifyPropertyChanged
     {
         get => _totalImages;
         set { _totalImages = value; OnPropertyChanged(); }
+    }
+
+    public string FolderPath
+    {
+        get => _folderPath;
+        set { _folderPath = value; OnPropertyChanged(); }
     }
 
     // ── Computed display properties ──

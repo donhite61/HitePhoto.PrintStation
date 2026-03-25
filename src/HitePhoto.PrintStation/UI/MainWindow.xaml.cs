@@ -51,9 +51,17 @@ public partial class MainWindow : Window
         PrintedTree.ItemsSource = _vm.PrintedOrders;
         OtherStoreTree.ItemsSource = _vm.OtherStoreOrders;
 
-        // Refresh timer — reload from SQLite periodically
+        // Refresh timer — only reload if data changed
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds) };
-        _refreshTimer.Tick += (_, _) => _vm.LoadOrders();
+        _refreshTimer.Tick += (_, _) =>
+        {
+            if (_vm.NeedsRefresh)
+            {
+                _vm.LoadOrders();
+                UpdateStatusBar();
+                _vm.NeedsRefresh = false;
+            }
+        };
 
         // Search debounce
         _searchDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
@@ -77,12 +85,12 @@ public partial class MainWindow : Window
             catch (Exception ex) { AlertCollector.Error(AlertCategory.Network, "Pixfizz poll failed", ex: ex); }
         };
 
-        // Dakis scan timer
-        _dakisScanTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        // Dakis scan timer — run verify to pick up new folders, don't rebuild tree directly
+        _dakisScanTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _dakisScanTimer.Tick += (_, _) =>
         {
-            try { _vm.RunDakisScan(); }
-            catch (Exception ex) { AlertCollector.Error(AlertCategory.Parsing, "Dakis scan failed", ex: ex); }
+            Task.Run(() => _vm.VerifyRecentOrders(1)); // just check last 1 day for new arrivals
+            // NeedsRefresh will be set if new orders found; refresh timer picks it up
         };
 
         Loaded += MainWindow_Loaded;
@@ -96,14 +104,39 @@ public partial class MainWindow : Window
     {
         ApplySettings();
 
-        // Load orders from SQLite
+        // Step 4: Show tree immediately from what's already in SQLite (fast, no disk I/O)
         _vm.LoadOrders();
         UpdateStatusBar();
 
-        // Start timers
+        // Step 7: Start timers
         _refreshTimer.Start();
-        if (_settings.PixfizzEnabled) _pixfizzPollTimer.Start();
-        if (_settings.DakisEnabled) _dakisScanTimer.Start();
+
+        // Step 8: Kick off background verify (discovers missing orders + validates existing)
+        Task.Run(() =>
+        {
+            _vm.VerifyRecentOrders(_settings.DaysToLoad);
+
+            // If verify inserted/repaired anything, refresh tree on UI thread
+            if (_vm.NeedsRefresh)
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    _vm.LoadOrders();
+                    UpdateStatusBar();
+                    _vm.NeedsRefresh = false;
+                });
+            }
+
+            // Enable ingest timers now that initial verify is done
+            Dispatcher.Invoke(() =>
+            {
+                if (_settings.PixfizzEnabled && !string.IsNullOrWhiteSpace(_settings.PixfizzApiKey))
+                    _pixfizzPollTimer.Start();
+
+                if (_settings.DakisEnabled && !string.IsNullOrWhiteSpace(_settings.DakisWatchFolder))
+                    _dakisScanTimer.Start();
+            });
+        });
     }
 
     private void ApplySettings()
@@ -135,14 +168,7 @@ public partial class MainWindow : Window
     private void DrainAlerts()
     {
         var alerts = AlertCollector.GetAndClear();
-        if (alerts.Count == 0)
-        {
-            AlertCountText.Text = "";
-            return;
-        }
-
-        AlertCountText.Text = $"Alerts: {alerts.Count}";
-        AlertCountText.Visibility = Visibility.Visible;
+        if (alerts.Count == 0) return;
 
         var errors = alerts.Where(a => a.Severity == AlertSeverity.Error).ToList();
         if (errors.Count > 0)
@@ -295,6 +321,7 @@ public partial class MainWindow : Window
 
     private void SourceFilterCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_vm == null) return; // fires during XAML init before DI assigns _vm
         if (SourceFilterCombo.SelectedItem is ComboBoxItem item)
         {
             _vm.SourceFilter = item.Content?.ToString() ?? "All";
@@ -304,6 +331,7 @@ public partial class MainWindow : Window
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        if (_vm == null) return;
         _vm.SearchText = SearchBox.Text;
         _searchDebounce.Stop();
         _searchDebounce.Start();
@@ -311,6 +339,7 @@ public partial class MainWindow : Window
 
     private void SortCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_vm == null) return;
         if (SortCombo.SelectedItem is ComboBoxItem item)
         {
             _vm.SortMode = item.Content?.ToString() ?? "Date Received";
@@ -345,6 +374,18 @@ public partial class MainWindow : Window
         ShowOrderDetail(null);
     }
 
+    private void ExpandAll_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_vm == null) return;
+        bool expand = ExpandAllCheck.IsChecked == true;
+        foreach (var order in _vm.PendingOrders)
+            order.IsExpanded = expand;
+        foreach (var order in _vm.PrintedOrders)
+            order.IsExpanded = expand;
+        foreach (var order in _vm.OtherStoreOrders)
+            order.IsExpanded = expand;
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  Action button handlers — delegate to ViewModel/services
     // ══════════════════════════════════════════════════════════════════════
@@ -355,12 +396,6 @@ public partial class MainWindow : Window
         _vm.ToggleHold("operator");
         _vm.LoadOrders();
         UpdateStatusBar();
-    }
-
-    private void OpenFolderButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_selectedOrderItem == null) return;
-        // TODO: get folder path from ViewModel/order data
     }
 
     private void NotifyButton_Click(object sender, RoutedEventArgs e)
@@ -391,24 +426,12 @@ public partial class MainWindow : Window
         MessageBox.Show("Color correct not yet wired.", "TODO", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private void ChangeSizeButton_Click(object sender, RoutedEventArgs e)
+    private void OpenFolderButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedOrderItem == null || _selectedSizeItem == null) return;
-        // TODO: open change size window
-        MessageBox.Show("Change size not yet wired.", "TODO", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
-    private void AssignChannelButton_Click(object sender, RoutedEventArgs e)
-    {
-        // TODO: delegate channel assignment to ViewModel
-    }
-
-    private void AlertCountText_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        var alerts = AlertCollector.GetAndClear();
-        if (alerts.Count == 0) return;
-        var text = string.Join("\n\n", alerts.Select(a => a.TechnicalDump()));
-        MessageBox.Show(text, $"Alerts ({alerts.Count})", MessageBoxButton.OK, MessageBoxImage.Information);
+        if (_selectedOrderItem == null) return;
+        var folder = _selectedOrderItem.FolderPath;
+        if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
+            Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true });
     }
 }
 

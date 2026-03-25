@@ -2,172 +2,538 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="PrintStation Settings"
-        Width="500" Height="550"
+        Width="780" Height="620"
+        MinWidth="650" MinHeight="500"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource WindowBg}"
-        ResizeMode="NoResize">
+        Foreground="{DynamicResource TextPrimary}">
 
-    <Grid Margin="16">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="*"/>    <!-- Content -->
-            <RowDefinition Height="Auto"/> <!-- Buttons -->
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
-            <StackPanel>
-                <!-- Database Connection -->
-                <TextBlock Text="Database Connection" Foreground="{DynamicResource TextHeading}"
-                           FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+        <TabControl x:Name="SettingsTabs" Grid.Row="0"
+                    Background="{DynamicResource WindowBg}"
+                    BorderBrush="{DynamicResource BorderBrush}">
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Host:" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <TextBox x:Name="DbHostBox" Grid.Column="1"
-                             Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                             BorderBrush="{DynamicResource InputBorder}" Padding="4,3"/>
+            <!-- SOURCES -->
+            <TabItem Header="Sources">
+                <ScrollViewer Margin="12">
+                    <StackPanel MaxWidth="650">
+
+                        <TextBlock Text="Dakis" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <CheckBox x:Name="DakisEnabledCheck" Content="Active" Margin="0,0,0,6"/>
+                        <Label Content="Incoming orders folder" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="DakisWatchBox" Grid.Column="0"/>
+                            <Button Grid.Column="1" Content="Browse..." Width="70" Margin="6,0,0,0"
+                                    Tag="DakisWatch" Click="BrowseFolder_Click"/>
+                        </Grid>
+
+                        <TextBlock Text="Noritsu" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <Label Content="Output (hotfolder) path" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="NoritsuOutputBox" Grid.Column="0"/>
+                            <Button Grid.Column="1" Content="Browse..." Width="70" Margin="6,0,0,0"
+                                    Tag="NoritsuOutput" Click="BrowseFolder_Click"/>
+                        </Grid>
+                        <Label Content="ch_data.csv path" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="ChannelsCsvBox" Grid.Column="0"/>
+                            <Button Grid.Column="1" Content="Browse..." Width="70" Margin="6,0,0,0"
+                                    Tag="ChannelsCsv" Click="BrowseFile_Click"/>
+                        </Grid>
+
+                        <TextBlock Text="Auto Refresh" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <Label Content="Refresh interval (seconds)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="RefreshIntervalBox" Grid.Column="0"/>
+                            <TextBlock Grid.Column="1" Text="0 = disabled" VerticalAlignment="Center" Margin="8,0,0,0"
+                                       Foreground="{DynamicResource TextMuted}" FontSize="11"/>
+                        </Grid>
+
+                        <TextBlock Text="Data" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <Label Content="Days to load (0 = all)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="DaysToLoadBox" Grid.Column="0"/>
+                            <TextBlock Grid.Column="1" Text="days  (0 = all)" VerticalAlignment="Center" Margin="8,0,0,0"
+                                       Foreground="{DynamicResource TextMuted}" FontSize="11"/>
+                        </Grid>
+
+                        <TextBlock Text="Store" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <Label Content="Store ID (BH=1, WB=2)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="StoreIdBox" Width="80" HorizontalAlignment="Left" Margin="0,0,0,8"/>
+
+                        <Label Content="Poll interval (seconds) — how often to check Pixfizz API" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="PollIntervalBox" Grid.Column="0"/>
+                            <TextBlock Grid.Column="1" Text="min 5" VerticalAlignment="Center" Margin="8,0,0,0"
+                                       Foreground="{DynamicResource TextMuted}" FontSize="11"/>
+                        </Grid>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- PIXFIZZ -->
+            <TabItem Header="Pixfizz">
+                <ScrollViewer Margin="12">
+                    <StackPanel MaxWidth="650">
+                        <CheckBox x:Name="PixfizzEnabledCheck" Content="Pixfizz Active" Margin="0,0,0,12"/>
+
+                        <TextBlock Text="API" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <Label Content="API Base URL" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="PixfizzApiUrlBox" Margin="0,0,0,6" FontFamily="Consolas"/>
+                        <Label Content="API Key" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <PasswordBox x:Name="PixfizzApiKeyBox" Margin="0,0,0,6"/>
+                        <Label Content="Organization ID" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="PixfizzOrgBox" Margin="0,0,0,6" FontFamily="Consolas"/>
+                        <Label Content="Location ID" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="PixfizzLocationBox" Margin="0,0,0,14" FontFamily="Consolas"/>
+
+                        <TextBlock Text="Local" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <Label Content="Download folder" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="OrderOutputBox" Grid.Column="0"/>
+                            <Button Grid.Column="1" Content="Browse..." Width="70" Margin="6,0,0,0"
+                                    Tag="OrderOutput" Click="BrowseFolder_Click"/>
+                        </Grid>
+
+                        <TextBlock Text="FTP Artwork Server" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <Label Content="Server" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="PixfizzFtpServerBox" Margin="0,0,0,6" FontFamily="Consolas"/>
+                        <Label Content="Port" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="PixfizzFtpPortBox" Width="80" HorizontalAlignment="Left" Margin="0,0,0,6"/>
+                        <Label Content="Artwork Folder" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="PixfizzFtpArtworkBox" Margin="0,0,0,6" FontFamily="Consolas"/>
+                        <Label Content="Darkroom Folder" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="PixfizzFtpDarkroomBox" Margin="0,0,0,6" FontFamily="Consolas"/>
+                        <Label Content="FTP Username" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="PixfizzFtpUserBox" Margin="0,0,0,6"/>
+                        <Label Content="FTP Password" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <PasswordBox x:Name="PixfizzFtpPassBox" Margin="0,0,0,8"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ROUTING RULES -->
+            <TabItem Header="Routing Rules">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Channel mappings (from SQLite channel_mappings table)"
+                                   Foreground="{DynamicResource TextPrimary}" FontSize="12"
+                                   VerticalAlignment="Center" Margin="0,0,20,0"/>
+                        <ComboBox x:Name="RoutingSourceFilter" Width="100" VerticalAlignment="Center"
+                                  Margin="0,0,10,0" SelectionChanged="RoutingSourceFilter_Changed">
+                            <ComboBoxItem Content="All" IsSelected="True"/>
+                            <ComboBoxItem Content="Dakis"/>
+                            <ComboBoxItem Content="Pixfizz"/>
+                            <ComboBoxItem Content="Unmapped"/>
+                        </ComboBox>
+                        <TextBox x:Name="RoutingSearchBox" Width="180" VerticalAlignment="Center"
+                                 TextChanged="RoutingSearchBox_TextChanged"/>
+                    </StackPanel>
+                    <DataGrid Grid.Row="1" x:Name="RoutingGrid"
+                              Background="{DynamicResource TreeBg}" Foreground="{DynamicResource TextPrimary}"
+                              BorderBrush="{DynamicResource BorderBrush}" RowBackground="{DynamicResource SurfaceBg}"
+                              AlternatingRowBackground="{DynamicResource SurfaceBg}"
+                              GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False" CanUserDeleteRows="False"
+                              SelectionMode="Single" ColumnHeaderHeight="28">
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background"   Value="{DynamicResource SurfaceBg}"/>
+                                <Setter Property="Foreground"   Value="{DynamicResource TextPrimary}"/>
+                                <Setter Property="BorderBrush"  Value="{DynamicResource BorderBrush}"/>
+                                <Setter Property="BorderThickness" Value="0,0,1,1"/>
+                                <Setter Property="Padding"      Value="8,5"/>
+                                <Setter Property="FontWeight"   Value="SemiBold"/>
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Source" Width="70"
+                                                Binding="{Binding Source}" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Routing Key" Width="*"
+                                                Binding="{Binding RoutingKey}" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Channel #" Width="80"
+                                                Binding="{Binding ChannelNumber}" IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Channel Name" Width="200"
+                                                Binding="{Binding ChannelName}" IsReadOnly="True"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button Content="Remove Selected" Width="130"
+                                Click="RemoveRoutingRule_Click"/>
+                        <ComboBox x:Name="RoutingChannelCombo" Width="250" Margin="20,0,6,0"
+                                  VerticalAlignment="Center" DisplayMemberPath="DisplayName"
+                                  MaxDropDownHeight="300"/>
+                        <Button Content="Assign Channel" Width="110"
+                                Click="AssignRoutingChannel_Click"/>
+                    </StackPanel>
                 </Grid>
+            </TabItem>
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Port:" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <TextBox x:Name="DbPortBox" Grid.Column="1"
-                             Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                             BorderBrush="{DynamicResource InputBorder}" Padding="4,3"/>
+            <!-- LAYOUTS -->
+            <TabItem Header="Layouts">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="Print layouts — canvas padding and multi-up tiling"
+                               Foreground="{DynamicResource TextPrimary}" FontSize="12" Margin="0,0,0,8"/>
+                    <DataGrid Grid.Row="1" x:Name="LayoutGrid"
+                              Background="{DynamicResource TreeBg}" Foreground="{DynamicResource TextPrimary}"
+                              BorderBrush="{DynamicResource BorderBrush}" RowBackground="{DynamicResource SurfaceBg}"
+                              AlternatingRowBackground="{DynamicResource SurfaceBg}"
+                              GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False" CanUserDeleteRows="False"
+                              SelectionMode="Single" IsReadOnly="True" ColumnHeaderHeight="28">
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background"   Value="{DynamicResource SurfaceBg}"/>
+                                <Setter Property="Foreground"   Value="{DynamicResource TextPrimary}"/>
+                                <Setter Property="BorderBrush"  Value="{DynamicResource BorderBrush}"/>
+                                <Setter Property="BorderThickness" Value="0,0,1,1"/>
+                                <Setter Property="Padding"      Value="8,5"/>
+                                <Setter Property="FontWeight"   Value="SemiBold"/>
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Name" Width="180"
+                                                Binding="{Binding Name}"/>
+                            <DataGridTextColumn Header="Print Size" Width="100"
+                                                Binding="{Binding PrintSizeDisplay}"/>
+                            <DataGridTextColumn Header="Grid" Width="60"
+                                                Binding="{Binding GridDisplay}"/>
+                            <DataGridTextColumn Header="Target CH" Width="80"
+                                                Binding="{Binding TargetChannelNumber}"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+                        <TextBlock Text="Layout editing not yet ported — use PrintRouter to manage layouts"
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
                 </Grid>
+            </TabItem>
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Database:" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <TextBox x:Name="DbNameBox" Grid.Column="1"
-                             Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                             BorderBrush="{DynamicResource InputBorder}" Padding="4,3"/>
-                </Grid>
+            <!-- CONTROLS -->
+            <TabItem Header="Controls">
+                <ScrollViewer Margin="12">
+                    <StackPanel MaxWidth="700">
+                        <TextBlock Text="Correction Control Layout" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Configure which controls appear in each slot of the color correction window. 3 groups of 7 slots."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,12"/>
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="User:" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <TextBox x:Name="DbUserBox" Grid.Column="1"
-                             Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                             BorderBrush="{DynamicResource InputBorder}" Padding="4,3"/>
-                </Grid>
+                        <TextBlock Text="Right Sidebar" Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,0,0,4"/>
+                        <UniformGrid x:Name="TopRowGrid" Columns="7" Margin="0,0,0,12"/>
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Password:" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <PasswordBox x:Name="DbPasswordBox" Grid.Column="1"
-                                 Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                                 BorderBrush="{DynamicResource InputBorder}" Padding="4,3"/>
-                </Grid>
+                        <TextBlock Text="Bottom Row" Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,0,0,4"/>
+                        <UniformGrid x:Name="BottomRow1Grid" Columns="7" Margin="0,0,0,12"/>
 
-                <Button Content="Test Connection" Margin="100,4,0,0" HorizontalAlignment="Left"
-                        Click="TestConnectionButton_Click"/>
-                <TextBlock x:Name="ConnectionTestResult" Foreground="{DynamicResource TextSecondary}"
-                           Margin="100,4,0,0" FontSize="11"/>
+                        <TextBlock Text="Left Sidebar (9 slots)" Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,0,0,4"/>
+                        <UniformGrid x:Name="BottomRow2Grid" Columns="9" Margin="0,0,0,16"/>
 
-                <Border Height="1" Background="{DynamicResource SeparatorBg}" Margin="0,12"/>
+                        <Button Content="Reset to Defaults" Width="140" HorizontalAlignment="Left"
+                                Click="ResetSlotLayout_Click"/>
 
-                <!-- Store -->
-                <TextBlock Text="Store" Foreground="{DynamicResource TextHeading}"
-                           FontSize="14" FontWeight="SemiBold" Margin="0,8,0,8"/>
+                        <!-- Settings Profiles -->
+                        <TextBlock Text="Correction Settings Profiles" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,20,0,4"/>
+                        <TextBlock Text="Save and load named sets of all strengths, ratios, and parameters below."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,8"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                            <ComboBox x:Name="ProfileCombo" Width="200" MinHeight="28"/>
+                            <Button Content="Load" Width="60" Margin="6,0,0,0" Click="LoadProfile_Click"/>
+                            <Button Content="Save As..." Width="80" Margin="6,0,0,0" Click="SaveProfile_Click"/>
+                            <Button Content="Delete" Width="60" Margin="6,0,0,0" Click="DeleteProfile_Click"/>
+                        </StackPanel>
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="This Store:" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <ComboBox x:Name="StoreCombo" Grid.Column="1"
-                              Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                              BorderBrush="{DynamicResource InputBorder}"/>
-                </Grid>
+                        <!-- Correction Strengths -->
+                        <TextBlock Text="Correction Strengths" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Multiplier for each correction type. 1.0 = standard, 2.0 = double effect per step."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,8"/>
 
-                <Border Height="1" Background="{DynamicResource SeparatorBg}" Margin="0,12"/>
+                        <UniformGrid Columns="3" Margin="0,0,0,4">
+                            <StackPanel Margin="0,0,8,6"><Label Content="Brightness" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrBrightnessBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Contrast" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrContrastBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Shadows" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrShadowsBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Highlights" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrHighlightsBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Saturation" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrSaturationBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="ColorTemp" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrColorTempBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Cyan (Red)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrRedBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Magenta (Green)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrGreenBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Yellow (Blue)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrBlueBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Sigmoidal Contrast" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrSigmoidalBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="CLAHE" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrClaheBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="ContrastStretch" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrContrastStretchBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Levels" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="StrLevelsBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                        </UniformGrid>
 
-                <!-- Noritsu -->
-                <TextBlock Text="Noritsu" Foreground="{DynamicResource TextHeading}"
-                           FontSize="14" FontWeight="SemiBold" Margin="0,8,0,8"/>
+                        <!-- Exposure Ratios -->
+                        <TextBlock Text="Exposure Ratios" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                        <TextBlock Text="How the Exposure meta-control fans out to individual corrections."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,8"/>
+                        <UniformGrid Columns="4" Margin="0,0,0,4">
+                            <StackPanel Margin="0,0,8,6"><Label Content="Brightness" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="ExpRatioBrightnessBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Contrast" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="ExpRatioContrastBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Shadows" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="ExpRatioShadowsBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Highlights" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="ExpRatioHighlightsBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                        </UniformGrid>
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Output Root:" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <TextBox x:Name="NoritsuOutputBox" Grid.Column="1"
-                             Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                             BorderBrush="{DynamicResource InputBorder}" Padding="4,3"/>
-                </Grid>
+                        <!-- Warmth Parameters -->
+                        <TextBlock Text="Warmth Parameters" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                        <UniformGrid Columns="2" Margin="0,0,0,4">
+                            <StackPanel Margin="0,0,8,6"><Label Content="Red strength" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="WarmthRedBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Blue strength" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="WarmthBlueBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                        </UniformGrid>
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Channels CSV:" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <TextBox x:Name="ChannelsCsvBox" Grid.Column="1"
-                             Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                             BorderBrush="{DynamicResource InputBorder}" Padding="4,3"/>
-                </Grid>
+                        <!-- Sigmoidal -->
+                        <TextBlock Text="Sigmoidal Contrast Parameters" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                        <StackPanel Margin="0,0,8,6"><Label Content="Midpoint (0-100)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="SigmoidalMidpointBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
 
-                <Border Height="1" Background="{DynamicResource SeparatorBg}" Margin="0,12"/>
+                        <!-- CLAHE -->
+                        <TextBlock Text="CLAHE Parameters" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                        <UniformGrid Columns="3" Margin="0,0,0,4">
+                            <StackPanel Margin="0,0,8,6"><Label Content="X Tiles" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="ClaheXTilesBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Y Tiles" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="ClaheYTilesBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="Bins" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="ClaheBinsBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                        </UniformGrid>
 
-                <!-- Display -->
-                <TextBlock Text="Display" Foreground="{DynamicResource TextHeading}"
-                           FontSize="14" FontWeight="SemiBold" Margin="0,8,0,8"/>
+                        <!-- ContrastStretch -->
+                        <TextBlock Text="ContrastStretch Parameters" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                        <UniformGrid Columns="2" Margin="0,0,0,4">
+                            <StackPanel Margin="0,0,8,6"><Label Content="Black clip %" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="CSBlackBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="White clip %" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="CSWhiteBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                        </UniformGrid>
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Theme:" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <ComboBox x:Name="ThemeCombo" Grid.Column="1"
-                              Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                              BorderBrush="{DynamicResource InputBorder}">
-                        <ComboBoxItem Content="Dark"/>
-                        <ComboBoxItem Content="Light"/>
-                    </ComboBox>
-                </Grid>
+                        <!-- Levels -->
+                        <TextBlock Text="Levels Parameters" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,12,0,4"/>
+                        <UniformGrid Columns="2" Margin="0,0,0,8">
+                            <StackPanel Margin="0,0,8,6"><Label Content="Black point (0-100)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="LevelBlackBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                            <StackPanel Margin="0,0,8,6"><Label Content="White point (0-100)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/><TextBox x:Name="LevelWhiteBox" Width="60" HorizontalAlignment="Left"/></StackPanel>
+                        </UniformGrid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
 
-                <Grid Margin="0,0,0,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="100"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="Refresh (sec):" Foreground="{DynamicResource TextLabel}" VerticalAlignment="Center"/>
-                    <TextBox x:Name="RefreshIntervalBox" Grid.Column="1"
-                             Background="{DynamicResource InputBg}" Foreground="{DynamicResource TextPrimary}"
-                             BorderBrush="{DynamicResource InputBorder}" Padding="4,3"/>
-                </Grid>
+            <!-- APPEARANCE -->
+            <TabItem Header="Appearance">
+                <ScrollViewer Margin="12">
+                    <StackPanel MaxWidth="650">
+                        <TextBlock Text="Color Theme" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <ComboBox x:Name="ThemeCombo" Width="200" HorizontalAlignment="Left" Margin="0,0,0,16">
+                            <ComboBoxItem Content="Light" Tag="Light"/>
+                            <ComboBoxItem Content="Dark" Tag="Dark"/>
+                        </ComboBox>
 
-                <CheckBox x:Name="DevModeCheck" Content="Developer Mode"
-                          Foreground="{DynamicResource TextPrimary}" Margin="0,8,0,0"/>
+                        <TextBlock Text="Tree Font" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <ComboBox x:Name="FontFamilyCombo" Width="200" HorizontalAlignment="Left" Margin="0,0,0,12">
+                            <ComboBoxItem Content="Segoe UI"      Tag="Segoe UI"/>
+                            <ComboBoxItem Content="Consolas"      Tag="Consolas"/>
+                            <ComboBoxItem Content="Cascadia Code" Tag="Cascadia Code"/>
+                            <ComboBoxItem Content="Arial"         Tag="Arial"/>
+                            <ComboBoxItem Content="Verdana"       Tag="Verdana"/>
+                            <ComboBoxItem Content="Calibri"       Tag="Calibri"/>
+                        </ComboBox>
 
-                <CheckBox x:Name="LoggingCheck" Content="Enable Logging"
-                          Foreground="{DynamicResource TextPrimary}" Margin="0,4,0,0"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <StackPanel Margin="0,0,16,0">
+                                <Label Content="Order font size" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="OrderFontSizeBox" Width="60" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                            <StackPanel>
+                                <Label Content="Size font size" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="SizeFontSizeBox" Width="60" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <TextBlock Text="(6-30)" Foreground="{DynamicResource TextMuted}" FontSize="11"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- AUTO UPDATE -->
+            <TabItem Header="Auto Update">
+                <ScrollViewer Margin="12">
+                    <StackPanel MaxWidth="650">
+                        <TextBlock Text="Auto Update" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Tries the local (UNC) path first — fast for machines on the same network. Falls back to SFTP for remote locations."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,12" TextWrapping="Wrap"/>
+
+                        <Label Content="Local/UNC path" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="UpdateLocalBox" Grid.Column="0" FontFamily="Consolas" FontSize="11"/>
+                            <Button Grid.Column="1" Content="Browse..." Width="70" Margin="6,0,0,0"
+                                    Tag="UpdateLocal" Click="BrowseFolder_Click"/>
+                        </Grid>
+
+                        <TextBlock Text="SFTP Connection (fallback)" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="13" FontWeight="SemiBold" Margin="0,8,0,4"/>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <Label Content="Host" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="UpdateSftpHostBox" FontFamily="Consolas" FontSize="11"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                <Label Content="Port" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="UpdateSftpPortBox" FontFamily="Consolas" FontSize="11" Width="60" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                <Label Content="Username" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="UpdateSftpUserBox" FontFamily="Consolas" FontSize="11"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                <Label Content="Password" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <PasswordBox x:Name="UpdateSftpPassBox" FontFamily="Consolas" FontSize="11"/>
+                            </StackPanel>
+                        </Grid>
+                        <Label Content="Remote folder path" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="UpdateSftpFolderBox" Margin="0,0,0,8" FontFamily="Consolas" FontSize="11"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- NOTIFICATIONS -->
+            <TabItem Header="Notifications">
+                <ScrollViewer Margin="12">
+                    <StackPanel MaxWidth="650">
+                        <TextBlock Text="Email Notifications (SMTP)" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <CheckBox x:Name="EmailEnabledCheck" Content="Enable email notifications" Margin="0,0,0,12"/>
+
+                        <TextBlock Text="Pixfizz Notification Mode" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="PixfizzNotifyCombo" Width="200" HorizontalAlignment="Left" Margin="0,0,0,16">
+                            <ComboBoxItem Content="Pixfizz"/>
+                            <ComboBoxItem Content="Email"/>
+                        </ComboBox>
+
+                        <Label Content="SMTP Server" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="SmtpHostBox" Margin="0,0,0,8"/>
+                        <Label Content="SMTP Port" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="SmtpPortBox" Margin="0,0,0,8" Width="80" HorizontalAlignment="Left"/>
+                        <Label Content="SMTP Username" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="SmtpUserBox" Margin="0,0,0,8"/>
+                        <Label Content="SMTP Password" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <PasswordBox x:Name="SmtpPassBox" Margin="0,0,0,8"/>
+                        <Label Content="From email address" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="EmailFromBox" Margin="0,0,0,8"/>
+
+                        <!-- Email Templates -->
+                        <TextBlock Text="Email Templates" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,8,0,4"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <ListBox x:Name="TemplateListBox" Width="180" Height="80"
+                                     DisplayMemberPath="Name"
+                                     SelectionChanged="TemplateListBox_SelectionChanged"/>
+                            <StackPanel Margin="8,0,0,0" VerticalAlignment="Center">
+                                <Button Content="Add" Width="70" Margin="0,0,0,4" Click="AddTemplate_Click"/>
+                                <Button Content="Remove" Width="70" Click="RemoveTemplate_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <Label Content="Template Name" Foreground="{DynamicResource TextSecondary}" Padding="0,2" Width="100"/>
+                            <TextBox x:Name="TemplateNameBox" Width="200" TextChanged="TemplateField_Changed"/>
+                        </StackPanel>
+                        <Label Content="Subject" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="TemplateSubjectBox" Margin="0,0,0,8" TextChanged="TemplateField_Changed"/>
+                        <Label Content="Body" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBlock Text="Placeholders: {CustomerName}, {StoreName}, {OrderId}, {OrderDate}, {Email}, {Phone}, {Location}"
+                                   Foreground="{DynamicResource TextMuted}" FontSize="10" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                        <TextBox x:Name="TemplateBodyBox" Margin="0,0,0,12"
+                                 AcceptsReturn="True" TextWrapping="Wrap"
+                                 Height="200" VerticalScrollBarVisibility="Auto"
+                                 TextChanged="TemplateField_Changed"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- DIAGNOSTICS -->
+            <TabItem Header="Diagnostics">
+                <ScrollViewer Margin="12">
+                    <StackPanel MaxWidth="650">
+                        <TextBlock Text="Developer Mode" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <CheckBox x:Name="DevModeCheck" Content="Enable developer mode (no Pixfizz lifecycle, no Noritsu output)" Margin="0,0,0,4"/>
+                        <TextBlock Text="Use when running for development/testing. Prevents this instance from claiming Pixfizz orders or sending prints to Noritsu."
+                                   Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="20,0,0,12"/>
+
+                        <TextBlock Text="Debug Logging" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <CheckBox x:Name="LoggingCheck" Content="Enable debug log" Margin="0,0,0,12"/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                            <Button Content="Open Log File" Width="120" Click="OpenLog_Click"/>
+                            <Button Content="Clear Log" Width="90" Margin="8,0,0,0" Click="ClearLog_Click"/>
+                        </StackPanel>
+
+                        <TextBlock Text="Test Data" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Scan Pixfizz and Dakis folders and seed orders into SQLite from disk files."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button x:Name="SeedBtn" Content="Seed Orders from Disk" Width="180" Click="SeedFromDisk_Click"/>
+                            <TextBlock x:Name="SeedResult" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+        </TabControl>
+
+        <!-- Bottom bar -->
+        <Border Grid.Row="1" Background="{DynamicResource ToolbarBg}" Padding="12,8">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Save and Close" Width="120" Margin="0,0,8,0"
+                        Click="SaveAndClose_Click"/>
+                <Button Content="Cancel" Width="80"
+                        Click="Cancel_Click"/>
             </StackPanel>
-        </ScrollViewer>
-
-        <!-- Buttons -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button Content="Save" Width="80" Margin="0,0,8,0" Click="SaveButton_Click"
-                    Background="{DynamicResource ButtonPrintBg}"/>
-            <Button Content="Cancel" Width="80" Click="CancelButton_Click"/>
-        </StackPanel>
+        </Border>
     </Grid>
 </Window>
