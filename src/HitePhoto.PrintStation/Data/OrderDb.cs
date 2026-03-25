@@ -404,10 +404,39 @@ public class OrderDb
 
         // Migration 002: Strip "order " prefix from Dakis external_order_id.
         // DakisIngestService used full folder name instead of just the number.
+        // Some orders exist BOTH as "order 123" and "123" — delete the prefixed
+        // duplicates first, then rename the non-duplicates.
+        Execute(conn, """
+            DELETE FROM order_items WHERE order_id IN (
+                SELECT o1.id FROM orders o1
+                INNER JOIN orders o2
+                    ON LTRIM(SUBSTR(o1.external_order_id, 6)) = o2.external_order_id
+                    AND o1.pickup_store_id = o2.pickup_store_id
+                WHERE LOWER(o1.external_order_id) LIKE 'order%'
+            );
+            """);
+        Execute(conn, """
+            DELETE FROM order_history WHERE order_id IN (
+                SELECT o1.id FROM orders o1
+                INNER JOIN orders o2
+                    ON LTRIM(SUBSTR(o1.external_order_id, 6)) = o2.external_order_id
+                    AND o1.pickup_store_id = o2.pickup_store_id
+                WHERE LOWER(o1.external_order_id) LIKE 'order%'
+            );
+            """);
+        Execute(conn, """
+            DELETE FROM orders WHERE id IN (
+                SELECT o1.id FROM orders o1
+                INNER JOIN orders o2
+                    ON LTRIM(SUBSTR(o1.external_order_id, 6)) = o2.external_order_id
+                    AND o1.pickup_store_id = o2.pickup_store_id
+                WHERE LOWER(o1.external_order_id) LIKE 'order%'
+            );
+            """);
         Execute(conn, """
             UPDATE orders
-            SET external_order_id = SUBSTR(external_order_id, 7)
-            WHERE external_order_id LIKE 'order %';
+            SET external_order_id = LTRIM(SUBSTR(external_order_id, 6))
+            WHERE LOWER(external_order_id) LIKE 'order%';
             """);
     }
 }
