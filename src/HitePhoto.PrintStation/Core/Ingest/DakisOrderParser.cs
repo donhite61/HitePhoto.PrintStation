@@ -18,8 +18,18 @@ public class DakisOrderParser
         var ymlLines = raw.RawData.Split('\n');
         var info = ReadOrderInfoFromLines(ymlLines, raw.ExternalOrderId);
 
-        // Order ID from YML is source of truth; caller's value is fallback
-        var orderId = !string.IsNullOrWhiteSpace(info.OrderId) ? info.OrderId : raw.ExternalOrderId;
+        // Order ID from YML is source of truth — missing is an error
+        if (string.IsNullOrWhiteSpace(info.OrderId))
+        {
+            AlertCollector.Error(AlertCategory.DataQuality,
+                "Dakis order.yml missing :id: field",
+                orderId: raw.ExternalOrderId,
+                detail: $"Attempted: read :id: from order.yml. Expected: numeric order ID. " +
+                        $"Found: empty/missing. Context: parsing folder '{raw.Metadata?.GetValueOrDefault("folder_path")}'. " +
+                        $"State: order cannot be ingested without an ID.");
+            throw new InvalidOperationException($"Dakis order.yml missing :id: field in '{raw.Metadata?.GetValueOrDefault("folder_path")}'");
+        }
+        var orderId = info.OrderId;
         var customerFirstName = info.CustFirst;
         var customerLastName = info.CustLast;
         var folderPath = raw.Metadata?.GetValueOrDefault("folder_path");
