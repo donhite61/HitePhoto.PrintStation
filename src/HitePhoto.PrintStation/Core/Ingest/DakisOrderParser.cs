@@ -18,6 +18,8 @@ public class DakisOrderParser
         var ymlLines = raw.RawData.Split('\n');
         var info = ReadOrderInfoFromLines(ymlLines, raw.ExternalOrderId);
 
+        // Order ID from YML is source of truth; caller's value is fallback
+        var orderId = !string.IsNullOrWhiteSpace(info.OrderId) ? info.OrderId : raw.ExternalOrderId;
         var customerFirstName = info.CustFirst;
         var customerLastName = info.CustLast;
         var folderPath = raw.Metadata?.GetValueOrDefault("folder_path");
@@ -29,7 +31,7 @@ public class DakisOrderParser
         {
             return new UnifiedOrder
             {
-                ExternalOrderId = raw.ExternalOrderId,
+                ExternalOrderId = orderId,
                 ExternalSource = "dakis",
                 OrderedAt = info.OrderedAt,
                 CustomerFirstName = customerFirstName,
@@ -56,7 +58,7 @@ public class DakisOrderParser
             info.OutlabCounts.TryGetValue(kvp.Key, out int outlabQty);
             items.Add(new UnifiedOrderItem
             {
-                ExternalLineId = $"{raw.ExternalOrderId}_{kvp.Key}",
+                ExternalLineId = $"{orderId}_{kvp.Key}",
                 SizeLabel = kvp.Key,
                 FormatString = kvp.Key,
                 ExpectedPrintCount = kvp.Value,
@@ -72,7 +74,7 @@ public class DakisOrderParser
             {
                 items.Add(new UnifiedOrderItem
                 {
-                    ExternalLineId = $"{raw.ExternalOrderId}_{kvp.Key}_outlab",
+                    ExternalLineId = $"{orderId}_{kvp.Key}_outlab",
                     SizeLabel = kvp.Key,
                     FormatString = kvp.Key,
                     ExpectedPrintCount = 0,
@@ -103,7 +105,7 @@ public class DakisOrderParser
                         foreach (var img in ScanImages(productDir))
                             items.Add(img with
                             {
-                                ExternalLineId = $"{raw.ExternalOrderId}_{formatString}_{Path.GetFileName(img.ImageFilepath ?? "")}",
+                                ExternalLineId = $"{orderId}_{formatString}_{Path.GetFileName(img.ImageFilepath ?? "")}",
                                 SizeLabel = formatString,
                                 FormatString = formatString
                             });
@@ -126,7 +128,7 @@ public class DakisOrderParser
                             {
                                 items.Add(images[i] with
                                 {
-                                    ExternalLineId = $"{raw.ExternalOrderId}_{existing.SizeLabel}_{i}",
+                                    ExternalLineId = $"{orderId}_{existing.SizeLabel}_{i}",
                                     SizeLabel = existing.SizeLabel,
                                     FormatString = existing.FormatString
                                 });
@@ -147,7 +149,7 @@ public class DakisOrderParser
                     {
                         items.Add(img with
                         {
-                            ExternalLineId = $"{raw.ExternalOrderId}_product_{label}_{Path.GetFileName(img.ImageFilepath ?? "")}",
+                            ExternalLineId = $"{orderId}_product_{label}_{Path.GetFileName(img.ImageFilepath ?? "")}",
                             SizeLabel = label,
                             FormatString = label,
                             IsNoritsu = false
@@ -159,7 +161,7 @@ public class DakisOrderParser
 
         // ── Validation ──
         var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(raw.ExternalOrderId))
+        if (string.IsNullOrWhiteSpace(orderId))
             errors.Add("ExternalOrderId is empty");
         if (string.IsNullOrWhiteSpace(info.BillingStoreId))
             errors.Add("BillingStoreId is empty");
@@ -174,14 +176,14 @@ public class DakisOrderParser
         {
             AlertCollector.Error(AlertCategory.DataQuality,
                 $"Dakis order validation failed: {string.Join("; ", errors)}",
-                orderId: raw.ExternalOrderId);
+                orderId: orderId);
             throw new InvalidOperationException(
-                $"Dakis order '{raw.ExternalOrderId}' failed validation: {string.Join("; ", errors)}");
+                $"Dakis order '{orderId}' failed validation: {string.Join("; ", errors)}");
         }
 
         return new UnifiedOrder
         {
-            ExternalOrderId = raw.ExternalOrderId,
+            ExternalOrderId = orderId,
             ExternalSource = "dakis",
             OrderedAt = info.OrderedAt,
             CustomerFirstName = customerFirstName,
@@ -216,7 +218,7 @@ public class DakisOrderParser
             info.Comment = YStr(root, ":comment:");
             info.BeenPaid = YBool(root, ":been_paid:");
             info.OrderType = YStr(root, ":type:");
-            var ymlOrderId = YStr(root, ":id:");
+            info.OrderId = YStr(root, ":id:");
             decimal.TryParse(YStr(root, ":charged_price:"), NumberStyles.Number, CultureInfo.InvariantCulture, out var chargedPrice);
             info.ChargedPrice = chargedPrice;
 
@@ -357,8 +359,8 @@ public class DakisOrderParser
 
                         if (objectType == "PrintingOrder")
                         {
-                            inMyOrder = string.IsNullOrEmpty(ymlOrderId) ||
-                                        text.Contains(ymlOrderId, StringComparison.OrdinalIgnoreCase);
+                            inMyOrder = string.IsNullOrEmpty(info.OrderId) ||
+                                        text.Contains(info.OrderId, StringComparison.OrdinalIgnoreCase);
                         }
                         else if (objectType == "PrintFormat" && inMyOrder && !string.IsNullOrWhiteSpace(text))
                         {
@@ -486,6 +488,7 @@ public class DakisOrderParser
 
     private class DakisOrderInfo
     {
+        public string OrderId { get; set; } = "";
         public string Comment { get; set; } = "";
         public bool BeenPaid { get; set; }
         public string Phone { get; set; } = "";
