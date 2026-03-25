@@ -228,9 +228,8 @@ public class MainViewModel : ViewModelBase
                     var txtPath = Path.Combine(folder.Path, "darkroom_ticket.txt");
                     if (File.Exists(txtPath))
                     {
-                        // TODO: full TXT-vs-DB compare-and-repair
-                        // When implemented: reread TXT, compare item count/sizes/filenames
-                        // If mismatch: overwrite DB from TXT, add "repaired at" note
+                        var repairResult = RepairFromTxt(conn, db.Id, folder.Path, txtPath);
+                        if (repairResult > 0) repaired += repairResult;
                     }
                 }
 
@@ -292,6 +291,128 @@ public class MainViewModel : ViewModelBase
         };
 
         Verify(folderList, dbList);
+    }
+
+    // ── TXT-vs-DB compare-and-repair (TXT is source of truth) ──
+
+    /// <summary>
+    /// Reread darkroom_ticket.txt, compare items against DB, overwrite DB if mismatch.
+    /// Never overwrites messages or history. Adds "repaired at" note.
+    /// Returns number of repairs made.
+    /// </summary>
+    private int RepairFromTxt(SqliteConnection conn, int dbOrderId, string folderPath, string txtPath)
+    {
+        try
+        {
+            var txtContent = File.ReadAllText(txtPath);
+
+            // Build local file index for path resolution
+            var artworkDir = Path.Combine(folderPath, "artwork");
+            var localFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (Directory.Exists(artworkDir))
+                foreach (var f in Directory.GetFiles(artworkDir, "*.jpg"))
+                    localFiles[Path.GetFileName(f)] = f;
+
+            var parsed = HitePhoto.Shared.Parsers.PixfizzTxtParser.ParseContent(txtContent, ftpPath =>
+            {
+                var fname = Path.GetFileName(ftpPath);
+                return localFiles.TryGetValue(fname, out var local) ? local : ftpPath;
+            });
+            if (parsed == null) return 0;
+
+            var txtItems = TxtItemConverter.ToUnifiedItems(parsed);
+
+            // Load current DB items for this order
+            var dbItems = new List<(int Id, string SizeLabel, string MediaType, string ImageFilename, string ImageFilepath, int Quantity)>();
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT id, size_label, media_type, image_filename, image_filepath, quantity FROM order_items WHERE order_id = @oid";
+                cmd.Parameters.AddWithValue("@oid", dbOrderId);
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    dbItems.Add((
+                        reader.GetInt32(0),
+                        reader.IsDBNull(1) ? "" : reader.GetString(1),
+                        reader.IsDBNull(2) ? "" : reader.GetString(2),
+                        reader.IsDBNull(3) ? "" : reader.GetString(3),
+                        reader.IsDBNull(4) ? "" : reader.GetString(4),
+                        reader.GetInt32(5)));
+                }
+            }
+
+            // Compare: check if item counts match and each TXT item has a DB match
+            int repairs = 0;
+            var unmatchedTxt = new List<UnifiedOrderItem>(txtItems);
+
+            foreach (var dbItem in dbItems)
+            {
+                var match = unmatchedTxt.FirstOrDefault(t =>
+                    string.Equals(t.ImageFilename, dbItem.ImageFilename, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(t.SizeLabel, dbItem.SizeLabel, StringComparison.OrdinalIgnoreCase));
+
+                if (match != null)
+                {
+                    unmatchedTxt.Remove(match);
+
+                    // Check if DB values match TXT — repair if not
+                    bool needsRepair = false;
+                    if (!string.Equals(match.MediaType, dbItem.MediaType, StringComparison.OrdinalIgnoreCase)) needsRepair = true;
+                    if (match.Quantity != dbItem.Quantity) needsRepair = true;
+                    if (!string.Equals(match.ImageFilepath, dbItem.ImageFilepath, StringComparison.OrdinalIgnoreCase)) needsRepair = true;
+
+                    if (needsRepair)
+                    {
+                        using var updateCmd = conn.CreateCommand();
+                        updateCmd.CommandText = """
+                            UPDATE order_items SET
+                                size_label = @size, media_type = @media,
+                                image_filename = @fname, image_filepath = @fpath,
+                                quantity = @qty, updated_at = datetime('now')
+                            WHERE id = @id
+                            """;
+                        updateCmd.Parameters.AddWithValue("@size", match.SizeLabel ?? "");
+                        updateCmd.Parameters.AddWithValue("@media", match.MediaType ?? "");
+                        updateCmd.Parameters.AddWithValue("@fname", match.ImageFilename ?? "");
+                        updateCmd.Parameters.AddWithValue("@fpath", match.ImageFilepath ?? "");
+                        updateCmd.Parameters.AddWithValue("@qty", match.Quantity);
+                        updateCmd.Parameters.AddWithValue("@id", dbItem.Id);
+                        updateCmd.ExecuteNonQuery();
+                        repairs++;
+                    }
+                }
+            }
+
+            // TXT items not in DB — insert them
+            foreach (var missing in unmatchedTxt)
+            {
+                using var insertCmd = conn.CreateCommand();
+                insertCmd.CommandText = """
+                    INSERT INTO order_items (order_id, size_label, media_type, quantity,
+                        image_filename, image_filepath, is_noritsu, created_at, updated_at)
+                    VALUES (@oid, @size, @media, @qty, @fname, @fpath, @noritsu, datetime('now'), datetime('now'))
+                    """;
+                insertCmd.Parameters.AddWithValue("@oid", dbOrderId);
+                insertCmd.Parameters.AddWithValue("@size", missing.SizeLabel ?? "");
+                insertCmd.Parameters.AddWithValue("@media", missing.MediaType ?? "");
+                insertCmd.Parameters.AddWithValue("@qty", missing.Quantity);
+                insertCmd.Parameters.AddWithValue("@fname", missing.ImageFilename ?? "");
+                insertCmd.Parameters.AddWithValue("@fpath", missing.ImageFilepath ?? "");
+                insertCmd.Parameters.AddWithValue("@noritsu", missing.IsNoritsu ? 1 : 0);
+                insertCmd.ExecuteNonQuery();
+                repairs++;
+            }
+
+            if (repairs > 0)
+                _history.AddNote(dbOrderId, $"Repaired at {DateTime.Now:yyyy-MM-dd HH:mm} — {repairs} item(s) updated from darkroom_ticket.txt", "system");
+
+            return repairs;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Info($"TXT repair failed for order {dbOrderId}: {ex.Message}");
+            return 0;
+        }
     }
 
     // ── Verify helpers ──
