@@ -315,4 +315,29 @@ public class OrderRepository : IOrderRepository
         transaction.Commit();
         return orderId;
     }
+
+    public List<Core.Models.ChannelInfo> GetAllChannels()
+    {
+        var channels = new List<Core.Models.ChannelInfo>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT channel_number, size_label, media_type, description
+            FROM channel_mappings
+            WHERE channel_number > 0
+            ORDER BY channel_number
+            """;
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            channels.Add(new Core.Models.ChannelInfo
+            {
+                ChannelNumber = reader.GetInt32(0),
+                SizeLabel = reader.IsDBNull(1) ? "" : reader.GetString(1),
+                MediaType = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                Description = reader.IsDBNull(3) ? "" : reader.GetString(3)
+            });
+        }
+        return channels;
+    }
 }

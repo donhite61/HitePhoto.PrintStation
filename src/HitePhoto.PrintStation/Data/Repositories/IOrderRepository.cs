@@ -43,6 +43,12 @@ public interface IOrderRepository
     /// Used by verify to build the DB side of the two-list reconciliation.
     /// </summary>
     Dictionary<string, (int Id, string FolderPath, string SourceCode)> GetRecentOrders(int storeId, int days);
+
+    /// <summary>
+    /// Get all configured channels from the channel_mappings table.
+    /// Used by ChangeSizeWindow for the channel dropdown.
+    /// </summary>
+    List<Core.Models.ChannelInfo> GetAllChannels();
 }
 
 public record OrderRecord(

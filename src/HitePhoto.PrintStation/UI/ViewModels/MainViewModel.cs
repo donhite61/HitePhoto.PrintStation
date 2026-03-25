@@ -24,6 +24,7 @@ public class MainViewModel : ViewModelBase
     private readonly IChannelDecision _channelDecision;
     private readonly IFilesNeededDecision _filesNeededDecision;
     private readonly IOrderVerifier _verifier;
+    private readonly IPrintService _printService;
     private readonly PixfizzIngestService _pixfizzIngest;
     private readonly DakisIngestService _dakisIngest;
     private readonly AppSettings _settings;
@@ -93,6 +94,7 @@ public class MainViewModel : ViewModelBase
         IChannelDecision channelDecision,
         IFilesNeededDecision filesNeededDecision,
         IOrderVerifier verifier,
+        IPrintService printService,
         PixfizzIngestService pixfizzIngest,
         DakisIngestService dakisIngest,
         AppSettings settings)
@@ -105,6 +107,7 @@ public class MainViewModel : ViewModelBase
         _channelDecision = channelDecision;
         _filesNeededDecision = filesNeededDecision;
         _verifier = verifier;
+        _printService = printService;
         _pixfizzIngest = pixfizzIngest;
         _dakisIngest = dakisIngest;
         _settings = settings;
@@ -462,6 +465,26 @@ public class MainViewModel : ViewModelBase
         foreach (var note in notes)
             OrderNotes.Add(note);
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Ingest
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Printing
+    // ══════════════════════════════════════════════════════════════════════
+
+    public SendResult PrintOrder(int orderId, string externalOrderId, string folderPath, string sourceCode)
+    {
+        // Verify before printing — same check every order gets
+        _verifier.VerifyOrder(externalOrderId, folderPath, sourceCode, orderId);
+
+        var result = _printService.SendToPrinter(orderId);
+        NeedsRefresh = true;
+        return result;
+    }
+
+    public List<Core.Models.ChannelInfo> GetAllChannels() => _orders.GetAllChannels();
 
     // ══════════════════════════════════════════════════════════════════════
     //  Ingest

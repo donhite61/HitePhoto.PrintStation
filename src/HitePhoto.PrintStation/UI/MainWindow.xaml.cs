@@ -414,11 +414,86 @@ public partial class MainWindow : Window
         MessageBox.Show("Transfer not yet wired.", "TODO", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private void PrintSelectedButton_Click(object sender, RoutedEventArgs e)
+    private async void PrintSelectedButton_Click(object sender, RoutedEventArgs e)
     {
         if (_selectedOrderItem == null) return;
-        // TODO: delegate to PrintService via ViewModel
-        MessageBox.Show("Print not yet wired.", "TODO", MessageBoxButton.OK, MessageBoxImage.Information);
+
+        if (_settings.DeveloperMode)
+        {
+            MessageBox.Show("Printing is disabled in developer mode.", "Dev Mode",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var order = _selectedOrderItem;
+        PrintBtn.IsEnabled = false;
+        PrintBtn.Content = "Printing...";
+
+        try
+        {
+            var result = await Task.Run(() => _vm.PrintOrder(
+                order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode));
+
+            var sentCount = result.Sent.Count;
+            var skippedCount = result.Skipped.Count;
+
+            if (sentCount > 0)
+            {
+                var channels = string.Join(", ", result.Sent.Select(s => $"Ch {s.ChannelNumber:D3}").Distinct());
+                _vm.StatusText = $"Sent {sentCount} item(s) to {channels}";
+            }
+
+            if (skippedCount > 0)
+            {
+                var reasons = string.Join("\n", result.Skipped.Select(s => $"{s.SizeLabel}: {s.Reason}"));
+                MessageBox.Show($"Skipped {skippedCount} size group(s):\n\n{reasons}",
+                    "Print — Some Sizes Skipped", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+
+            _vm.LoadOrders();
+            UpdateStatusBar();
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(Core.AlertCategory.Printing,
+                $"Print failed for {order.ExternalOrderId}", ex: ex);
+            MessageBox.Show($"Print failed: {ex.Message}", "Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            PrintBtn.IsEnabled = true;
+            PrintBtn.Content = "Print Selected";
+        }
+    }
+
+    private void ChangeSizeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedOrderItem == null || _selectedSizeItem == null) return;
+
+        var order = _selectedOrderItem.Order;
+        if (order == null)
+        {
+            MessageBox.Show("Order data not loaded.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var channels = _vm.GetAllChannels();
+        var items = _selectedSizeItem.Items;
+
+        var win = new ChangeSizeWindow(
+            _selectedSizeItem.SizeLabel,
+            order,
+            items,
+            channels,
+            _settings,
+            null); // TODO: replace null with IOrderRepository once ChangeSizeWindow is updated
+        win.Owner = this;
+        win.ShowDialog();
+
+        // Refresh tree after changes
+        _vm.LoadOrders();
+        UpdateStatusBar();
     }
 
     private void ColorCorrectButton_Click(object sender, RoutedEventArgs e)

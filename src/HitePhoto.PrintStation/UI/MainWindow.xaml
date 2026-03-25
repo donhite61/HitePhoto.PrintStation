@@ -181,6 +181,8 @@
                 <Button x:Name="PrintBtn" Content="Print Selected"
                         Width="120" Margin="0,0,6,0" Background="{DynamicResource ButtonPrintBg}"
                         Click="PrintSelectedButton_Click"/>
+                <Button Content="Change Size" Width="100" Margin="0,0,6,0"
+                        Click="ChangeSizeButton_Click"/>
                 <Button Content="Refresh" Width="80" Margin="0,0,6,0"
                         Click="RefreshButton_Click"/>
                 <Button Content="Open Folder" Width="100" Margin="0,0,6,0"

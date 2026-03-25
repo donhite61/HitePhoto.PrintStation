@@ -86,14 +86,21 @@ public partial class App : Application
         services.AddSingleton<DakisIngestService>();
 
         // Processing (ported from PrintRouter — stateless, reuse instances)
-        services.AddSingleton<Core.Processing.NoritsuMrkWriter>();
-        // ImageProcessor is static — no DI registration needed
+        services.AddSingleton(new Core.Processing.NoritsuMrkWriter(settings.NoritsuOutputRoot));
+        services.AddSingleton<IPrinterWriter>(sp =>
+            new Core.Processing.NoritsuMrkWriterAdapter(
+                sp.GetRequiredService<Core.Processing.NoritsuMrkWriter>()));
+        services.AddSingleton<IPrintService>(sp =>
+            new PrintService(
+                sp.GetRequiredService<IOrderRepository>(),
+                sp.GetRequiredService<IHistoryRepository>(),
+                sp.GetRequiredService<IChannelDecision>(),
+                sp.GetRequiredService<IPrinterWriter>(),
+                settings.NoritsuOutputRoot));
 
         // TODO: wire real implementations when ready
         services.AddSingleton<IEmailSender, StubEmailSender>();
         services.AddSingleton<IPixfizzNotifier, StubPixfizzNotifier>();
-        // services.AddSingleton<IPrinterWriter, NoritsuMrkWriterAdapter>();
-        // services.AddSingleton<IPrintService, PrintService>();
         // services.AddSingleton<ITransferService, TransferService>();
 
         // ViewModel
