@@ -132,6 +132,112 @@ public class OrderRepository : IOrderRepository
         return result != null ? Convert.ToInt32(result) : null;
     }
 
+    public List<OrderItemRecord> GetItems(int orderId)
+    {
+        var items = new List<OrderItemRecord>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, order_id, size_label, media_type, image_filepath,
+                   quantity, is_noritsu, is_printed, image_filename
+            FROM order_items
+            WHERE order_id = @id
+            ORDER BY size_label, media_type
+            """;
+        cmd.Parameters.AddWithValue("@id", orderId);
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            items.Add(new OrderItemRecord(
+                Id: reader.GetInt32(0),
+                OrderId: reader.GetInt32(1),
+                SizeLabel: reader.IsDBNull(2) ? "" : reader.GetString(2),
+                MediaType: reader.IsDBNull(3) ? "" : reader.GetString(3),
+                ImageFilepath: reader.IsDBNull(4) ? "" : reader.GetString(4),
+                Quantity: reader.GetInt32(5),
+                IsNoritsu: reader.GetInt32(6) == 1,
+                IsPrinted: reader.GetInt32(7) == 1,
+                ImageFilename: reader.IsDBNull(8) ? "" : reader.GetString(8)));
+        }
+        return items;
+    }
+
+    public void UpdateItem(int itemId, string sizeLabel, string mediaType,
+        string imageFilename, string imageFilepath, int quantity)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE order_items SET
+                size_label = @size, media_type = @media,
+                image_filename = @fname, image_filepath = @fpath,
+                quantity = @qty, updated_at = datetime('now')
+            WHERE id = @id
+            """;
+        cmd.Parameters.AddWithValue("@size", sizeLabel);
+        cmd.Parameters.AddWithValue("@media", mediaType);
+        cmd.Parameters.AddWithValue("@fname", imageFilename);
+        cmd.Parameters.AddWithValue("@fpath", imageFilepath);
+        cmd.Parameters.AddWithValue("@qty", quantity);
+        cmd.Parameters.AddWithValue("@id", itemId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void InsertItem(int orderId, UnifiedOrderItem item)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO order_items (
+                order_id, size_label, media_type, quantity,
+                image_filename, image_filepath, is_noritsu, options_json
+            ) VALUES (
+                @oid, @size, @media, @qty,
+                @fname, @fpath, @noritsu, @options
+            )
+            """;
+        cmd.Parameters.AddWithValue("@oid", orderId);
+        cmd.Parameters.AddWithValue("@size", item.SizeLabel ?? "");
+        cmd.Parameters.AddWithValue("@media", item.MediaType ?? "");
+        cmd.Parameters.AddWithValue("@qty", item.Quantity);
+        cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
+        cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
+        cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
+        cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
+            ? System.Text.Json.JsonSerializer.Serialize(item.Options)
+            : "[]");
+        cmd.ExecuteNonQuery();
+    }
+
+    public Dictionary<string, (int Id, string FolderPath, string SourceCode)> GetRecentOrders(int storeId, int days)
+    {
+        var cutoff = days > 0 ? DateTime.Now.AddDays(-days) : DateTime.MinValue;
+        var result = new Dictionary<string, (int Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase);
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT o.id, o.external_order_id, o.folder_path, o.source_code
+            FROM orders o
+            WHERE o.pickup_store_id = @storeId
+              AND (@daysBack = 0 OR o.ordered_at >= @cutoff)
+              AND o.is_test = 0
+            """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
+        cmd.Parameters.AddWithValue("@daysBack", days);
+        cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var eid = reader.GetString(1);
+            result[eid] = (
+                reader.GetInt32(0),
+                reader.IsDBNull(2) ? "" : reader.GetString(2),
+                reader.IsDBNull(3) ? "" : reader.GetString(3));
+        }
+        return result;
+    }
+
     public int InsertOrder(UnifiedOrder order, int storeId)
     {
         using var conn = _db.OpenConnection();

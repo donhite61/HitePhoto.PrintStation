@@ -58,7 +58,7 @@ public partial class SettingsWindow : Window
         RefreshIntervalBox.Text = _settings.RefreshIntervalSeconds.ToString();
         StoreIdBox.Text = _settings.StoreId.ToString();
         PollIntervalBox.Text = _settings.PollIntervalSeconds.ToString();
-        DaysToLoadBox.Text = _settings.DaysToLoad.ToString();
+        DaysToLoadBox.Text = _settings.DaysToVerify.ToString();
 
         // Pixfizz
         PixfizzEnabledCheck.IsChecked = _settings.PixfizzEnabled;
@@ -158,7 +158,7 @@ public partial class SettingsWindow : Window
         _settings.RefreshIntervalSeconds = int.TryParse(RefreshIntervalBox.Text.Trim(), out int ri) && ri >= 0 ? ri : 30;
         _settings.StoreId = int.TryParse(StoreIdBox.Text.Trim(), out int sid) && sid > 0 ? sid : _settings.StoreId;
         _settings.PollIntervalSeconds = int.TryParse(PollIntervalBox.Text.Trim(), out int pi) && pi >= 5 ? pi : 30;
-        _settings.DaysToLoad = int.TryParse(DaysToLoadBox.Text.Trim(), out int dtl) && dtl >= 0 ? dtl : 14;
+        _settings.DaysToVerify = int.TryParse(DaysToLoadBox.Text.Trim(), out int dtl) && dtl >= 0 ? dtl : 14;
 
         // Pixfizz
         _settings.PixfizzEnabled = PixfizzEnabledCheck.IsChecked == true;

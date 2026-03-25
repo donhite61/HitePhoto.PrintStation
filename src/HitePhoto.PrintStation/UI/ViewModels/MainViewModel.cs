@@ -1,14 +1,11 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Text.Json;
 using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Decisions;
 using HitePhoto.PrintStation.Core.Ingest;
-using HitePhoto.PrintStation.Core.Models;
 using HitePhoto.PrintStation.Core.Services;
 using HitePhoto.PrintStation.Data;
 using HitePhoto.PrintStation.Data.Repositories;
-using HitePhoto.Shared.Models;
 using Microsoft.Data.Sqlite;
 
 namespace HitePhoto.PrintStation.UI.ViewModels;
@@ -26,9 +23,9 @@ public class MainViewModel : ViewModelBase
     private readonly IHoldService _holdService;
     private readonly IChannelDecision _channelDecision;
     private readonly IFilesNeededDecision _filesNeededDecision;
+    private readonly IOrderVerifier _verifier;
     private readonly PixfizzIngestService _pixfizzIngest;
     private readonly DakisIngestService _dakisIngest;
-    private readonly DakisOrderParser _dakisParser;
     private readonly AppSettings _settings;
 
     // ── Observable collections for tree views ──
@@ -95,9 +92,9 @@ public class MainViewModel : ViewModelBase
         IHoldService holdService,
         IChannelDecision channelDecision,
         IFilesNeededDecision filesNeededDecision,
+        IOrderVerifier verifier,
         PixfizzIngestService pixfizzIngest,
         DakisIngestService dakisIngest,
-        DakisOrderParser dakisParser,
         AppSettings settings)
     {
         _db = db;
@@ -107,32 +104,22 @@ public class MainViewModel : ViewModelBase
         _holdService = holdService;
         _channelDecision = channelDecision;
         _filesNeededDecision = filesNeededDecision;
+        _verifier = verifier;
         _pixfizzIngest = pixfizzIngest;
         _dakisIngest = dakisIngest;
-        _dakisParser = dakisParser;
         _settings = settings;
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  Verify — two lists, reconcile, both should be empty at the end
+    //  Verify — delegates to IOrderVerifier (single source of truth)
     // ══════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Convenience: build both lists from date range and reconcile.
-    /// </summary>
     public void VerifyRecentOrders(int days)
     {
         try
         {
-            var cutoff = days > 0 ? DateTime.Now.AddDays(-days) : DateTime.MinValue;
-
-            var folderList = new Dictionary<string, (string Path, string Source)>(StringComparer.OrdinalIgnoreCase);
-            ScanFoldersIntoList(_settings.OrderOutputPath, "pixfizz", cutoff, folderList);
-            ScanFoldersIntoList(_settings.DakisWatchFolder, "dakis", cutoff, folderList);
-
-            var dbList = LoadDbOrderList(days);
-
-            Verify(folderList, dbList);
+            var result = _verifier.VerifyRecentOrders(days);
+            NeedsRefresh = result.Inserted > 0 || result.Repaired > 0 || result.Errors > 0;
         }
         catch (Exception ex)
         {
@@ -141,376 +128,13 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Load DB list for a date range: order ID → (dbId, folderPath, sourceCode).
-    /// </summary>
-    private Dictionary<string, (int Id, string FolderPath, string SourceCode)> LoadDbOrderList(int days)
-    {
-        var cutoff = days > 0 ? DateTime.Now.AddDays(-days) : DateTime.MinValue;
-        var dbList = new Dictionary<string, (int Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase);
-        using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT o.id, o.external_order_id, o.folder_path, o.source_code
-            FROM orders o
-            WHERE o.pickup_store_id = @storeId
-              AND (@daysBack = 0 OR o.ordered_at >= @cutoff)
-              AND o.is_test = 0
-            """;
-        cmd.Parameters.AddWithValue("@storeId", _settings.StoreId);
-        cmd.Parameters.AddWithValue("@daysBack", days);
-        cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            var eid = reader.GetString(1);
-            dbList[eid] = (
-                reader.GetInt32(0),
-                reader.IsDBNull(2) ? "" : reader.GetString(2),
-                reader.IsDBNull(3) ? "" : reader.GetString(3));
-        }
-        return dbList;
-    }
-
-    /// <summary>
-    /// Reconcile two lists: folders on disk vs orders in SQLite.
-    /// Can be called with full date range (startup) or a single order (on click).
-    /// Both lists should be empty at the end.
-    /// </summary>
-    public void Verify(
-        Dictionary<string, (string Path, string Source)> folderList,
-        Dictionary<string, (int Id, string FolderPath, string SourceCode)> dbList)
-    {
-        int inserted = 0, repaired = 0, errors = 0;
-        int matchCount = 0;
-
-        using var conn = _db.OpenConnection();
-
-        // ── Reconcile: orders in BOTH lists ──
-        var matched = folderList.Keys.Intersect(dbList.Keys, StringComparer.OrdinalIgnoreCase).ToList();
-        foreach (var orderId in matched)
-        {
-            var folder = folderList[orderId];
-            var db = dbList[orderId];
-
-            // Verify files on disk using OrderHelpers.VerifyFile (the ONE verification function)
-            Core.Models.OrderSource source;
-            try { source = Core.Models.OrderSourceExtensions.FromCode(db.SourceCode); }
-            catch { folderList.Remove(orderId); dbList.Remove(orderId); matchCount++; continue; }
-
-            bool filesRequired = _filesNeededDecision.AreFilesRequired(source, _settings.StoreId, _settings.StoreId);
-
-            if (filesRequired)
-            {
-                using var itemCmd = conn.CreateCommand();
-                itemCmd.CommandText = "SELECT id, image_filepath, image_filename FROM order_items WHERE order_id = @oid";
-                itemCmd.Parameters.AddWithValue("@oid", db.Id);
-
-                var itemIssues = new List<string>();
-                using (var itemReader = itemCmd.ExecuteReader())
-                {
-                    while (itemReader.Read())
-                    {
-                        var filepath = itemReader.IsDBNull(1) ? "" : itemReader.GetString(1);
-                        if (string.IsNullOrWhiteSpace(filepath)) continue;
-
-                        var error = OrderHelpers.VerifyFile(filepath);
-                        if (error != null)
-                        {
-                            var filename = itemReader.IsDBNull(2) ? Path.GetFileName(filepath) : itemReader.GetString(2);
-                            itemIssues.Add($"{filename}: {error}");
-                        }
-                    }
-                }
-
-                // For Pixfizz: reread TXT and compare with DB (TXT is source of truth)
-                if (source == Core.Models.OrderSource.Pixfizz)
-                {
-                    var txtPath = Path.Combine(folder.Path, "darkroom_ticket.txt");
-                    if (File.Exists(txtPath))
-                    {
-                        var repairResult = RepairFromTxt(conn, db.Id, folder.Path, txtPath);
-                        if (repairResult > 0) repaired += repairResult;
-                    }
-                }
-
-                if (itemIssues.Count > 0)
-                {
-                    var note = $"Verify: {itemIssues.Count} file issue(s) — {string.Join("; ", itemIssues.Take(5))}";
-                    _history.AddNote(db.Id, note, "system");
-                    repaired += itemIssues.Count;
-                }
-            }
-
-            // Reconciled — remove from both lists
-            folderList.Remove(orderId);
-            dbList.Remove(orderId);
-            matchCount++;
-        }
-
-        // ── Leftover in folder list: on disk but not in DB → insert ──
-        foreach (var kvp in folderList)
-        {
-            try
-            {
-                if (kvp.Value.Source == "pixfizz")
-                    InsertPixfizzFromDisk(kvp.Value.Path);
-                else
-                    InsertDakisFromDisk(kvp.Key, kvp.Value.Path);
-                inserted++;
-            }
-            catch (Exception ex)
-            {
-                AppLog.Info($"Verify insert skip {kvp.Key}: {ex.Message}");
-                errors++;
-            }
-        }
-
-        // ── Leftover in DB list: in DB but not on disk → error state ──
-        foreach (var kvp in dbList)
-        {
-            _history.AddNote(kvp.Value.Id, "Verify: order folder not found on disk", "system");
-            errors++;
-        }
-
-        NeedsRefresh = inserted > 0 || repaired > 0 || errors > 0;
-        AppLog.Info($"Verify complete: {matchCount} matched, {inserted} inserted, {repaired} repaired, {errors} errors");
-    }
-
-    /// <summary>
     /// Verify a single order — called when operator clicks an order in the tree.
     /// </summary>
     public void VerifyOrder(OrderTreeItem order)
     {
-        var folderList = new Dictionary<string, (string Path, string Source)>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(order.FolderPath))
-            folderList[order.ExternalOrderId] = (order.FolderPath, order.SourceCode);
-
-        var dbList = new Dictionary<string, (int Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase)
-        {
-            [order.ExternalOrderId] = (order.DbId, order.FolderPath, order.SourceCode)
-        };
-
-        Verify(folderList, dbList);
-    }
-
-    // ── TXT-vs-DB compare-and-repair (TXT is source of truth) ──
-
-    /// <summary>
-    /// Reread darkroom_ticket.txt, compare items against DB, overwrite DB if mismatch.
-    /// Never overwrites messages or history. Adds "repaired at" note.
-    /// Returns number of repairs made.
-    /// </summary>
-    private int RepairFromTxt(SqliteConnection conn, int dbOrderId, string folderPath, string txtPath)
-    {
-        try
-        {
-            var txtContent = File.ReadAllText(txtPath);
-
-            // Build local file index for path resolution
-            var artworkDir = Path.Combine(folderPath, "artwork");
-            var localFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (Directory.Exists(artworkDir))
-                foreach (var f in Directory.GetFiles(artworkDir, "*.jpg"))
-                    localFiles[Path.GetFileName(f)] = f;
-
-            var parsed = HitePhoto.Shared.Parsers.PixfizzTxtParser.ParseContent(txtContent, ftpPath =>
-            {
-                var fname = Path.GetFileName(ftpPath);
-                return localFiles.TryGetValue(fname, out var local) ? local : ftpPath;
-            });
-            if (parsed == null) return 0;
-
-            var txtItems = TxtItemConverter.ToUnifiedItems(parsed);
-
-            // Load current DB items for this order
-            var dbItems = new List<(int Id, string SizeLabel, string MediaType, string ImageFilename, string ImageFilepath, int Quantity)>();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = "SELECT id, size_label, media_type, image_filename, image_filepath, quantity FROM order_items WHERE order_id = @oid";
-                cmd.Parameters.AddWithValue("@oid", dbOrderId);
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    dbItems.Add((
-                        reader.GetInt32(0),
-                        reader.IsDBNull(1) ? "" : reader.GetString(1),
-                        reader.IsDBNull(2) ? "" : reader.GetString(2),
-                        reader.IsDBNull(3) ? "" : reader.GetString(3),
-                        reader.IsDBNull(4) ? "" : reader.GetString(4),
-                        reader.GetInt32(5)));
-                }
-            }
-
-            // Compare: check if item counts match and each TXT item has a DB match
-            int repairs = 0;
-            var unmatchedTxt = new List<UnifiedOrderItem>(txtItems);
-
-            foreach (var dbItem in dbItems)
-            {
-                var match = unmatchedTxt.FirstOrDefault(t =>
-                    string.Equals(t.ImageFilename, dbItem.ImageFilename, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(t.SizeLabel, dbItem.SizeLabel, StringComparison.OrdinalIgnoreCase));
-
-                if (match != null)
-                {
-                    unmatchedTxt.Remove(match);
-
-                    // Check if DB values match TXT — repair if not
-                    bool needsRepair = false;
-                    if (!string.Equals(match.MediaType, dbItem.MediaType, StringComparison.OrdinalIgnoreCase)) needsRepair = true;
-                    if (match.Quantity != dbItem.Quantity) needsRepair = true;
-                    if (!string.Equals(match.ImageFilepath, dbItem.ImageFilepath, StringComparison.OrdinalIgnoreCase)) needsRepair = true;
-
-                    if (needsRepair)
-                    {
-                        using var updateCmd = conn.CreateCommand();
-                        updateCmd.CommandText = """
-                            UPDATE order_items SET
-                                size_label = @size, media_type = @media,
-                                image_filename = @fname, image_filepath = @fpath,
-                                quantity = @qty, updated_at = datetime('now')
-                            WHERE id = @id
-                            """;
-                        updateCmd.Parameters.AddWithValue("@size", match.SizeLabel ?? "");
-                        updateCmd.Parameters.AddWithValue("@media", match.MediaType ?? "");
-                        updateCmd.Parameters.AddWithValue("@fname", match.ImageFilename ?? "");
-                        updateCmd.Parameters.AddWithValue("@fpath", match.ImageFilepath ?? "");
-                        updateCmd.Parameters.AddWithValue("@qty", match.Quantity);
-                        updateCmd.Parameters.AddWithValue("@id", dbItem.Id);
-                        updateCmd.ExecuteNonQuery();
-                        repairs++;
-                    }
-                }
-            }
-
-            // TXT items not in DB — insert them
-            foreach (var missing in unmatchedTxt)
-            {
-                using var insertCmd = conn.CreateCommand();
-                insertCmd.CommandText = """
-                    INSERT INTO order_items (order_id, size_label, media_type, quantity,
-                        image_filename, image_filepath, is_noritsu, created_at, updated_at)
-                    VALUES (@oid, @size, @media, @qty, @fname, @fpath, @noritsu, datetime('now'), datetime('now'))
-                    """;
-                insertCmd.Parameters.AddWithValue("@oid", dbOrderId);
-                insertCmd.Parameters.AddWithValue("@size", missing.SizeLabel ?? "");
-                insertCmd.Parameters.AddWithValue("@media", missing.MediaType ?? "");
-                insertCmd.Parameters.AddWithValue("@qty", missing.Quantity);
-                insertCmd.Parameters.AddWithValue("@fname", missing.ImageFilename ?? "");
-                insertCmd.Parameters.AddWithValue("@fpath", missing.ImageFilepath ?? "");
-                insertCmd.Parameters.AddWithValue("@noritsu", missing.IsNoritsu ? 1 : 0);
-                insertCmd.ExecuteNonQuery();
-                repairs++;
-            }
-
-            if (repairs > 0)
-                _history.AddNote(dbOrderId, $"Repaired at {DateTime.Now:yyyy-MM-dd HH:mm} — {repairs} item(s) updated from darkroom_ticket.txt", "system");
-
-            return repairs;
-        }
-        catch (Exception ex)
-        {
-            AppLog.Info($"TXT repair failed for order {dbOrderId}: {ex.Message}");
-            return 0;
-        }
-    }
-
-    // ── Verify helpers ──
-
-    private static void ScanFoldersIntoList(string root, string source, DateTime cutoff,
-        Dictionary<string, (string Path, string Source)> list)
-    {
-        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return;
-
-        foreach (var dir in Directory.GetDirectories(root))
-        {
-            // Skip non-order folders (Archived, Artwork, etc.)
-            bool hasOrderFile = source == "pixfizz"
-                ? File.Exists(Path.Combine(dir, "darkroom_ticket.txt"))
-                : File.Exists(Path.Combine(dir, "order.yml"));
-            if (!hasOrderFile) continue;
-
-            if (cutoff > DateTime.MinValue && new DirectoryInfo(dir).LastWriteTime < cutoff) continue;
-
-            var folderName = Path.GetFileName(dir);
-            var orderId = source == "dakis" && folderName.StartsWith("order ", StringComparison.OrdinalIgnoreCase)
-                ? folderName[6..].Trim()
-                : folderName;
-
-            // For Pixfizz: order ID comes from TXT, but folder name is the short ID
-            // Read the TXT to get the real order ID
-            if (source == "pixfizz")
-            {
-                var txtPath = Path.Combine(dir, "darkroom_ticket.txt");
-                try
-                {
-                    foreach (var line in File.ReadLines(txtPath))
-                    {
-                        if (line.StartsWith("ExtOrderNum=", StringComparison.OrdinalIgnoreCase))
-                        {
-                            orderId = line[12..].Trim();
-                            break;
-                        }
-                        if (line.StartsWith("Orderid=", StringComparison.OrdinalIgnoreCase))
-                        {
-                            orderId = line[8..].Trim();
-                            break;
-                        }
-                    }
-                }
-                catch { /* use folder name as fallback */ }
-            }
-
-            list.TryAdd(orderId, (dir, source));
-        }
-    }
-
-    private void InsertPixfizzFromDisk(string dir)
-    {
-        var txtPath = Path.Combine(dir, "darkroom_ticket.txt");
-        var txtContent = File.ReadAllText(txtPath);
-
-        // Build local file index for path resolution
-        var artworkDir = Path.Combine(dir, "artwork");
-        var localFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (Directory.Exists(artworkDir))
-            foreach (var f in Directory.GetFiles(artworkDir, "*.jpg"))
-                localFiles[Path.GetFileName(f)] = f;
-
-        var parsed = HitePhoto.Shared.Parsers.PixfizzTxtParser.ParseContent(txtContent, ftpPath =>
-        {
-            var fname = Path.GetFileName(ftpPath);
-            return localFiles.TryGetValue(fname, out var local) ? local : ftpPath;
-        });
-        if (parsed == null) throw new InvalidOperationException("TXT parse returned null");
-
-        var items = TxtItemConverter.ToUnifiedItems(parsed);
-
-        var order = new UnifiedOrder
-        {
-            ExternalOrderId = parsed.OrderId ?? Path.GetFileName(dir),
-            ExternalSource = "pixfizz",
-            CustomerFirstName = parsed.FirstName,
-            CustomerLastName = parsed.LastName,
-            CustomerEmail = parsed.Email,
-            OrderedAt = DateTime.TryParse(parsed.ReceivedAt, out var dt) ? dt : DateTime.Now,
-            Notes = parsed.Notes,
-            FolderPath = dir,
-            Location = parsed.Location,
-            DownloadStatus = "complete",
-            Items = items
-        };
-
-        _orders.InsertOrder(order, _settings.StoreId);
-    }
-
-    private void InsertDakisFromDisk(string orderId, string dir)
-    {
-        var ymlContent = File.ReadAllText(Path.Combine(dir, "order.yml"));
-        var raw = new RawOrder(orderId, "dakis", ymlContent,
-            new Dictionary<string, string> { ["folder_path"] = dir });
-        var order = _dakisParser.Parse(raw);
-        _orders.InsertOrder(order, _settings.StoreId);
+        var result = _verifier.VerifyOrder(
+            order.ExternalOrderId, order.FolderPath, order.SourceCode, order.DbId);
+        NeedsRefresh = result.Repaired > 0 || result.Errors > 0;
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -561,12 +185,9 @@ public class MainViewModel : ViewModelBase
             WHERE o.pickup_store_id = @storeId
               AND o.status_code IN ({placeholders})
               AND o.is_test = 0
-              AND (@daysBack = 0 OR o.ordered_at >= @cutoff)
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", _settings.StoreId);
-        cmd.Parameters.AddWithValue("@daysBack", _settings.DaysToLoad);
-        cmd.Parameters.AddWithValue("@cutoff", DateTime.Now.AddDays(-Math.Max(_settings.DaysToLoad, 1)).ToString("yyyy-MM-dd"));
         for (int i = 0; i < statusCodes.Length; i++)
             cmd.Parameters.AddWithValue($"@s{i}", statusCodes[i]);
 
@@ -849,7 +470,7 @@ public class MainViewModel : ViewModelBase
     public async Task RunPixfizzPollAsync(CancellationToken ct)
     {
         await _pixfizzIngest.PollAsync(ct);
-        LoadOrders(); // Refresh tree after new orders ingested
+        LoadOrders();
     }
 
     public void RunDakisScan()
@@ -857,6 +478,8 @@ public class MainViewModel : ViewModelBase
         _dakisIngest.ScanFolder();
         LoadOrders();
     }
+
+    public void StartDakisWatcher() => _dakisIngest.StartWatching();
 }
 
 // ── Internal data records (not exposed outside ViewModel) ──

@@ -64,6 +64,7 @@ public partial class App : Application
         services.AddSingleton<IChannelDecision, ChannelDecision>();
 
         // Services
+        services.AddSingleton<IOrderVerifier, OrderVerifier>();
         services.AddSingleton<IHoldService, HoldService>();
         services.AddSingleton<INotificationService>(sp => new NotificationService(
             sp.GetRequiredService<IOrderRepository>(),

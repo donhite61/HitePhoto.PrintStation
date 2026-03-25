@@ -85,12 +85,11 @@ public partial class MainWindow : Window
             catch (Exception ex) { AlertCollector.Error(AlertCategory.Network, "Pixfizz poll failed", ex: ex); }
         };
 
-        // Dakis scan timer — run verify to pick up new folders, don't rebuild tree directly
-        _dakisScanTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        // Dakis scan timer — fallback in case FileSystemWatcher misses an event
+        _dakisScanTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
         _dakisScanTimer.Tick += (_, _) =>
         {
-            Task.Run(() => _vm.VerifyRecentOrders(1)); // just check last 1 day for new arrivals
-            // NeedsRefresh will be set if new orders found; refresh timer picks it up
+            Task.Run(() => _vm.RunDakisScan());
         };
 
         Loaded += MainWindow_Loaded;
@@ -114,7 +113,7 @@ public partial class MainWindow : Window
         // Step 8: Kick off background verify (discovers missing orders + validates existing)
         Task.Run(() =>
         {
-            _vm.VerifyRecentOrders(_settings.DaysToLoad);
+            _vm.VerifyRecentOrders(_settings.DaysToVerify);
 
             // If verify inserted/repaired anything, refresh tree on UI thread
             if (_vm.NeedsRefresh)
@@ -134,7 +133,10 @@ public partial class MainWindow : Window
                     _pixfizzPollTimer.Start();
 
                 if (_settings.DakisEnabled && !string.IsNullOrWhiteSpace(_settings.DakisWatchFolder))
-                    _dakisScanTimer.Start();
+                {
+                    _vm.StartDakisWatcher();
+                    _dakisScanTimer.Start(); // fallback scan
+                }
             });
         });
     }

@@ -1,4 +1,5 @@
 using System.IO;
+using HitePhoto.PrintStation.Core.Services;
 using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Ingest;
@@ -19,6 +20,7 @@ public class PixfizzIngestService
     private readonly PixfizzArtworkDownloader _downloader;
     private readonly PixfizzOrderParser _parser;
     private readonly OhdReceivedPusher _receivedPusher;
+    private readonly IOrderVerifier _verifier;
     private readonly IOrderRepository _orders;
     private readonly IHistoryRepository _history;
     private readonly AppSettings _settings;
@@ -28,6 +30,7 @@ public class PixfizzIngestService
         PixfizzArtworkDownloader downloader,
         PixfizzOrderParser parser,
         OhdReceivedPusher receivedPusher,
+        IOrderVerifier verifier,
         IOrderRepository orders,
         IHistoryRepository history,
         AppSettings settings)
@@ -36,6 +39,7 @@ public class PixfizzIngestService
         _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
         _receivedPusher = receivedPusher ?? throw new ArgumentNullException(nameof(receivedPusher));
+        _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _history = history ?? throw new ArgumentNullException(nameof(history));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -112,38 +116,12 @@ public class PixfizzIngestService
         WriteToSqlite(result.Order);
     }
 
-    /// <summary>
-    /// Verify an existing order on disk. Reread TXT and compare to database.
-    /// If they don't match, overwrite database (except history).
-    /// </summary>
-    private async Task VerifyAndRepairAsync(string orderNumber, string folderPath, CancellationToken ct)
+    private Task VerifyAndRepairAsync(string orderNumber, string folderPath, CancellationToken ct)
     {
-        var txtPath = Path.Combine(folderPath, "darkroom_ticket.txt");
-        if (!File.Exists(txtPath)) return;
+        var existingId = _orders.FindOrderId(orderNumber, _settings.StoreId);
+        if (existingId == null) return Task.CompletedTask;
 
-        // Reread TXT — the source of truth
-        var txtContent = await File.ReadAllTextAsync(txtPath, ct);
-        var txtResult = HitePhoto.Shared.Parsers.PixfizzTxtParser.ParseContent(txtContent, path => path);
-        if (txtResult == null) return;
-
-        var txtItems = TxtItemConverter.ToUnifiedItems(txtResult);
-
-        // Verify all files on disk
-        foreach (var item in txtItems)
-        {
-            if (string.IsNullOrEmpty(item.ImageFilepath)) continue;
-            var error = OrderHelpers.VerifyFile(item.ImageFilepath);
-            if (error != null)
-            {
-                AlertCollector.Warn(AlertCategory.DataQuality,
-                    $"File verification failed during repair check: {item.ImageFilename}",
-                    orderId: orderNumber,
-                    detail: error);
-            }
-        }
-
-        // TODO: compare TXT data against SQLite, overwrite if mismatch
-        // Don't overwrite history. Add "Repaired at" note if changes made.
+        return Task.Run(() => _verifier.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId.Value), ct);
     }
 
     private void WriteToSqlite(UnifiedOrder order)
@@ -155,14 +133,15 @@ public class PixfizzIngestService
             var orderId = _orders.InsertOrder(order, _settings.StoreId);
             _history.AddNote(orderId, $"Order received at {DateTime.Now:g}");
             AppLog.Info($"Inserted Pixfizz order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
+
+            // Verify immediately after insert — same check every order gets
+            var folderPath = order.FolderPath ?? IngestConstants.GetOrderFolderPath(_settings.OrderOutputPath, order.ExternalOrderId);
+            _verifier.VerifyOrder(order.ExternalOrderId, folderPath, "pixfizz", orderId);
         }
         else
         {
-            // TODO: compare TXT data against existing DB record
-            // Overwrite source fields (customer, items, total) if they don't match TXT
-            // Never overwrite: history, hold state, printed state
-            // Add "Repaired at {timestamp}" note if changes were made
-            AppLog.Info($"Order {order.ExternalOrderId} already exists (id={existingId}) — verify/repair not yet implemented");
+            var folderPath = order.FolderPath ?? IngestConstants.GetOrderFolderPath(_settings.OrderOutputPath, order.ExternalOrderId);
+            _verifier.VerifyOrder(order.ExternalOrderId, folderPath, "pixfizz", existingId.Value);
         }
     }
 

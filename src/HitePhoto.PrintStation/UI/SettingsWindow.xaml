@@ -63,7 +63,7 @@
 
                         <TextBlock Text="Data" Foreground="{DynamicResource TextHeading}"
                                    FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                        <Label Content="Days to load (0 = all)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Label Content="Days to verify (0 = all)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
                         <Grid Margin="0,0,0,14">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition/></Grid.ColumnDefinitions>
                             <TextBox x:Name="DaysToLoadBox" Grid.Column="0"/>
