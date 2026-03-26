@@ -139,7 +139,8 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, order_id, size_label, media_type, image_filepath,
-                   quantity, is_noritsu, is_printed, image_filename
+                   quantity, is_noritsu, is_printed, image_filename,
+                   category, sub_category
             FROM order_items
             WHERE order_id = @id
             ORDER BY size_label, media_type
@@ -158,13 +159,16 @@ public class OrderRepository : IOrderRepository
                 Quantity: reader.GetInt32(5),
                 IsNoritsu: reader.GetInt32(6) == 1,
                 IsPrinted: reader.GetInt32(7) == 1,
-                ImageFilename: reader.IsDBNull(8) ? "" : reader.GetString(8)));
+                ImageFilename: reader.IsDBNull(8) ? "" : reader.GetString(8),
+                Category: reader.IsDBNull(9) ? "" : reader.GetString(9),
+                SubCategory: reader.IsDBNull(10) ? "" : reader.GetString(10)));
         }
         return items;
     }
 
     public void UpdateItem(int itemId, string sizeLabel, string mediaType,
-        string imageFilename, string imageFilepath, int quantity)
+        string imageFilename, string imageFilepath, int quantity,
+        bool isNoritsu, string category, string subCategory)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -172,7 +176,9 @@ public class OrderRepository : IOrderRepository
             UPDATE order_items SET
                 size_label = @size, media_type = @media,
                 image_filename = @fname, image_filepath = @fpath,
-                quantity = @qty, updated_at = datetime('now')
+                quantity = @qty, is_noritsu = @noritsu,
+                category = @cat, sub_category = @subcat,
+                updated_at = datetime('now')
             WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@size", sizeLabel);
@@ -180,7 +186,50 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@fname", imageFilename);
         cmd.Parameters.AddWithValue("@fpath", imageFilepath);
         cmd.Parameters.AddWithValue("@qty", quantity);
+        cmd.Parameters.AddWithValue("@noritsu", isNoritsu ? 1 : 0);
+        cmd.Parameters.AddWithValue("@cat", category);
+        cmd.Parameters.AddWithValue("@subcat", subCategory);
         cmd.Parameters.AddWithValue("@id", itemId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void InsertItemOptions(int orderItemId, List<HitePhoto.Shared.Parsers.OrderItemOption> options)
+    {
+        if (options.Count == 0) return;
+        using var conn = _db.OpenConnection();
+        foreach (var opt in options)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO order_item_options (order_item_id, option_key, option_value)
+                VALUES (@itemId, @key, @value)
+                """;
+            cmd.Parameters.AddWithValue("@itemId", orderItemId);
+            cmd.Parameters.AddWithValue("@key", opt.Key);
+            cmd.Parameters.AddWithValue("@value", opt.Value);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public List<HitePhoto.Shared.Parsers.OrderItemOption> GetItemOptions(int orderItemId)
+    {
+        var options = new List<HitePhoto.Shared.Parsers.OrderItemOption>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT option_key, option_value FROM order_item_options WHERE order_item_id = @id";
+        cmd.Parameters.AddWithValue("@id", orderItemId);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            options.Add(new HitePhoto.Shared.Parsers.OrderItemOption(reader.GetString(0), reader.GetString(1)));
+        return options;
+    }
+
+    public void DeleteItemOptions(int orderItemId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM order_item_options WHERE order_item_id = @id";
+        cmd.Parameters.AddWithValue("@id", orderItemId);
         cmd.ExecuteNonQuery();
     }
 
@@ -190,16 +239,18 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO order_items (
-                order_id, size_label, media_type, quantity,
-                image_filename, image_filepath, is_noritsu, options_json
+                order_id, size_label, media_type, category, sub_category,
+                quantity, image_filename, image_filepath, is_noritsu, options_json
             ) VALUES (
-                @oid, @size, @media, @qty,
-                @fname, @fpath, @noritsu, @options
+                @oid, @size, @media, @cat, @subcat,
+                @qty, @fname, @fpath, @noritsu, @options
             )
             """;
         cmd.Parameters.AddWithValue("@oid", orderId);
         cmd.Parameters.AddWithValue("@size", item.SizeLabel ?? "");
         cmd.Parameters.AddWithValue("@media", item.MediaType ?? "");
+        cmd.Parameters.AddWithValue("@cat", item.Options.FirstOrDefault(o => o.Key == "Category")?.Value ?? "");
+        cmd.Parameters.AddWithValue("@subcat", item.Options.FirstOrDefault(o => o.Key == "SubCategory")?.Value ?? "");
         cmd.Parameters.AddWithValue("@qty", item.Quantity);
         cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
         cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
@@ -289,18 +340,20 @@ public class OrderRepository : IOrderRepository
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO order_items (
-                    order_id, size_label, media_type, quantity,
-                    image_filename, image_filepath, original_image_filepath,
+                    order_id, size_label, media_type, category, sub_category,
+                    quantity, image_filename, image_filepath, original_image_filepath,
                     is_noritsu, options_json
                 ) VALUES (
-                    @oid, @size, @media, @qty,
-                    @fname, @fpath, @orig,
+                    @oid, @size, @media, @cat, @subcat,
+                    @qty, @fname, @fpath, @orig,
                     @noritsu, @options
                 )
                 """;
             cmd.Parameters.AddWithValue("@oid", orderId);
             cmd.Parameters.AddWithValue("@size", item.SizeLabel ?? "");
             cmd.Parameters.AddWithValue("@media", item.MediaType ?? "");
+            cmd.Parameters.AddWithValue("@cat", item.Options.FirstOrDefault(o => o.Key == "Category")?.Value ?? "");
+            cmd.Parameters.AddWithValue("@subcat", item.Options.FirstOrDefault(o => o.Key == "SubCategory")?.Value ?? "");
             cmd.Parameters.AddWithValue("@qty", item.Quantity);
             cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
             cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");

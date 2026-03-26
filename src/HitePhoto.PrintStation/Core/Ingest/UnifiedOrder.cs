@@ -38,6 +38,9 @@ public record UnifiedOrder
     public string? BillingStoreId { get; init; }
     public string? CurrentStoreId { get; init; }
 
+    // Channel (Online/Kiosk) — from Dakis shopping cart
+    public string? Channel { get; init; }
+
     // Download status
     public string DownloadStatus { get; init; } = "pending";
     public List<string> DownloadErrors { get; init; } = [];

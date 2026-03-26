@@ -250,13 +250,16 @@ public class OrderVerifier : IOrderVerifier
                 if (!string.Equals(match.MediaType, dbItem.MediaType, StringComparison.OrdinalIgnoreCase)) needsRepair = true;
                 if (match.Quantity != dbItem.Quantity) needsRepair = true;
                 if (!string.Equals(match.ImageFilepath, dbItem.ImageFilepath, StringComparison.OrdinalIgnoreCase)) needsRepair = true;
+                if (match.IsNoritsu != dbItem.IsNoritsu) needsRepair = true;
 
                 if (needsRepair)
                 {
+                    var matchCategory = match.Options.FirstOrDefault(o => o.Key == "Category")?.Value ?? "";
+                    var matchSubCategory = match.Options.FirstOrDefault(o => o.Key == "SubCategory")?.Value ?? "";
                     _orders.UpdateItem(dbItem.Id,
                         match.SizeLabel ?? "", match.MediaType ?? "",
                         match.ImageFilename ?? "", match.ImageFilepath ?? "",
-                        match.Quantity);
+                        match.Quantity, match.IsNoritsu, matchCategory, matchSubCategory);
                     repairs++;
                 }
             }

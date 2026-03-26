@@ -26,11 +26,21 @@ public interface IOrderRepository
     List<OrderItemRecord> GetItems(int orderId);
 
     /// <summary>
-    /// Update a single item's source-of-truth fields (size, media, filename, filepath, quantity).
+    /// Update a single item's source-of-truth fields.
     /// Never touches hold, printed, or history fields.
     /// </summary>
     void UpdateItem(int itemId, string sizeLabel, string mediaType,
-        string imageFilename, string imageFilepath, int quantity);
+        string imageFilename, string imageFilepath, int quantity,
+        bool isNoritsu, string category, string subCategory);
+
+    /// <summary>Insert options for an order item.</summary>
+    void InsertItemOptions(int orderItemId, List<HitePhoto.Shared.Parsers.OrderItemOption> options);
+
+    /// <summary>Get all options for an order item.</summary>
+    List<HitePhoto.Shared.Parsers.OrderItemOption> GetItemOptions(int orderItemId);
+
+    /// <summary>Delete all options for an order item (for repair/replace).</summary>
+    void DeleteItemOptions(int orderItemId);
 
     /// <summary>
     /// Insert a single item into an existing order.
@@ -69,4 +79,6 @@ public record OrderItemRecord(
     int Quantity,
     bool IsNoritsu,
     bool IsPrinted,
-    string ImageFilename = "");
+    string ImageFilename = "",
+    string Category = "",
+    string SubCategory = "");

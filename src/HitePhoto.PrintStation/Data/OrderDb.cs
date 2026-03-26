@@ -226,6 +226,8 @@ public class OrderDb
             order_id                INTEGER NOT NULL REFERENCES orders(id),
             size_label              TEXT NOT NULL,
             media_type              TEXT DEFAULT '',
+            category                TEXT DEFAULT '',
+            sub_category            TEXT DEFAULT '',
             quantity                INTEGER NOT NULL DEFAULT 1,
             image_filename          TEXT DEFAULT '',
             image_filepath          TEXT DEFAULT '',
@@ -246,6 +248,14 @@ public class OrderDb
             files_expected          INTEGER DEFAULT NULL,
             created_at              TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS order_item_options (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_item_id INTEGER NOT NULL REFERENCES order_items(id),
+            option_key    TEXT NOT NULL,
+            option_value  TEXT NOT NULL,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
         );
         """;
 
@@ -438,5 +448,22 @@ public class OrderDb
             SET external_order_id = LTRIM(SUBSTR(external_order_id, 6))
             WHERE LOWER(external_order_id) LIKE 'order%';
             """);
+
+        // Migration 003: Add category/sub_category columns to order_items (for gift items)
+        AddColumnIfMissing(conn, "order_items", "category", "TEXT DEFAULT ''");
+        AddColumnIfMissing(conn, "order_items", "sub_category", "TEXT DEFAULT ''");
+    }
+
+    private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({table})";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+        Execute(conn, $"ALTER TABLE {table} ADD COLUMN {column} {definition}");
     }
 }

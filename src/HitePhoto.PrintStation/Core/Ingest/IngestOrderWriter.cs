@@ -109,10 +109,16 @@ public class IngestOrderWriter
                 errors.Add("SizeLabel is empty");
             if (item.Quantity <= 0)
                 errors.Add($"Quantity is {item.Quantity}");
-            if (string.IsNullOrWhiteSpace(item.ImageFilename))
-                errors.Add("ImageFilename is empty");
-            if (string.IsNullOrWhiteSpace(item.ImageFilepath))
-                errors.Add("ImageFilepath is empty");
+
+            // Noritsu (print) items must have image files.
+            // Non-Noritsu (gift) items may not have rendered files on disk yet.
+            if (item.IsNoritsu)
+            {
+                if (string.IsNullOrWhiteSpace(item.ImageFilename))
+                    errors.Add("ImageFilename is empty");
+                if (string.IsNullOrWhiteSpace(item.ImageFilepath))
+                    errors.Add("ImageFilepath is empty");
+            }
 
             if (errors.Count > 0)
             {
@@ -121,9 +127,11 @@ public class IngestOrderWriter
                     $"{sourceCode} order {order.ExternalOrderId} item [{i}] failed validation",
                     orderId: order.ExternalOrderId,
                     detail: $"Attempted: validate item before SQLite write. " +
-                            $"Expected: SizeLabel, Quantity>0, ImageFilename, ImageFilepath all populated. " +
+                            $"Expected: SizeLabel, Quantity>0" +
+                            (item.IsNoritsu ? ", ImageFilename, ImageFilepath" : "") + " populated. " +
                             $"Found: {errorList}. " +
-                            $"Context: item {i} of {order.Items.Count}, file '{item.ImageFilename ?? "(null)"}'. " +
+                            $"Context: item {i} of {order.Items.Count}, IsNoritsu={item.IsNoritsu}, " +
+                            $"file '{item.ImageFilename ?? "(null)"}'. " +
                             $"State: entire order rejected — no partial inserts.");
                 throw new InvalidOperationException(
                     $"{sourceCode} order {order.ExternalOrderId} item [{i}] failed validation: {errorList}");

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using HitePhoto.Shared.Parsers;
 using YamlDotNet.Serialization;
 
 namespace HitePhoto.PrintStation.Core.Ingest;
@@ -7,18 +8,33 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 /// <summary>
 /// Parses Dakis order.yml + folder structure into UnifiedOrder format.
 /// Uses YamlDotNet for proper YAML deserialization.
-/// All customer info comes from order.yml — no customer.txt needed.
+/// Order type detection: :print_formats: → print, :photo_gift_orders: → gift.
+/// Shopping cart is NOT used for item data (it's a billing artifact shared across split orders).
 /// </summary>
 public class DakisOrderParser
 {
     private static readonly IDeserializer s_yaml = new DeserializerBuilder().Build();
 
+    // ── Main entry point ─────────────────────────────────────────────────
+
     public UnifiedOrder Parse(RawOrder raw)
     {
-        var ymlLines = raw.RawData.Split('\n');
-        var info = ReadOrderInfoFromLines(ymlLines, raw.ExternalOrderId);
+        var yaml = raw.RawData;
+        var root = s_yaml.Deserialize<object>(yaml);
+        if (root is null)
+        {
+            AlertCollector.Error(AlertCategory.Parsing,
+                "Dakis order.yml deserialized to null",
+                orderId: raw.ExternalOrderId,
+                detail: $"Attempted: deserialize order.yml. Expected: valid YAML root object. " +
+                        $"Found: null. Context: RawOrder '{raw.ExternalOrderId}'. " +
+                        $"State: cannot parse without YAML root.");
+            throw new InvalidOperationException($"Dakis order.yml deserialized to null for '{raw.ExternalOrderId}'");
+        }
 
-        // Order ID from YML is source of truth — missing is an error
+        var info = ReadOrderHeader(root, raw.ExternalOrderId);
+
+        // Validate order ID — source of truth from YML
         if (string.IsNullOrWhiteSpace(info.OrderId))
         {
             AlertCollector.Error(AlertCategory.DataQuality,
@@ -29,210 +45,87 @@ public class DakisOrderParser
                         $"State: order cannot be ingested without an ID.");
             throw new InvalidOperationException($"Dakis order.yml missing :id: field in '{raw.Metadata?.GetValueOrDefault("folder_path")}'");
         }
-        var orderId = info.OrderId;
-        var customerFirstName = info.CustFirst;
-        var customerLastName = info.CustLast;
+
         var folderPath = raw.Metadata?.GetValueOrDefault("folder_path");
 
-        var items = new List<UnifiedOrderItem>();
-
-        // Invoice-only: another store produces this order, skip image scanning
+        // Invoice-only: another store produces this order, we just hold the header
         if (info.IsInvoiceOnly)
-        {
-            return new UnifiedOrder
-            {
-                ExternalOrderId = orderId,
-                ExternalSource = "dakis",
-                OrderedAt = info.OrderedAt,
-                CustomerFirstName = customerFirstName,
-                CustomerLastName = customerLastName,
-                CustomerEmail = info.Email,
-                CustomerPhone = info.Phone,
-                OrderTotal = info.ChargedPrice > 0 ? info.ChargedPrice : null,
-                Paid = info.BeenPaid,
-                Notes = info.Comment,
-                FolderPath = folderPath,
-                Location = info.StoreName,
-                OrderType = info.OrderType,
-                FulfillmentType = info.FulfillmentType,
-                IsInvoiceOnly = true,
-                BillingStoreId = info.BillingStoreId,
-                CurrentStoreId = info.CurrentStoreId,
-                Items = items
-            };
-        }
+            return BuildUnifiedOrder(info, folderPath, items: [], isInvoiceOnly: true);
 
-        // ── Build items from YML shopping cart (this store's counts) ──
-        foreach (var kvp in info.ExpectedCounts)
-        {
-            info.OutlabCounts.TryGetValue(kvp.Key, out int outlabQty);
-            items.Add(new UnifiedOrderItem
-            {
-                ExternalLineId = $"{orderId}_{kvp.Key}",
-                SizeLabel = kvp.Key,
-                FormatString = kvp.Key,
-                ExpectedPrintCount = kvp.Value,
-                OutlabCount = outlabQty,
-                Quantity = kvp.Value
-            });
-        }
+        // ── Order type detection ──
+        var printFormats = YList(root, ":print_formats:");
+        var giftOrders = YList(root, ":photo_gift_orders:");
+        bool hasPrints = printFormats != null && printFormats.Count > 0;
+        bool hasGifts = giftOrders != null && giftOrders.Count > 0;
 
-        // ── Add outlab-only sizes (fulfilled at other store, no images expected) ──
-        foreach (var kvp in info.OutlabCounts)
-        {
-            if (!info.ExpectedCounts.ContainsKey(kvp.Key))
-            {
-                items.Add(new UnifiedOrderItem
-                {
-                    ExternalLineId = $"{orderId}_{kvp.Key}_outlab",
-                    SizeLabel = kvp.Key,
-                    FormatString = kvp.Key,
-                    ExpectedPrintCount = 0,
-                    OutlabCount = kvp.Value,
-                    FulfillmentStore = "Other store",
-                    Quantity = 0
-                });
-            }
-        }
-
-        // ── Scan prints/ subfolder for actual images ──
-        if (!string.IsNullOrEmpty(folderPath))
-        {
-            var printsRoot = Path.Combine(folderPath, "prints");
-            if (Directory.Exists(printsRoot))
-            {
-                foreach (var productDir in Directory.GetDirectories(printsRoot))
-                {
-                    string formatString = StripFormatSuffix(Path.GetFileName(productDir));
-
-                    var existing = items.FirstOrDefault(i =>
-                        i.SizeLabel != null &&
-                        (i.SizeLabel.Equals(formatString, StringComparison.OrdinalIgnoreCase) ||
-                         i.SizeLabel.Replace(".", "").Equals(formatString.Replace(".", ""), StringComparison.OrdinalIgnoreCase)));
-
-                    if (existing == null)
-                    {
-                        foreach (var img in ScanImages(productDir))
-                            items.Add(img with
-                            {
-                                ExternalLineId = $"{orderId}_{formatString}_{Path.GetFileName(img.ImageFilepath ?? "")}",
-                                SizeLabel = formatString,
-                                FormatString = formatString
-                            });
-                    }
-                    else
-                    {
-                        var idx = items.IndexOf(existing);
-                        var images = ScanImages(productDir);
-                        if (images.Count > 0)
-                        {
-                            items[idx] = images[0] with
-                            {
-                                ExternalLineId = existing.ExternalLineId,
-                                SizeLabel = existing.SizeLabel,
-                                FormatString = existing.FormatString,
-                                ExpectedPrintCount = existing.ExpectedPrintCount,
-                                OutlabCount = existing.OutlabCount
-                            };
-                            for (int i = 1; i < images.Count; i++)
-                            {
-                                items.Add(images[i] with
-                                {
-                                    ExternalLineId = $"{orderId}_{existing.SizeLabel}_{i}",
-                                    SizeLabel = existing.SizeLabel,
-                                    FormatString = existing.FormatString
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Scan photo_products/ for non-Noritsu items ──
-            var giftRoot = Path.Combine(folderPath, "photo_products");
-            if (Directory.Exists(giftRoot))
-            {
-                foreach (var productDir in Directory.GetDirectories(giftRoot))
-                {
-                    var label = StripFormatSuffix(Path.GetFileName(productDir));
-                    foreach (var img in ScanImages(productDir))
-                    {
-                        items.Add(img with
-                        {
-                            ExternalLineId = $"{orderId}_product_{label}_{Path.GetFileName(img.ImageFilepath ?? "")}",
-                            SizeLabel = label,
-                            FormatString = label,
-                            IsNoritsu = false
-                        });
-                    }
-                }
-            }
-        }
-
-        // ── Validation ──
-        var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(orderId))
-            errors.Add("ExternalOrderId is empty");
-        if (string.IsNullOrWhiteSpace(info.BillingStoreId))
-            errors.Add("BillingStoreId is empty");
-        if (string.IsNullOrWhiteSpace(customerFirstName) && string.IsNullOrWhiteSpace(customerLastName))
-            errors.Add("Customer name is empty");
-        if (string.IsNullOrWhiteSpace(folderPath))
-            errors.Add("FolderPath is empty");
-        if (items.Count == 0)
-            errors.Add("No items found");
-
-        if (errors.Count > 0)
+        if (hasPrints && hasGifts)
         {
             AlertCollector.Error(AlertCategory.DataQuality,
-                $"Dakis order validation failed: {string.Join("; ", errors)}",
-                orderId: orderId);
-            throw new InvalidOperationException(
-                $"Dakis order '{orderId}' failed validation: {string.Join("; ", errors)}");
+                "Dakis order has both :print_formats: and :photo_gift_orders: — Dakis should split these",
+                orderId: info.OrderId,
+                detail: $"Attempted: detect order type. Expected: one or the other populated. " +
+                        $"Found: both populated ({printFormats!.Count} print formats, {giftOrders!.Count} gift orders). " +
+                        $"Context: order {info.OrderId}. State: cannot determine order type.");
+            throw new InvalidOperationException($"Dakis order '{info.OrderId}' has both print_formats and photo_gift_orders");
+        }
+        if (!hasPrints && !hasGifts)
+        {
+            AlertCollector.Error(AlertCategory.DataQuality,
+                "Dakis order has neither :print_formats: nor :photo_gift_orders:",
+                orderId: info.OrderId,
+                detail: $"Attempted: detect order type. Expected: at least one populated. " +
+                        $"Found: both empty. Context: order {info.OrderId}. " +
+                        $"State: no items to parse.");
+            throw new InvalidOperationException($"Dakis order '{info.OrderId}' has no print_formats or photo_gift_orders");
         }
 
-        return new UnifiedOrder
-        {
-            ExternalOrderId = orderId,
-            ExternalSource = "dakis",
-            OrderedAt = info.OrderedAt,
-            CustomerFirstName = customerFirstName,
-            CustomerLastName = customerLastName,
-            CustomerEmail = info.Email,
-            CustomerPhone = info.Phone,
-            OrderTotal = info.ChargedPrice > 0 ? info.ChargedPrice : null,
-            Paid = info.BeenPaid,
-            Notes = info.Comment,
-            FolderPath = folderPath,
-            Location = info.StoreName,
-            OrderType = info.OrderType,
-            FulfillmentType = info.FulfillmentType,
-            IsInvoiceOnly = false,
-            BillingStoreId = info.BillingStoreId,
-            CurrentStoreId = info.CurrentStoreId,
-            Items = items
-        };
+        info.DakisOrderType = hasPrints ? "print" : "gift";
+
+        // ── Build items by type ──
+        List<UnifiedOrderItem> items;
+        if (hasPrints)
+            items = BuildPrintItems(root, info, folderPath);
+        else
+            items = BuildGiftItems(root, info, folderPath);
+
+        // ── Validate ──
+        ValidateOrder(info, items, folderPath);
+
+        return BuildUnifiedOrder(info, folderPath, items, isInvoiceOnly: false);
     }
 
-    // ── YamlDotNet-based order info extraction ───────────────────────────
+    // ── Order header extraction ──────────────────────────────────────────
 
-    private static DakisOrderInfo ReadOrderInfoFromLines(string[] lines, string orderId)
+    private static DakisOrderInfo ReadOrderHeader(object root, string fallbackOrderId)
     {
         var info = new DakisOrderInfo();
 
         try
         {
-            var yaml = string.Join("\n", lines);
-            var root = s_yaml.Deserialize<object>(yaml);
+            // Format version check
+            int formatVersion = YInt(root, ":format_version:");
+            if (formatVersion != 4 && formatVersion != 0)
+            {
+                AlertCollector.Warn(AlertCategory.DataQuality,
+                    $"Dakis order format_version is {formatVersion}, expected 4",
+                    orderId: fallbackOrderId,
+                    detail: $"Attempted: check format_version. Expected: 4. " +
+                            $"Found: {formatVersion}. Context: order {fallbackOrderId}. " +
+                            $"State: parsing will continue but results may be unreliable.");
+            }
 
+            // Core fields
+            info.OrderId = YStr(root, ":id:");
             info.Comment = YStr(root, ":comment:");
             info.BeenPaid = YBool(root, ":been_paid:");
             info.OrderType = YStr(root, ":type:");
-            info.OrderId = YStr(root, ":id:");
-            decimal.TryParse(YStr(root, ":charged_price:"), NumberStyles.Number, CultureInfo.InvariantCulture, out var chargedPrice);
+            info.PaymentDate = YStr(root, ":payment_date:");
+
+            decimal.TryParse(YStr(root, ":charged_price:"), NumberStyles.Number,
+                CultureInfo.InvariantCulture, out var chargedPrice);
             info.ChargedPrice = chargedPrice;
 
-            var receivedAt = YStr(root, ":created_at:");
+            // Date with server_time_offset
             int oYear = YInt(root, ":year:"), oMonth = YInt(root, ":month:"), oDay = YInt(root, ":day:");
             if (oYear > 0 && oMonth > 0 && oDay > 0)
             {
@@ -240,25 +133,75 @@ public class DakisOrderParser
                 {
                     var dt = new DateTime(oYear, oMonth, oDay,
                         YInt(root, ":hour:"), YInt(root, ":minute:"), YInt(root, ":second:"), DateTimeKind.Utc);
+
+                    var offsetStr = YStr(root, ":server_time_offset:");
+                    if (int.TryParse(offsetStr, out int offsetHours) && offsetHours != 0)
+                        dt = dt.AddHours(-offsetHours);
+
                     info.OrderedAt = dt.ToLocalTime();
                 }
-                catch { }
-            }
-            if (!info.OrderedAt.HasValue && !string.IsNullOrEmpty(receivedAt))
-            {
-                if (DateTime.TryParse(receivedAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
-                    info.OrderedAt = parsed;
+                catch (Exception ex)
+                {
+                    AlertCollector.Warn(AlertCategory.Parsing,
+                        "Failed to parse Dakis order date",
+                        orderId: info.OrderId,
+                        detail: $"Attempted: parse date {oYear}-{oMonth}-{oDay}. " +
+                                $"Expected: valid DateTime. Found: exception. " +
+                                $"Context: order {info.OrderId}. State: OrderedAt will be null.",
+                        ex: ex);
+                }
             }
 
-            // Customer — all from order.yml
+            if (!info.OrderedAt.HasValue)
+            {
+                AlertCollector.Warn(AlertCategory.DataQuality,
+                    "Dakis order has no parseable date",
+                    orderId: info.OrderId,
+                    detail: $"Attempted: parse date from :year:/:month:/:day:. Expected: valid date. " +
+                            $"Found: year={oYear}, month={oMonth}, day={oDay}. " +
+                            $"Context: order {info.OrderId}. State: OrderedAt is null.");
+            }
+
+            // Customer
             var cust = YGet(root, ":customer:");
+            info.CustomerId = YStr(cust, ":id:");
             info.CustFirst = YStr(cust, ":first_name:");
             info.CustLast = YStr(cust, ":last_name:");
             info.Phone = YStr(cust, ":phone:");
             info.Email = YStr(cust, ":email:");
+            info.CustomerCompany = YStr(cust, ":company:");
+            info.BillingAddress1 = YStr(cust, ":billing_address_1:");
+            info.BillingCity = YStr(cust, ":billing_city:");
+            info.BillingState = YStr(cust, ":billing_state:");
+            info.BillingPostalCode = YStr(cust, ":billing_postal_code:");
+            info.BillingCountry = YStr(cust, ":billing_country:");
+
+            // Shipping
+            var shipping = YGet(root, ":shipping:");
+            info.ShippingMethod = YStr(shipping, ":method:");
+            info.PickupInStore = YBool(shipping, ":pickup_in_store:");
+            info.ShippingFirstName = YStr(cust, ":shipping_first_name:");
+            info.ShippingLastName = YStr(cust, ":shipping_last_name:");
 
             // Store
             info.StoreName = YStr(YGet(root, ":store:"), ":name:");
+
+            // Shopping cart — channel only
+            var cart = YGet(root, ":shopping_cart:");
+            info.Channel = YStr(cart, ":channel:");
+
+            // Related orders
+            var relatedList = YList(root, ":related_printing_orders:");
+            if (relatedList != null)
+            {
+                foreach (var rel in relatedList)
+                {
+                    var relId = YStr(rel, ":id:");
+                    var relType = YStr(rel, ":type:");
+                    if (!string.IsNullOrEmpty(relId))
+                        info.RelatedOrders.Add((relId, relType));
+                }
+            }
 
             // Fulfillment
             var fulfillment = YGet(root, ":fulfillment:") ?? YGet(root, ":order_fulfillment:");
@@ -299,6 +242,54 @@ public class DakisOrderParser
                 }
             }
 
+            // For :normal fulfillment (single store), current_store is absent.
+            // Derive from first print/gift fulfillment_store_id, then billing_store.
+            if (string.IsNullOrEmpty(currentStoreId))
+            {
+                // Try prints first
+                var storePhotos = YList(root, ":photos:");
+                if (storePhotos != null)
+                {
+                    foreach (var photo in storePhotos)
+                    {
+                        var printsList = YList(photo, ":prints:");
+                        if (printsList == null) continue;
+                        foreach (var print in printsList)
+                        {
+                            var fsid = YStr(print, ":fulfillment_store_id:");
+                            if (!string.IsNullOrEmpty(fsid))
+                            {
+                                currentStoreId = fsid;
+                                break;
+                            }
+                        }
+                        if (!string.IsNullOrEmpty(currentStoreId)) break;
+                    }
+                }
+
+                // Try gift orders
+                if (string.IsNullOrEmpty(currentStoreId))
+                {
+                    var gifts = YList(root, ":photo_gift_orders:");
+                    if (gifts != null)
+                    {
+                        foreach (var gift in gifts)
+                        {
+                            var fsid = YStr(gift, ":fulfillment_store_id:");
+                            if (!string.IsNullOrEmpty(fsid))
+                            {
+                                currentStoreId = fsid;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Last resort: use billing store
+                if (string.IsNullOrEmpty(currentStoreId))
+                    currentStoreId = billingStoreId;
+            }
+
             info.BillingStoreId = billingStoreId;
             info.CurrentStoreId = currentStoreId;
 
@@ -310,8 +301,10 @@ public class DakisOrderParser
                 if (!string.IsNullOrEmpty(storeId))
                     info.StoreName = LookupStoreNameById(root, storeId) ?? storeId;
             }
+
             info.FulfillmentType = YStr(fulfillment, ":fulfillment_type:");
 
+            // Invoice-only detection
             if (!string.IsNullOrEmpty(currentStoreId))
             {
                 var fulfillers = YList(fulfillment, ":fulfillers:");
@@ -319,84 +312,369 @@ public class DakisOrderParser
                     info.IsInvoiceOnly = !fulfillers.Any(f => f?.ToString() == currentStoreId);
             }
 
-            // Expected counts
-            var photosList = YList(root, ":photos:");
-            bool isMultiStore = !string.IsNullOrEmpty(currentStoreId) && photosList != null;
+            // Printing order options (for print orders)
+            info.PrintingOrderOptions = YList(root, ":printing_order_options:");
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Parsing,
+                "YML header parsing failed",
+                orderId: fallbackOrderId,
+                detail: $"Attempted: parse order header from order.yml. Expected: valid header fields. " +
+                        $"Found: exception during parsing. Context: order {fallbackOrderId}. " +
+                        $"State: partial header data may be available.",
+                ex: ex);
+            throw;
+        }
 
-            if (isMultiStore)
+        return info;
+    }
+
+    // ── Print item builder ───────────────────────────────────────────────
+
+    private static List<UnifiedOrderItem> BuildPrintItems(object root, DakisOrderInfo info, string? folderPath)
+    {
+        var items = new List<UnifiedOrderItem>();
+
+        // Build options list from :printing_order_options:
+        var options = new List<OrderItemOption>();
+        if (info.PrintingOrderOptions != null)
+        {
+            foreach (var opt in info.PrintingOrderOptions)
             {
-                foreach (var photo in photosList!)
+                var textEn = YStr(opt, ":text_en:");
+                var groupTextEn = YStr(opt, ":group_text_en:");
+                if (!string.IsNullOrEmpty(textEn))
+                    options.Add(new OrderItemOption(groupTextEn, textEn));
+            }
+        }
+
+        // Aggregate print counts by size label from :photos: → :prints:
+        // Each photo can have multiple prints; we group by size for expected counts
+        var sizeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var photosList = YList(root, ":photos:");
+        if (photosList != null)
+        {
+            foreach (var photo in photosList)
+            {
+                var printsList = YList(photo, ":prints:");
+                if (printsList == null) continue;
+
+                foreach (var print in printsList)
                 {
-                    var printsList = YList(photo, ":prints:");
-                    if (printsList == null || printsList.Count == 0) continue;
-
-                    foreach (var print in printsList)
+                    var sizeLabel = YStr(print, ":text:");
+                    if (string.IsNullOrWhiteSpace(sizeLabel))
                     {
-                        var text = YStr(print, ":text:");
-                        if (string.IsNullOrWhiteSpace(text)) continue;
-                        int qty = YInt(print, ":quantity:");
-                        if (qty <= 0) qty = 1;
-                        var printStoreId = YStr(print, ":fulfillment_store_id:");
-
-                        if (printStoreId == currentStoreId)
-                        {
-                            if (info.ExpectedCounts.ContainsKey(text))
-                                info.ExpectedCounts[text] += qty;
-                            else
-                                info.ExpectedCounts[text] = qty;
-                        }
-                        else if (!string.IsNullOrEmpty(printStoreId))
-                        {
-                            if (info.OutlabCounts.ContainsKey(text))
-                                info.OutlabCounts[text] += qty;
-                            else
-                                info.OutlabCounts[text] = qty;
-                        }
+                        AlertCollector.Warn(AlertCategory.DataQuality,
+                            "Print entry missing :text: (size label)",
+                            orderId: info.OrderId,
+                            detail: $"Attempted: read :text: from print entry. Expected: size label string. " +
+                                    $"Found: empty. Context: order {info.OrderId}, photo in :photos: list. " +
+                                    $"State: skipping this print entry.");
+                        continue;
                     }
+
+                    int qty = YInt(print, ":quantity:");
+                    if (qty <= 0)
+                    {
+                        AlertCollector.Warn(AlertCategory.DataQuality,
+                            $"Print entry has invalid quantity: {qty}",
+                            orderId: info.OrderId,
+                            detail: $"Attempted: read :quantity:. Expected: > 0. Found: {qty}. " +
+                                    $"Context: order {info.OrderId}, size '{sizeLabel}'. " +
+                                    $"State: skipping this print entry.");
+                        continue;
+                    }
+
+                    var fulfillmentStoreId = YStr(print, ":fulfillment_store_id:");
+
+                    // Filter: only this store's items
+                    if (!string.IsNullOrEmpty(info.CurrentStoreId) &&
+                        fulfillmentStoreId != info.CurrentStoreId)
+                        continue;
+
+                    if (sizeCounts.ContainsKey(sizeLabel))
+                        sizeCounts[sizeLabel] += qty;
+                    else
+                        sizeCounts[sizeLabel] = qty;
                 }
             }
-            else
-            {
-                var cartContent = YGet(root, ":shopping_cart_content:");
-                var cartItems = YList(cartContent, ":shopping_cart_items:") ?? YList(root, ":shopping_cart_items:");
-                if (cartItems != null)
-                {
-                    bool inMyOrder = true;
-                    foreach (var item in cartItems)
-                    {
-                        var objectType = YStr(item, ":object_type:");
-                        var text = YStr(item, ":text:");
+        }
 
-                        if (objectType == "PrintingOrder")
-                        {
-                            inMyOrder = string.IsNullOrEmpty(info.OrderId) ||
-                                        text.Contains(info.OrderId, StringComparison.OrdinalIgnoreCase);
-                        }
-                        else if (objectType == "PrintFormat" && inMyOrder && !string.IsNullOrWhiteSpace(text))
-                        {
-                            int qty = YInt(item, ":quantity:");
-                            if (qty > 0)
+        // Create one item per size with expected count
+        foreach (var kvp in sizeCounts)
+        {
+            items.Add(new UnifiedOrderItem
+            {
+                ExternalLineId = $"{info.OrderId}_{kvp.Key}",
+                SizeLabel = kvp.Key,
+                FormatString = kvp.Key,
+                ExpectedPrintCount = kvp.Value,
+                Quantity = kvp.Value,
+                IsNoritsu = true,
+                FulfillmentStore = info.CurrentStoreId,
+                Options = options
+            });
+        }
+
+        // Scan prints/ disk folder and attach images
+        if (!string.IsNullOrEmpty(folderPath))
+        {
+            var printsRoot = Path.Combine(folderPath, "prints");
+            if (Directory.Exists(printsRoot))
+            {
+                foreach (var productDir in Directory.GetDirectories(printsRoot))
+                {
+                    string formatString = StripFormatSuffix(Path.GetFileName(productDir));
+
+                    var existing = items.FirstOrDefault(i =>
+                        i.SizeLabel != null &&
+                        (i.SizeLabel.Equals(formatString, StringComparison.OrdinalIgnoreCase) ||
+                         i.SizeLabel.Replace(".", "").Equals(formatString.Replace(".", ""), StringComparison.OrdinalIgnoreCase)));
+
+                    if (existing == null)
+                    {
+                        // Disk folder with no YML match — create items from disk
+                        foreach (var img in ScanImages(productDir))
+                            items.Add(img with
                             {
-                                if (info.ExpectedCounts.ContainsKey(text))
-                                    info.ExpectedCounts[text] += qty;
-                                else
-                                    info.ExpectedCounts[text] = qty;
+                                ExternalLineId = $"{info.OrderId}_{formatString}_{Path.GetFileName(img.ImageFilepath ?? "")}",
+                                SizeLabel = formatString,
+                                FormatString = formatString,
+                                IsNoritsu = true,
+                                FulfillmentStore = info.CurrentStoreId,
+                                Options = options
+                            });
+                    }
+                    else
+                    {
+                        // Merge disk images into YML-declared size
+                        var idx = items.IndexOf(existing);
+                        var images = ScanImages(productDir);
+                        if (images.Count > 0)
+                        {
+                            items[idx] = images[0] with
+                            {
+                                ExternalLineId = existing.ExternalLineId,
+                                SizeLabel = existing.SizeLabel,
+                                FormatString = existing.FormatString,
+                                ExpectedPrintCount = existing.ExpectedPrintCount,
+                                IsNoritsu = true,
+                                FulfillmentStore = existing.FulfillmentStore,
+                                Options = existing.Options
+                            };
+                            for (int i = 1; i < images.Count; i++)
+                            {
+                                items.Add(images[i] with
+                                {
+                                    ExternalLineId = $"{info.OrderId}_{existing.SizeLabel}_{i}",
+                                    SizeLabel = existing.SizeLabel,
+                                    FormatString = existing.FormatString,
+                                    IsNoritsu = true,
+                                    FulfillmentStore = existing.FulfillmentStore,
+                                    Options = existing.Options
+                                });
                             }
                         }
                     }
                 }
             }
         }
-        catch (Exception ex)
-        {
-            AlertCollector.Error(AlertCategory.Parsing,
-                "YML parsing failed", orderId: orderId, ex: ex);
-        }
 
-        return info;
+        return items;
     }
 
-    // ── YAML helpers ──
+    // ── Gift item builder ────────────────────────────────────────────────
+
+    private static List<UnifiedOrderItem> BuildGiftItems(object root, DakisOrderInfo info, string? folderPath)
+    {
+        var items = new List<UnifiedOrderItem>();
+        var giftOrders = YList(root, ":photo_gift_orders:");
+        if (giftOrders == null) return items;
+
+        foreach (var gift in giftOrders)
+        {
+            var text = YStr(gift, ":text:");
+            var category = YStr(gift, ":category:");
+            var subCategory = YStr(gift, ":sub_category:");
+            var fulfillmentStoreId = YStr(gift, ":fulfillment_store_id:");
+            var giftingOrderId = YStr(gift, ":gifting_order_id:");
+            int qty = YInt(gift, ":quantity:");
+            if (qty <= 0) qty = 1;
+
+            decimal.TryParse(YStr(gift, ":price:"), NumberStyles.Number,
+                CultureInfo.InvariantCulture, out var price);
+
+            // Filter: only this store's items
+            if (!string.IsNullOrEmpty(info.CurrentStoreId) &&
+                fulfillmentStoreId != info.CurrentStoreId)
+                continue;
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                AlertCollector.Error(AlertCategory.DataQuality,
+                    "Gift order entry missing :text: (product name)",
+                    orderId: info.OrderId,
+                    detail: $"Attempted: read :text: from photo_gift_orders entry. Expected: product name. " +
+                            $"Found: empty. Context: order {info.OrderId}, gifting_order_id={giftingOrderId}. " +
+                            $"State: skipping this gift entry.");
+                continue;
+            }
+
+            // Build options with category/price metadata
+            var giftOptions = new List<OrderItemOption>();
+            if (!string.IsNullOrEmpty(category))
+                giftOptions.Add(new OrderItemOption("Category", category));
+            if (!string.IsNullOrEmpty(subCategory))
+                giftOptions.Add(new OrderItemOption("SubCategory", subCategory));
+            if (price > 0)
+                giftOptions.Add(new OrderItemOption("Price", price.ToString(CultureInfo.InvariantCulture)));
+
+            // Find images in photo_products/ subfolder
+            string? imageFilepath = null;
+            string? imageFilename = null;
+
+            if (!string.IsNullOrEmpty(folderPath) && !string.IsNullOrEmpty(giftingOrderId))
+            {
+                var giftRoot = Path.Combine(folderPath, "photo_products");
+                if (Directory.Exists(giftRoot))
+                {
+                    // Match folder by trailing gifting_order_id
+                    var matchingDir = Directory.GetDirectories(giftRoot)
+                        .FirstOrDefault(d => Path.GetFileName(d).EndsWith(giftingOrderId, StringComparison.OrdinalIgnoreCase));
+
+                    if (matchingDir != null)
+                    {
+                        // Find Page N *.jpg files — exclude toprint.jpg and canvas PNGs
+                        var pageFiles = Directory.GetFiles(matchingDir)
+                            .Where(f =>
+                            {
+                                var fname = Path.GetFileName(f);
+                                if (fname.Equals("toprint.jpg", StringComparison.OrdinalIgnoreCase))
+                                    return false;
+                                if (!IsImageFile(f))
+                                    return false;
+                                if (fname.StartsWith("canvas", StringComparison.OrdinalIgnoreCase)
+                                    && Path.GetExtension(f).Equals(".png", StringComparison.OrdinalIgnoreCase))
+                                    return false;
+                                return true;
+                            })
+                            .OrderBy(f => f)
+                            .ToList();
+
+                        if (pageFiles.Count > 0)
+                        {
+                            imageFilepath = pageFiles[0];
+                            imageFilename = Path.GetFileName(pageFiles[0]);
+                        }
+                    }
+                }
+            }
+
+            items.Add(new UnifiedOrderItem
+            {
+                ExternalLineId = $"{info.OrderId}_gift_{giftingOrderId}",
+                SizeLabel = text,
+                MediaType = subCategory,
+                FormatString = text,
+                Quantity = qty,
+                ImageFilepath = imageFilepath,
+                ImageFilename = imageFilename,
+                IsNoritsu = false,
+                FulfillmentStore = fulfillmentStoreId,
+                Options = giftOptions
+            });
+        }
+
+        return items;
+    }
+
+    // ── Validation ───────────────────────────────────────────────────────
+
+    private static void ValidateOrder(DakisOrderInfo info, List<UnifiedOrderItem> items, string? folderPath)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(info.OrderId))
+            errors.Add("ExternalOrderId is empty");
+        if (string.IsNullOrWhiteSpace(info.BillingStoreId))
+            errors.Add("BillingStoreId is empty");
+        if (string.IsNullOrWhiteSpace(info.CustFirst) && string.IsNullOrWhiteSpace(info.CustLast))
+            errors.Add("Customer name is empty (both first and last)");
+        if (string.IsNullOrWhiteSpace(folderPath))
+            errors.Add("FolderPath is empty");
+        if (!info.OrderedAt.HasValue)
+            errors.Add("OrderedAt has no value");
+        if (string.IsNullOrWhiteSpace(info.CurrentStoreId))
+            errors.Add("CurrentStoreId is empty");
+
+        // Item-level validation
+        for (int i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            if (string.IsNullOrWhiteSpace(item.SizeLabel))
+                errors.Add($"Item[{i}] SizeLabel is empty");
+            if (item.Quantity <= 0)
+                errors.Add($"Item[{i}] Quantity is {item.Quantity} (expected > 0)");
+            if (string.IsNullOrWhiteSpace(item.FulfillmentStore))
+                errors.Add($"Item[{i}] FulfillmentStore is empty");
+
+            // Gift-specific validation
+            if (!item.IsNoritsu)
+            {
+                if (string.IsNullOrWhiteSpace(item.MediaType))
+                    errors.Add($"Item[{i}] gift MediaType (sub_category) is empty");
+            }
+        }
+
+        if (items.Count == 0)
+            errors.Add("No items found for this store");
+
+        if (errors.Count > 0)
+        {
+            var errorText = string.Join("; ", errors);
+            AlertCollector.Error(AlertCategory.DataQuality,
+                $"Dakis order validation failed: {errorText}",
+                orderId: info.OrderId,
+                detail: $"Attempted: validate order {info.OrderId} ({info.DakisOrderType}). " +
+                        $"Expected: all fields valid. Found: {errors.Count} error(s). " +
+                        $"Context: folder '{folderPath}'. " +
+                        $"State: order will not be ingested.");
+            throw new InvalidOperationException(
+                $"Dakis order '{info.OrderId}' failed validation: {errorText}");
+        }
+    }
+
+    // ── Build final UnifiedOrder ─────────────────────────────────────────
+
+    private static UnifiedOrder BuildUnifiedOrder(DakisOrderInfo info, string? folderPath,
+        List<UnifiedOrderItem> items, bool isInvoiceOnly)
+    {
+        return new UnifiedOrder
+        {
+            ExternalOrderId = info.OrderId,
+            ExternalSource = "dakis",
+            OrderedAt = info.OrderedAt,
+            CustomerFirstName = info.CustFirst,
+            CustomerLastName = info.CustLast,
+            CustomerEmail = info.Email,
+            CustomerPhone = info.Phone,
+            OrderTotal = info.ChargedPrice > 0 ? info.ChargedPrice : null,
+            Paid = info.BeenPaid,
+            Notes = info.Comment,
+            FolderPath = folderPath,
+            Location = info.StoreName,
+            OrderType = info.OrderType,
+            FulfillmentType = info.FulfillmentType,
+            IsInvoiceOnly = isInvoiceOnly,
+            BillingStoreId = info.BillingStoreId,
+            CurrentStoreId = info.CurrentStoreId,
+            Channel = info.Channel,
+            Items = items
+        };
+    }
+
+    // ── YAML helpers ─────────────────────────────────────────────────────
 
     private static object? YGet(object? node, string key)
     {
@@ -416,6 +694,9 @@ public class DakisOrderParser
 
     private static bool YBool(object? node, string key)
         => YGet(node, key)?.ToString()?.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static List<object>? YList(object? node, string key)
+        => YGet(node, key) as List<object>;
 
     private static string? LookupStoreNameById(object? root, string storeId)
     {
@@ -441,10 +722,7 @@ public class DakisOrderParser
         return null;
     }
 
-    private static List<object>? YList(object? node, string key)
-        => YGet(node, key) as List<object>;
-
-    // ── Disk scan helpers ──
+    // ── Disk scan helpers ────────────────────────────────────────────────
 
     private static string StripFormatSuffix(string folderName)
         => folderName.EndsWith(" format", StringComparison.OrdinalIgnoreCase)
@@ -494,26 +772,55 @@ public class DakisOrderParser
         return ext is ".jpg" or ".jpeg" or ".png" or ".tif" or ".tiff";
     }
 
-    // ── Internal model ──
+    // ── Internal model ───────────────────────────────────────────────────
 
     private class DakisOrderInfo
     {
+        // Core
         public string OrderId { get; set; } = "";
         public string Comment { get; set; } = "";
         public bool BeenPaid { get; set; }
-        public string Phone { get; set; } = "";
-        public string Email { get; set; } = "";
-        public string StoreName { get; set; } = "";
+        public string OrderType { get; set; } = "";
+        public string PaymentDate { get; set; } = "";
+        public decimal ChargedPrice { get; set; }
+        public DateTime? OrderedAt { get; set; }
+
+        // Customer
+        public string CustomerId { get; set; } = "";
         public string CustFirst { get; set; } = "";
         public string CustLast { get; set; } = "";
-        public DateTime? OrderedAt { get; set; }
-        public string OrderType { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string CustomerCompany { get; set; } = "";
+        public string ShippingFirstName { get; set; } = "";
+        public string ShippingLastName { get; set; } = "";
+        public string BillingAddress1 { get; set; } = "";
+        public string BillingCity { get; set; } = "";
+        public string BillingState { get; set; } = "";
+        public string BillingPostalCode { get; set; } = "";
+        public string BillingCountry { get; set; } = "";
+
+        // Shipping
+        public string ShippingMethod { get; set; } = "";
+        public bool PickupInStore { get; set; }
+
+        // Store / fulfillment
+        public string StoreName { get; set; } = "";
         public string FulfillmentType { get; set; } = "";
-        public decimal ChargedPrice { get; set; }
         public bool IsInvoiceOnly { get; set; }
         public string BillingStoreId { get; set; } = "";
         public string CurrentStoreId { get; set; } = "";
-        public Dictionary<string, int> ExpectedCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, int> OutlabCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        // Channel
+        public string Channel { get; set; } = "";
+
+        // Order type (set by type detection)
+        public string DakisOrderType { get; set; } = "";
+
+        // Related orders
+        public List<(string Id, string Type)> RelatedOrders { get; } = [];
+
+        // Raw YML lists (for builders)
+        public List<object>? PrintingOrderOptions { get; set; }
     }
 }
