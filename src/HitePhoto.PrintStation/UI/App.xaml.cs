@@ -57,6 +57,7 @@ public partial class App : Application
         services.AddSingleton<OrderDb>();
         services.AddSingleton<IOrderRepository, OrderRepository>();
         services.AddSingleton<IHistoryRepository, HistoryRepository>();
+        services.AddSingleton<IAlertRepository, AlertRepository>();
 
         // Decision makers
         services.AddSingleton<IHoldDecision, HoldDecision>();
@@ -116,6 +117,12 @@ public partial class App : Application
         services.AddTransient<MainWindow>();
 
         Services = services.BuildServiceProvider();
+
+        // Wire alert persistence and purge old alerts
+        var alertRepo = Services.GetRequiredService<IAlertRepository>();
+        AlertCollector.SetRepository(alertRepo);
+        try { alertRepo.PurgeOlderThan(30); }
+        catch (Exception ex) { AppLog.Error($"Failed to purge old alerts: {ex.Message}"); }
 
         // Show main window
         try

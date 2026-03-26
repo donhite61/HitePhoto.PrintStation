@@ -6,13 +6,12 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 
 /// <summary>
 /// Pixfizz ingest pipeline. Follows the flow:
-/// 1. Poll OHD API for pending jobs
+/// 1. Poll OHD API for pending jobs (discovery only — order_number + job_id)
 /// 2. Check disk for existing folder — if exists, verify; if not, download
 /// 3. Download artwork + darkroom_ticket.txt from FTP
-/// 4. Parse TXT (source of truth)
-/// 5. Verify files (exists, >1KB, JPEG magic bytes)
-/// 6. Write to SQLite — insert new or compare-and-repair existing
-/// 7. Background: mark /received after 24 hours verified
+/// 4. Parse TXT from disk via PixfizzOrderParser (source of truth)
+/// 5. Write to SQLite via unified IngestOrderWriter
+/// 6. Background: mark /received after 24 hours verified
 /// </summary>
 public class PixfizzIngestService
 {
@@ -88,20 +87,19 @@ public class PixfizzIngestService
     private async Task ProcessJobAsync(RawOrder raw, CancellationToken ct)
     {
         var orderNumber = raw.ExternalOrderId;
+        var jobId = raw.Metadata?.GetValueOrDefault("job_id") ?? "";
         var folderPath = IngestConstants.GetOrderFolderPath(_settings.OrderOutputPath, orderNumber);
 
-        // Step 2: Check disk — if folder exists, verify it
+        // Step 2: Check disk — if folder exists and downloaded, verify it
         if (Directory.Exists(folderPath) &&
             IngestConstants.MarkerExists(folderPath, IngestConstants.MarkerDownloadComplete))
         {
-            // Already downloaded — verify and repair if needed
-            await VerifyAndRepairAsync(orderNumber, folderPath, ct);
+            VerifyAndRepair(orderNumber, folderPath);
             return;
         }
 
-        // Step 3-5: Parse API, download, verify
-        var apiOrder = _parser.Parse(raw);
-        var result = await _downloader.DownloadAsync(apiOrder, raw, ct);
+        // Step 3: Download (files only, no order building)
+        var result = await _downloader.DownloadAsync(orderNumber, jobId, ct);
 
         if (!result.Success)
         {
@@ -109,29 +107,66 @@ public class PixfizzIngestService
             return; // Will retry next poll — no /received called
         }
 
-        // Write download_complete marker
+        folderPath = result.FolderPath;
+
+        // Step 4: Write download_complete marker
         IngestConstants.WriteMarker(folderPath, IngestConstants.MarkerDownloadComplete);
 
-        // Step 6: Write to SQLite
-        if (string.IsNullOrEmpty(result.Order.FolderPath))
+        // Step 5: Save raw API JSON for later /received marking
+        SaveRawJson(folderPath, raw.RawData, orderNumber);
+
+        // Step 6: Read TXT from disk, parse via PixfizzOrderParser
+        var txtPath = Path.Combine(folderPath, "darkroom_ticket.txt");
+        if (!File.Exists(txtPath))
         {
             AlertCollector.Error(AlertCategory.DataQuality,
-                $"Pixfizz order missing FolderPath after download",
-                orderId: result.Order.ExternalOrderId,
-                detail: $"Attempted: write order to SQLite. Expected: FolderPath set by downloader. " +
-                        $"Found: null/empty. Context: ProcessJobAsync for {result.Order.ExternalOrderId}. " +
-                        $"State: order cannot be inserted without a folder path.");
-            throw new InvalidOperationException($"Pixfizz order {result.Order.ExternalOrderId} has no FolderPath after download");
+                $"Pixfizz darkroom_ticket.txt missing after download",
+                orderId: orderNumber,
+                detail: $"Attempted: read TXT from '{txtPath}'. Expected: file exists after download. " +
+                        $"Found: file missing. Context: order {orderNumber}, folder '{folderPath}'. " +
+                        $"State: cannot parse order without TXT.");
+            return;
         }
-        _writer.WriteToSqlite(result.Order, _settings.StoreId, "pixfizz", result.Order.FolderPath);
+
+        var txtContent = await File.ReadAllTextAsync(txtPath, ct);
+
+        var parseRaw = new RawOrder(
+            ExternalOrderId: orderNumber,
+            SourceName: "pixfizz",
+            RawData: txtContent,
+            Metadata: new Dictionary<string, string>
+            {
+                ["folder_path"] = folderPath,
+                ["job_id"] = jobId
+            });
+
+        var order = _parser.Parse(parseRaw);
+
+        // Step 7: Write to SQLite
+        _writer.WriteToSqlite(order, _settings.StoreId, "pixfizz", order.FolderPath ?? "");
     }
 
-    private Task VerifyAndRepairAsync(string orderNumber, string folderPath, CancellationToken ct)
+    private void VerifyAndRepair(string orderNumber, string folderPath)
     {
         var existingId = _orders.FindOrderId(orderNumber, _settings.StoreId);
-        if (existingId == null) return Task.CompletedTask;
+        if (existingId == null) return;
 
-        return Task.Run(() => _verifier.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId.Value), ct);
+        _verifier.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId.Value);
+    }
+
+    private static void SaveRawJson(string folderPath, string rawData, string orderNumber)
+    {
+        try
+        {
+            var rawPath = Path.Combine(folderPath, "pixfizz_raw.json");
+            if (!File.Exists(rawPath))
+                File.WriteAllText(rawPath, rawData);
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Warn(AlertCategory.General,
+                $"Could not write pixfizz_raw.json for {orderNumber}", ex: ex);
+        }
     }
 
     /// <summary>

@@ -342,6 +342,21 @@ public class OrderDb
             last_sync_at TEXT NOT NULL,
             PRIMARY KEY (table_name, direction)
         );
+
+        CREATE TABLE IF NOT EXISTS alerts (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            severity      TEXT    NOT NULL,
+            category      TEXT    NOT NULL,
+            summary       TEXT    NOT NULL,
+            order_id      TEXT,
+            detail        TEXT,
+            exception     TEXT,
+            source_method TEXT,
+            source_file   TEXT,
+            source_line   INTEGER,
+            created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            acknowledged  INTEGER NOT NULL DEFAULT 0
+        );
         """;
 
     // ══════════════════════════════════════════════════════════════════════

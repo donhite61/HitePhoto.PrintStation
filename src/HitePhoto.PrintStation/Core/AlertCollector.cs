@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
+using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core;
 
@@ -76,6 +77,13 @@ public static class AlertCollector
 {
     private static readonly object _lock = new();
     private static readonly List<AppAlert> _alerts = new();
+    private static IAlertRepository? _repository;
+
+    /// <summary>
+    /// Set the persistence repository. Called once at startup after DI is built.
+    /// If null, alerts still work in-memory — persistence is gracefully skipped.
+    /// </summary>
+    public static void SetRepository(IAlertRepository repository) => _repository = repository;
 
     // ── Core Add ─────────────────────────────────────────────────────────
 
@@ -100,6 +108,32 @@ public static class AlertCollector
             case AlertSeverity.Error:   AppLog.Error(logMsg); break;
             case AlertSeverity.Warning: AppLog.Warn(logMsg);  break;
             default:                    AppLog.Info(logMsg);   break;
+        }
+
+        // Persist errors and warnings to SQLite
+        if (_repository != null && alert.Severity != AlertSeverity.Info)
+        {
+            try
+            {
+                _repository.Insert(new AlertRecord(
+                    Id: 0,
+                    Severity: alert.SeverityLabel,
+                    Category: alert.CategoryLabel,
+                    Summary: alert.Summary,
+                    OrderId: alert.OrderId,
+                    Detail: alert.Detail,
+                    Exception: alert.Exception,
+                    SourceMethod: alert.Method,
+                    SourceFile: alert.SourceFile,
+                    SourceLine: alert.SourceLine,
+                    CreatedAt: alert.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
+                    Acknowledged: false));
+            }
+            catch (Exception ex)
+            {
+                // Don't let persistence failure break the alert system
+                AppLog.Error($"Failed to persist alert to SQLite: {ex.Message}");
+            }
         }
     }
 

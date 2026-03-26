@@ -20,6 +20,7 @@ public class OrderVerifier : IOrderVerifier
     private readonly IHistoryRepository _history;
     private readonly IFilesNeededDecision _filesNeededDecision;
     private readonly DakisOrderParser _dakisParser;
+    private readonly PixfizzOrderParser _pixfizzParser;
     private readonly AppSettings _settings;
 
     public OrderVerifier(
@@ -27,12 +28,14 @@ public class OrderVerifier : IOrderVerifier
         IHistoryRepository history,
         IFilesNeededDecision filesNeededDecision,
         DakisOrderParser dakisParser,
+        PixfizzOrderParser pixfizzParser,
         AppSettings settings)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _history = history ?? throw new ArgumentNullException(nameof(history));
         _filesNeededDecision = filesNeededDecision ?? throw new ArgumentNullException(nameof(filesNeededDecision));
         _dakisParser = dakisParser ?? throw new ArgumentNullException(nameof(dakisParser));
+        _pixfizzParser = pixfizzParser ?? throw new ArgumentNullException(nameof(pixfizzParser));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
@@ -176,22 +179,16 @@ public class OrderVerifier : IOrderVerifier
         try
         {
             var txtContent = File.ReadAllText(txtPath);
+            var orderId = Path.GetFileName(folderPath);
 
-            var artworkDir = Path.Combine(folderPath, "artwork");
-            var localFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (Directory.Exists(artworkDir))
-                foreach (var f in Directory.GetFiles(artworkDir, "*.jpg"))
-                    localFiles[Path.GetFileName(f)] = f;
+            var raw = new RawOrder(
+                ExternalOrderId: orderId,
+                SourceName: "pixfizz",
+                RawData: txtContent,
+                Metadata: new Dictionary<string, string> { ["folder_path"] = folderPath });
 
-            var parsed = HitePhoto.Shared.Parsers.PixfizzTxtParser.ParseContent(txtContent, ftpPath =>
-            {
-                var fname = Path.GetFileName(ftpPath);
-                return localFiles.TryGetValue(fname, out var local) ? local : ftpPath;
-            });
-            if (parsed == null) return 0;
-
-            var sourceItems = TxtItemConverter.ToUnifiedItems(parsed);
-            return CompareAndRepair(dbOrderId, sourceItems, "darkroom_ticket.txt");
+            var parsed = _pixfizzParser.Parse(raw);
+            return CompareAndRepair(dbOrderId, parsed.Items, "darkroom_ticket.txt");
         }
         catch (Exception ex)
         {
@@ -286,38 +283,16 @@ public class OrderVerifier : IOrderVerifier
     {
         var txtPath = Path.Combine(dir, "darkroom_ticket.txt");
         var txtContent = File.ReadAllText(txtPath);
+        var folderName = Path.GetFileName(dir);
 
-        var artworkDir = Path.Combine(dir, "artwork");
-        var localFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (Directory.Exists(artworkDir))
-            foreach (var f in Directory.GetFiles(artworkDir, "*.jpg"))
-                localFiles[Path.GetFileName(f)] = f;
+        var raw = new RawOrder(
+            ExternalOrderId: folderName,
+            SourceName: "pixfizz",
+            RawData: txtContent,
+            Metadata: new Dictionary<string, string> { ["folder_path"] = dir });
 
-        var parsed = HitePhoto.Shared.Parsers.PixfizzTxtParser.ParseContent(txtContent, ftpPath =>
-        {
-            var fname = Path.GetFileName(ftpPath);
-            return localFiles.TryGetValue(fname, out var local) ? local : ftpPath;
-        });
-        if (parsed == null) throw new InvalidOperationException("TXT parse returned null");
+        var order = _pixfizzParser.Parse(raw);
 
-        var items = TxtItemConverter.ToUnifiedItems(parsed);
-
-        var order = new UnifiedOrder
-        {
-            ExternalOrderId = parsed.OrderId ?? Path.GetFileName(dir),
-            ExternalSource = "pixfizz",
-            CustomerFirstName = parsed.FirstName,
-            CustomerLastName = parsed.LastName,
-            CustomerEmail = parsed.Email,
-            OrderedAt = DateTime.TryParse(parsed.ReceivedAt, out var dt) ? dt : DateTime.Now,
-            Notes = parsed.Notes,
-            FolderPath = dir,
-            Location = parsed.Location,
-            DownloadStatus = "complete",
-            Items = items
-        };
-
-        // Check if already in DB (may exist outside the verify date range)
         var existingId = _orders.FindOrderId(order.ExternalOrderId, _settings.StoreId);
         if (existingId != null) return;
 
