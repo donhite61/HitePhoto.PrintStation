@@ -1,6 +1,4 @@
 using System.IO;
-using HitePhoto.PrintStation.Core.Services;
-using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Ingest;
 
@@ -12,24 +10,18 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 public class DakisIngestService : IDisposable
 {
     private readonly DakisOrderParser _parser;
-    private readonly IOrderVerifier _verifier;
-    private readonly IOrderRepository _orders;
-    private readonly IHistoryRepository _history;
+    private readonly IngestOrderWriter _writer;
     private readonly AppSettings _settings;
 
     private FileSystemWatcher? _watcher;
 
     public DakisIngestService(
         DakisOrderParser parser,
-        IOrderVerifier verifier,
-        IOrderRepository orders,
-        IHistoryRepository history,
+        IngestOrderWriter writer,
         AppSettings settings)
     {
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
-        _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
-        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
-        _history = history ?? throw new ArgumentNullException(nameof(history));
+        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
@@ -150,26 +142,7 @@ public class DakisIngestService : IDisposable
         // File verification happens in verify after insert — not here
         order = order with { DownloadStatus = IngestConstants.StatusReady };
 
-        WriteToSqlite(order);
-    }
-
-    private void WriteToSqlite(UnifiedOrder order)
-    {
-        var existingId = _orders.FindOrderId(order.ExternalOrderId, _settings.StoreId);
-
-        if (existingId == null)
-        {
-            var orderId = _orders.InsertOrder(order, _settings.StoreId);
-            _history.AddNote(orderId, $"Order received at {DateTime.Now:g}");
-            AppLog.Info($"Inserted Dakis order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
-
-            // Verify immediately after insert — same check every order gets
-            _verifier.VerifyOrder(order.ExternalOrderId, order.FolderPath ?? "", "dakis", orderId);
-        }
-        else
-        {
-            _verifier.VerifyOrder(order.ExternalOrderId, order.FolderPath ?? "", "dakis", existingId.Value);
-        }
+        _writer.WriteToSqlite(order, _settings.StoreId, "dakis", order.FolderPath ?? "");
     }
 
     public void Dispose()

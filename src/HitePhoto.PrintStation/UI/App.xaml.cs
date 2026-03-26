@@ -81,6 +81,9 @@ public partial class App : Application
         services.AddSingleton<OhdReceivedPusher>();
         services.AddSingleton<PixfizzIngestService>();
 
+        // Ingest — shared
+        services.AddSingleton<IngestOrderWriter>();
+
         // Ingest — Dakis
         services.AddSingleton<DakisOrderParser>();
         services.AddSingleton<DakisIngestService>();

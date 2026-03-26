@@ -20,9 +20,9 @@ public class PixfizzIngestService
     private readonly PixfizzArtworkDownloader _downloader;
     private readonly PixfizzOrderParser _parser;
     private readonly OhdReceivedPusher _receivedPusher;
+    private readonly IngestOrderWriter _writer;
     private readonly IOrderVerifier _verifier;
     private readonly IOrderRepository _orders;
-    private readonly IHistoryRepository _history;
     private readonly AppSettings _settings;
 
     public PixfizzIngestService(
@@ -30,18 +30,18 @@ public class PixfizzIngestService
         PixfizzArtworkDownloader downloader,
         PixfizzOrderParser parser,
         OhdReceivedPusher receivedPusher,
+        IngestOrderWriter writer,
         IOrderVerifier verifier,
         IOrderRepository orders,
-        IHistoryRepository history,
         AppSettings settings)
     {
         _apiSource = apiSource ?? throw new ArgumentNullException(nameof(apiSource));
         _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
         _receivedPusher = receivedPusher ?? throw new ArgumentNullException(nameof(receivedPusher));
+        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
-        _history = history ?? throw new ArgumentNullException(nameof(history));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
@@ -113,7 +113,17 @@ public class PixfizzIngestService
         IngestConstants.WriteMarker(folderPath, IngestConstants.MarkerDownloadComplete);
 
         // Step 6: Write to SQLite
-        WriteToSqlite(result.Order);
+        if (string.IsNullOrEmpty(result.Order.FolderPath))
+        {
+            AlertCollector.Error(AlertCategory.DataQuality,
+                $"Pixfizz order missing FolderPath after download",
+                orderId: result.Order.ExternalOrderId,
+                detail: $"Attempted: write order to SQLite. Expected: FolderPath set by downloader. " +
+                        $"Found: null/empty. Context: ProcessJobAsync for {result.Order.ExternalOrderId}. " +
+                        $"State: order cannot be inserted without a folder path.");
+            throw new InvalidOperationException($"Pixfizz order {result.Order.ExternalOrderId} has no FolderPath after download");
+        }
+        _writer.WriteToSqlite(result.Order, _settings.StoreId, "pixfizz", result.Order.FolderPath);
     }
 
     private Task VerifyAndRepairAsync(string orderNumber, string folderPath, CancellationToken ct)
@@ -122,27 +132,6 @@ public class PixfizzIngestService
         if (existingId == null) return Task.CompletedTask;
 
         return Task.Run(() => _verifier.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId.Value), ct);
-    }
-
-    private void WriteToSqlite(UnifiedOrder order)
-    {
-        var existingId = _orders.FindOrderId(order.ExternalOrderId, _settings.StoreId);
-
-        if (existingId == null)
-        {
-            var orderId = _orders.InsertOrder(order, _settings.StoreId);
-            _history.AddNote(orderId, $"Order received at {DateTime.Now:g}");
-            AppLog.Info($"Inserted Pixfizz order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
-
-            // Verify immediately after insert — same check every order gets
-            var folderPath = order.FolderPath ?? IngestConstants.GetOrderFolderPath(_settings.OrderOutputPath, order.ExternalOrderId);
-            _verifier.VerifyOrder(order.ExternalOrderId, folderPath, "pixfizz", orderId);
-        }
-        else
-        {
-            var folderPath = order.FolderPath ?? IngestConstants.GetOrderFolderPath(_settings.OrderOutputPath, order.ExternalOrderId);
-            _verifier.VerifyOrder(order.ExternalOrderId, folderPath, "pixfizz", existingId.Value);
-        }
     }
 
     /// <summary>

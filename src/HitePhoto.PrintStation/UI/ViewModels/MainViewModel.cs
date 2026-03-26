@@ -282,7 +282,7 @@ public class MainViewModel : ViewModelBase
             };
 
             var items = allItems.TryGetValue(order.Id, out var list) ? list : new();
-            BuildSizeGroups(treeItem, items, verifyFiles: false);
+            BuildSizeGroups(treeItem, items, verifyFiles);
 
             built.Add(treeItem);
         }

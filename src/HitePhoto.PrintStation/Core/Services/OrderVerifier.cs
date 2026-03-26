@@ -4,6 +4,7 @@ using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Core.Models;
 using HitePhoto.PrintStation.Data.Repositories;
 using HitePhoto.Shared.Models;
+using YamlDotNet.Serialization;
 using OrderSource = HitePhoto.PrintStation.Core.Models.OrderSource;
 
 namespace HitePhoto.PrintStation.Core.Services;
@@ -353,9 +354,7 @@ public class OrderVerifier : IOrderVerifier
             if (cutoff > DateTime.MinValue && new DirectoryInfo(dir).LastWriteTime < cutoff) continue;
 
             var folderName = Path.GetFileName(dir);
-            var orderId = source == "dakis" && folderName.StartsWith("order ", StringComparison.OrdinalIgnoreCase)
-                ? folderName[6..].Trim()
-                : folderName;
+            string? orderId = null;
 
             if (source == "pixfizz")
             {
@@ -378,6 +377,43 @@ public class OrderVerifier : IOrderVerifier
                 }
                 catch { /* use folder name as fallback */ }
             }
+            else if (source == "dakis")
+            {
+                // Read :id: from order.yml — source of truth, not folder name
+                var ymlPath = Path.Combine(dir, "order.yml");
+                try
+                {
+                    var yaml = File.ReadAllText(ymlPath);
+                    var deserializer = new DeserializerBuilder().Build();
+                    var ymlRoot = deserializer.Deserialize<object>(yaml);
+                    if (ymlRoot is Dictionary<object, object> dict)
+                    {
+                        if (dict.TryGetValue(":id:", out var val) || dict.TryGetValue(":id", out val))
+                            orderId = val?.ToString()?.Trim().Trim('"');
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AlertCollector.Error(AlertCategory.Parsing,
+                        $"Failed to read :id: from order.yml in {folderName}",
+                        orderId: folderName, ex: ex);
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(orderId))
+                {
+                    AlertCollector.Error(AlertCategory.DataQuality,
+                        $"Dakis order.yml missing :id: in {folderName}",
+                        orderId: folderName,
+                        detail: $"Attempted: read :id: from order.yml. Expected: numeric order ID. " +
+                                $"Found: empty/missing. Context: folder scan '{dir}'. " +
+                                $"State: order skipped — cannot identify without :id:.");
+                    continue;
+                }
+            }
+
+            // Fallback to folder name only if source file didn't yield an ID
+            orderId ??= folderName;
 
             list.TryAdd(orderId, (dir, source));
         }
