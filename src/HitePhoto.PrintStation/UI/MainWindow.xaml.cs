@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly Data.Repositories.IOrderRepository _orders;
     private readonly Data.CorrectionStore _correctionStore;
     private readonly IAlertRepository _alertRepo;
+    private readonly Core.Services.INotificationService _notificationService;
 
     private readonly System.Collections.ObjectModel.ObservableCollection<AlertItemViewModel> _sessionAlerts = new();
     private int _nextAlertId;
@@ -56,7 +57,7 @@ public partial class MainWindow : Window
 
     public MainWindow(MainViewModel vm, AppSettings settings, SettingsManager settingsManager,
         Data.Repositories.IOrderRepository orders, Data.CorrectionStore correctionStore,
-        IAlertRepository alertRepo)
+        IAlertRepository alertRepo, Core.Services.INotificationService notificationService)
     {
         InitializeComponent();
 
@@ -68,6 +69,7 @@ public partial class MainWindow : Window
         _orders = orders;
         _correctionStore = correctionStore;
         _alertRepo = alertRepo;
+        _notificationService = notificationService;
 
         PendingTree.ItemsSource = _vm.PendingOrders;
         PrintedTree.ItemsSource = _vm.PrintedOrders;
@@ -530,7 +532,7 @@ public partial class MainWindow : Window
         if (sizeItem == null)
         {
             SizeDetailPanel.Visibility = Visibility.Collapsed;
-            ChannelList.Visibility = Visibility.Collapsed;
+            ChannelPopup.IsOpen = false;
             return;
         }
 
@@ -538,7 +540,7 @@ public partial class MainWindow : Window
         SizeDetailLabel.Text = sizeItem.DisplayLabel;
         SizeDetailChannel.Text = sizeItem.ChannelLabel;
         ChannelSearchBox.Text = "";
-        ChannelList.Visibility = Visibility.Collapsed;
+        ChannelPopup.IsOpen = false;
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -606,20 +608,20 @@ public partial class MainWindow : Window
     {
         if (!_channelEntriesLoaded) LoadChannelEntries();
         PopulateChannelList(ChannelSearchBox.Text.Trim());
-        ChannelList.Visibility = Visibility.Visible;
+        ChannelPopup.IsOpen = true;
     }
 
     private void ChannelSearchBox_GotFocus(object sender, RoutedEventArgs e)
     {
         if (!_channelEntriesLoaded) LoadChannelEntries();
         PopulateChannelList();
-        ChannelList.Visibility = Visibility.Visible;
+        ChannelPopup.IsOpen = true;
     }
 
-    private void ChannelSearchBox_LostFocus(object sender, RoutedEventArgs e)
+    private void ChannelList_MouseClick(object sender, MouseButtonEventArgs e)
     {
-        if (!ChannelList.IsKeyboardFocusWithin)
-            ChannelList.Visibility = Visibility.Collapsed;
+        if (ChannelList.SelectedIndex >= 0)
+            AssignChannel_Click(sender, e);
     }
 
     private void AssignChannel_Click(object sender, RoutedEventArgs e)
@@ -641,7 +643,7 @@ public partial class MainWindow : Window
 
         _selectedSizeItem.ChannelNumber = selected.Channel;
         SizeDetailChannel.Text = _selectedSizeItem.ChannelLabel;
-        ChannelList.Visibility = Visibility.Collapsed;
+        ChannelPopup.IsOpen = false;
         ChannelSearchBox.Text = "";
 
         _channelEntriesLoaded = false;
@@ -766,10 +768,13 @@ public partial class MainWindow : Window
         }
     }
 
+    private bool IsPrintedTabActive => MainTabs.SelectedIndex == 1;
+
     private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != MainTabs) return;
         ShowOrderDetail(null);
+        DoneBtn.Content = IsPrintedTabActive ? "Mark Unprinted" : "Mark Printed";
     }
 
     private void ExpandAll_Changed(object sender, RoutedEventArgs e)
@@ -807,7 +812,36 @@ public partial class MainWindow : Window
 
     private void DoneButton_Click(object sender, RoutedEventArgs e)
     {
-        OpenDoneConfirmForSelected(cursorOverEmail: false);
+        if (IsPrintedTabActive)
+            MarkSelectedUnprinted();
+        else
+            OpenDoneConfirmForSelected(cursorOverEmail: false);
+    }
+
+    private void MarkSelectedUnprinted()
+    {
+        var selected = GetSelectedOrders();
+        if (selected.Count == 0 && _selectedOrderItem != null)
+            selected = new List<OrderTreeItem> { _selectedOrderItem };
+        if (selected.Count == 0) return;
+
+        var names = string.Join(", ", selected.Take(5).Select(o => o.ShortId));
+        if (selected.Count > 5) names += $" +{selected.Count - 5} more";
+
+        var result = MessageBox.Show(
+            $"Mark {selected.Count} order(s) as UNPRINTED?\n\n{names}",
+            "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+        if (result != MessageBoxResult.Yes) return;
+
+        foreach (var order in selected)
+        {
+            _vm.MarkUnprinted(order.DbId);
+            order.StatusCode = OrderStatusCode.New;
+        }
+
+        _vm.LoadOrders();
+        UpdateStatusBar();
     }
 
     private void OpenDoneConfirmForSelected(bool cursorOverEmail)
@@ -823,7 +857,7 @@ public partial class MainWindow : Window
             var order = selected[0];
             var win = new DoneConfirmWindow(
                 order.CustomerName, order.ShortId,
-                alreadyDone: order.StatusCode == "picked_up",
+                alreadyDone: order.StatusCode == OrderStatusCode.PickedUp,
                 alreadyEmailed: false,
                 cursorOverEmail: cursorOverEmail)
             { Owner = this };
@@ -857,13 +891,26 @@ public partial class MainWindow : Window
             if (action == DoneAction.MarkDone || action == DoneAction.MarkDoneAndEmail)
             {
                 _vm.MarkDone(order.DbId);
-                order.StatusCode = "picked_up";
+                order.StatusCode = OrderStatusCode.PickedUp;
             }
             if (action == DoneAction.MarkDoneAndEmail)
             {
-                // TODO: send email via NotificationService
-                AlertCollector.Info(AlertCategory.General,
-                    $"Email for {order.ShortId} not yet wired", orderId: order.ExternalOrderId);
+                try
+                {
+                    _notificationService.NotifyCustomer(order.DbId, "operator");
+                }
+                catch (Exception ex)
+                {
+                    AlertCollector.Error(AlertCategory.Network,
+                        $"Failed to notify customer for order {order.ShortId}",
+                        orderId: order.ExternalOrderId,
+                        detail: $"Attempted: send notification via NotificationService. " +
+                                $"Expected: customer notified. " +
+                                $"Found: {ex.GetType().Name}. " +
+                                $"Context: ApplyDoneAction with MarkDoneAndEmail. " +
+                                $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
+                        ex: ex);
+                }
             }
         }
     }
@@ -871,6 +918,116 @@ public partial class MainWindow : Window
     private void NotifyButton_Click(object sender, RoutedEventArgs e)
     {
         OpenDoneConfirmForSelected(cursorOverEmail: true);
+    }
+
+    // ── Context menu handlers (right-click on order header) ──
+
+    private OrderTreeItem? GetContextMenuOrder(object sender)
+    {
+        if (sender is MenuItem mi && mi.Parent is ContextMenu cm)
+            return cm.PlacementTarget is FrameworkElement fe ? fe.DataContext as OrderTreeItem : null;
+        return null;
+    }
+
+    private void ContextMenu_Email_Click(object sender, RoutedEventArgs e)
+    {
+        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (order == null) return;
+
+        try
+        {
+            _notificationService.NotifyCustomer(order.DbId, "operator");
+            _vm.LoadOrders();
+            UpdateStatusBar();
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Network,
+                $"Failed to notify customer for order {order.ShortId}",
+                orderId: order.ExternalOrderId,
+                detail: $"Attempted: send default email via NotificationService. " +
+                        $"Expected: customer notified. " +
+                        $"Found: {ex.GetType().Name}. " +
+                        $"Context: right-click Email on order. " +
+                        $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
+                ex: ex);
+        }
+    }
+
+    private void ContextMenu_OpenTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (order == null) return;
+
+        if (_settings.EmailTemplates.Count == 0)
+        {
+            AlertCollector.Warn(AlertCategory.Settings,
+                "No email templates configured. Open Settings > Notifications to create templates.");
+            return;
+        }
+
+        // Step 1: Choose template
+        var fullOrder = _orders.GetFullOrder(order.DbId);
+        if (fullOrder == null)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                $"Cannot load order {order.ShortId} for email preview",
+                orderId: order.ExternalOrderId);
+            return;
+        }
+
+        var isShipped = fullOrder.DeliveryMethodId == DeliveryMethodId.Ship;
+        var defaultName = _settings.GetDefaultTemplate(isShipped)?.Name;
+        var chooser = new EmailTemplateChooser(_settings.EmailTemplates, defaultName) { Owner = this };
+        if (chooser.ShowDialog() != true || chooser.SelectedTemplate == null) return;
+
+        // Step 2: Preview with placeholders filled
+        var template = chooser.SelectedTemplate;
+        var subject = Core.Processing.EmailService.ReplacePlaceholders(template.Subject, fullOrder);
+        var body = Core.Processing.EmailService.ReplacePlaceholders(template.Body, fullOrder);
+
+        var preview = new SendEmailWindow(fullOrder.CustomerEmail ?? "", subject, body) { Owner = this };
+        if (preview.ShowDialog() != true) return;
+
+        // Step 3: Send through NotificationService
+        try
+        {
+            _notificationService.NotifyCustomer(order.DbId, "operator", template);
+            _vm.LoadOrders();
+            UpdateStatusBar();
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Network,
+                $"Failed to notify customer for order {order.ShortId}",
+                orderId: order.ExternalOrderId,
+                detail: $"Attempted: send email with template '{template.Name}'. " +
+                        $"Expected: customer notified. " +
+                        $"Found: {ex.GetType().Name}. " +
+                        $"Context: right-click Open Email Template. " +
+                        $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
+                ex: ex);
+        }
+    }
+
+    private void ContextMenu_MarkDone_Click(object sender, RoutedEventArgs e)
+    {
+        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (order == null) return;
+
+        if (IsPrintedTabActive)
+        {
+            _vm.MarkUnprinted(order.DbId);
+            order.StatusCode = OrderStatusCode.New;
+        }
+        else
+        {
+            _vm.MarkDone(order.DbId);
+            order.StatusCode = OrderStatusCode.PickedUp;
+        }
+
+        _vm.LoadOrders();
+        UpdateStatusBar();
     }
 
     private void TransferButton_Click(object sender, RoutedEventArgs e)

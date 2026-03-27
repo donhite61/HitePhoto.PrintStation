@@ -163,8 +163,8 @@ public class MainViewModel : ViewModelBase
                 _channelNamesDirty = false;
             }
 
-            var pending = LoadOrdersWithStatus(conn, "new", "in_progress");
-            var printed = LoadOrdersWithStatus(conn, "ready", "notified", "picked_up");
+            var pending = LoadOrdersWithStatus(conn, OrderStatusCode.New, OrderStatusCode.InProgress);
+            var printed = LoadOrdersWithStatus(conn, OrderStatusCode.Ready, OrderStatusCode.Notified, OrderStatusCode.PickedUp);
             var otherStore = LoadOtherStoreOrders(conn);
 
             DiffAndPatch(PendingOrders, pending, verifyFiles: true);
@@ -217,7 +217,7 @@ public class MainViewModel : ViewModelBase
     {
         var results = new List<OrderRow>();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
+        cmd.CommandText = $"""
             SELECT o.id, o.external_order_id, o.source_code, o.status_code,
                    o.customer_first_name, o.customer_last_name,
                    o.customer_email, o.customer_phone,
@@ -227,7 +227,7 @@ public class MainViewModel : ViewModelBase
             FROM orders o
             LEFT JOIN stores s ON s.id = o.pickup_store_id
             WHERE o.pickup_store_id != @storeId
-              AND o.status_code NOT IN ('picked_up', 'cancelled')
+              AND o.status_code NOT IN ('{OrderStatusCode.PickedUp}', '{OrderStatusCode.Cancelled}')
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
@@ -606,8 +606,14 @@ public class MainViewModel : ViewModelBase
 
     public void MarkDone(int orderId)
     {
-        _orders.UpdateOrderStatus(orderId, "picked_up");
+        _orders.UpdateOrderStatus(orderId, OrderStatusCode.PickedUp);
         _history.AddNote(orderId, "Marked done by operator", "operator");
+    }
+
+    public void MarkUnprinted(int orderId)
+    {
+        _orders.UpdateOrderStatus(orderId, OrderStatusCode.New);
+        _history.AddNote(orderId, "Marked unprinted by operator", "operator");
     }
 
     public void UnassignChannel(string sizeLabel, string mediaType)

@@ -106,7 +106,8 @@ public partial class App : Application
                 settings.NoritsuOutputRoot));
 
         // TODO: wire real implementations when ready
-        services.AddSingleton<IEmailSender, StubEmailSender>();
+        services.AddSingleton<IEmailSender>(sp =>
+            new Core.Processing.EmailService(sp.GetRequiredService<AppSettings>()));
         services.AddSingleton<IPixfizzNotifier, StubPixfizzNotifier>();
         // services.AddSingleton<ITransferService, TransferService>();
 

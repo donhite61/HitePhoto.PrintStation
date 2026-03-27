@@ -182,6 +182,12 @@ public class DakisOrderParser
             info.PickupInStore = YBool(shipping, ":pickup_in_store:");
             info.ShippingFirstName = YStr(cust, ":shipping_first_name:");
             info.ShippingLastName = YStr(cust, ":shipping_last_name:");
+            info.ShippingAddress1 = YStr(cust, ":address_1:");
+            info.ShippingAddress2 = YStr(cust, ":address_2:");
+            info.ShippingCity = YStr(cust, ":city:");
+            info.ShippingState = YStr(cust, ":state:");
+            info.ShippingZip = YStr(cust, ":postal_code:");
+            info.ShippingCountry = YStr(cust, ":country:");
 
             // Store
             info.StoreName = YStr(YGet(root, ":store:"), ":name:");
@@ -643,6 +649,16 @@ public class DakisOrderParser
             BillingStoreId = info.BillingStoreId,
             CurrentStoreId = info.CurrentStoreId,
             Channel = info.Channel,
+            DeliveryMethodId = info.PickupInStore ? DeliveryMethodId.Pickup : DeliveryMethodId.Ship,
+            ShippingFirstName = info.ShippingFirstName,
+            ShippingLastName = info.ShippingLastName,
+            ShippingAddress1 = info.ShippingAddress1,
+            ShippingAddress2 = info.ShippingAddress2,
+            ShippingCity = info.ShippingCity,
+            ShippingState = info.ShippingState,
+            ShippingZip = info.ShippingZip,
+            ShippingCountry = info.ShippingCountry,
+            ShippingMethod = info.ShippingMethod,
             Items = items
         };
     }
@@ -723,6 +739,12 @@ public class DakisOrderParser
         public string CustomerCompany { get; set; } = "";
         public string ShippingFirstName { get; set; } = "";
         public string ShippingLastName { get; set; } = "";
+        public string ShippingAddress1 { get; set; } = "";
+        public string ShippingAddress2 { get; set; } = "";
+        public string ShippingCity { get; set; } = "";
+        public string ShippingState { get; set; } = "";
+        public string ShippingZip { get; set; } = "";
+        public string ShippingCountry { get; set; } = "";
         public string BillingAddress1 { get; set; } = "";
         public string BillingCity { get; set; } = "";
         public string BillingState { get; set; } = "";

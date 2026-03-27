@@ -111,6 +111,13 @@ public class OrderDb
             source_code  TEXT NOT NULL,
             display_name TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS delivery_methods (
+            id           INTEGER PRIMARY KEY,
+            method_code  TEXT NOT NULL UNIQUE,
+            method_name  TEXT NOT NULL,
+            sort_order   INTEGER NOT NULL DEFAULT 0
+        );
         """;
 
     // ── Stores ────────────────────────────────────────────────────────────
@@ -208,6 +215,16 @@ public class OrderDb
             ordered_at                TEXT NOT NULL,
             folder_path               TEXT DEFAULT '',
             download_status           TEXT DEFAULT 'pending',
+            delivery_method_id        INTEGER NOT NULL DEFAULT 1,
+            shipping_first_name       TEXT NOT NULL DEFAULT '',
+            shipping_last_name        TEXT NOT NULL DEFAULT '',
+            shipping_address1         TEXT DEFAULT NULL,
+            shipping_address2         TEXT DEFAULT NULL,
+            shipping_city             TEXT DEFAULT NULL,
+            shipping_state            TEXT DEFAULT NULL,
+            shipping_zip              TEXT DEFAULT NULL,
+            shipping_country          TEXT DEFAULT NULL,
+            shipping_method           TEXT DEFAULT NULL,
             is_transfer               INTEGER NOT NULL DEFAULT 0,
             transfer_store_id         INTEGER DEFAULT NULL,
             pixfizz_job_id            TEXT DEFAULT NULL,
@@ -389,6 +406,14 @@ public class OrderDb
                 (3, 'dashboard', 'Dashboard');
             """);
 
+        // Delivery methods — match MariaDB IDs exactly
+        Execute(conn, """
+            INSERT OR IGNORE INTO delivery_methods (id, method_code, method_name, sort_order) VALUES
+                (1, 'pickup',      'Pickup',      1),
+                (2, 'ship',        'Ship',        2),
+                (3, 'inter_store', 'Inter-Store', 3);
+            """);
+
         // Stores — match MariaDB IDs exactly
         Execute(conn, """
             INSERT OR IGNORE INTO stores (id, store_name, short_name) VALUES
@@ -473,6 +498,13 @@ public class OrderDb
         // Migration 004: Add pixfizz_job_id and received tracking to orders
         AddColumnIfMissing(conn, "orders", "pixfizz_job_id", "TEXT DEFAULT NULL");
         AddColumnIfMissing(conn, "orders", "is_received_pushed", "INTEGER NOT NULL DEFAULT 0");
+
+        // Migration 005: Partial unique index for alert dedup (enables ON CONFLICT upsert)
+        Execute(conn, """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_dedup
+                ON alerts (category, summary, COALESCE(order_id, ''))
+                WHERE acknowledged = 0;
+            """);
     }
 
     private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)

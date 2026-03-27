@@ -95,6 +95,14 @@
                                   ItemsSource="{Binding Sizes}">
             <Border x:Name="SelectionBorder" Background="Transparent"
                     CornerRadius="3" Padding="2,0" Margin="0,8,4,1">
+                <Border.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Email" Click="ContextMenu_Email_Click"/>
+                        <MenuItem Header="Open Email Template" Click="ContextMenu_OpenTemplate_Click"/>
+                        <Separator/>
+                        <MenuItem Header="Mark Done" Click="ContextMenu_MarkDone_Click"/>
+                    </ContextMenu>
+                </Border.ContextMenu>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock x:Name="NameText"
                                Text="{Binding DisplayLabel}"
@@ -339,19 +347,28 @@
                                     <TextBox x:Name="ChannelSearchBox" Width="200" Padding="4,3" FontSize="11"
                                              VerticalAlignment="Center" Margin="0,0,6,0"
                                              TextChanged="ChannelSearch_TextChanged"
-                                             GotFocus="ChannelSearchBox_GotFocus"
-                                             LostFocus="ChannelSearchBox_LostFocus"/>
+                                             GotFocus="ChannelSearchBox_GotFocus"/>
                                     <Button x:Name="AssignChannelBtn" Content="Assign" Width="70" FontSize="11"
                                             VerticalAlignment="Center"
                                             Click="AssignChannel_Click"/>
                                 </WrapPanel>
-                                <ListBox x:Name="ChannelList" MaxHeight="140" Margin="0,4,0,0"
-                                         Visibility="Collapsed"
-                                         Background="{DynamicResource InputBg}"
-                                         BorderBrush="{DynamicResource InputBorder}"
-                                         Foreground="{DynamicResource TextPrimary}"
-                                         FontSize="11"/>
                             </StackPanel>
+                            <Popup x:Name="ChannelPopup"
+                                   PlacementTarget="{Binding ElementName=ChannelSearchBox}"
+                                   Placement="Bottom"
+                                   StaysOpen="False"
+                                   AllowsTransparency="True"
+                                   PopupAnimation="Fade">
+                                <Border Background="{DynamicResource InputBg}"
+                                        BorderBrush="{DynamicResource InputBorder}"
+                                        BorderThickness="1">
+                                    <ListBox x:Name="ChannelList" MaxHeight="140" MinWidth="300"
+                                             Background="{DynamicResource InputBg}"
+                                             Foreground="{DynamicResource TextPrimary}"
+                                             FontSize="11" BorderThickness="0"
+                                             MouseLeftButtonUp="ChannelList_MouseClick"/>
+                                </Border>
+                            </Popup>
 
                             <!-- Notes (compact) -->
                             <ListBox x:Name="NotesListBox" Grid.Row="2" MaxHeight="80" Margin="10,4,10,0"

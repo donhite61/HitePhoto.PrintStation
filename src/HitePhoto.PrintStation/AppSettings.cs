@@ -62,6 +62,17 @@ public class AppSettings
     public string NotificationBodyTemplate { get; set; } =
         "Hi {CustomerName},\n\nYour photo order is ready for pickup at {StoreName}.\n\nThank you!\nHite Photo";
     public List<Core.Processing.EmailTemplate> EmailTemplates { get; set; } = new();
+    public string DefaultPickupTemplate  { get; set; } = "Pickup";
+    public string DefaultShippedTemplate { get; set; } = "Shipped";
+
+    /// <summary>Find a template by name, or null if not found.</summary>
+    public Core.Processing.EmailTemplate? GetTemplate(string name)
+        => EmailTemplates.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Get the appropriate default template for pickup or shipped orders.</summary>
+    public Core.Processing.EmailTemplate? GetDefaultTemplate(bool isShipped)
+        => GetTemplate(isShipped ? DefaultShippedTemplate : DefaultPickupTemplate)
+           ?? EmailTemplates.FirstOrDefault();
 
     // ── Pixfizz ──
     public bool   PixfizzEnabled         { get; set; } = true;

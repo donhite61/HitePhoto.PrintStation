@@ -1,6 +1,7 @@
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using MimeKit;
+using HitePhoto.PrintStation.Core.Services;
 using HitePhoto.Shared.Models;
 
 namespace HitePhoto.PrintStation.Core.Processing;
@@ -24,7 +25,7 @@ public class EmailTemplate
 /// Adapted from PrintRouter's NotificationService to use DB Order model.
 /// Notification status is tracked in the DB via order_notes (note_type = "notification").
 /// </summary>
-public class EmailService
+public class EmailService : IEmailSender
 {
     private readonly AppSettings _settings;
 
@@ -87,12 +88,9 @@ public class EmailService
         await client.DisconnectAsync(true);
     }
 
-    private string ReplacePlaceholders(string template, Order order)
+    public static string ReplacePlaceholders(string template, Order order)
     {
-        string shortId = order.ExternalOrderId;
-        int dash = shortId.LastIndexOf('-');
-        if (dash > 0 && dash < shortId.Length - 1)
-            shortId = shortId[(dash + 1)..];
+        var shortId = OrderHelpers.GetShortId(order.ExternalOrderId);
 
         return template
             .Replace("{CustomerName}", $"{order.CustomerFirstName} {order.CustomerLastName}".Trim())

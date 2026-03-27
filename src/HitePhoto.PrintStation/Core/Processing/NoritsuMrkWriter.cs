@@ -40,7 +40,7 @@ public class NoritsuMrkWriter
             throw new InvalidOperationException(
                 $"Channel not assigned for {sizeLabel} in order {order.ExternalOrderId}");
 
-        string shortId = GetShortId(order.ExternalOrderId);
+        string shortId = OrderHelpers.GetShortId(order.ExternalOrderId);
         string baseName = $"{shortId}_{SanitizeFolderName(sizeLabel)}";
         var (stagingDir, finalDir) = ResolveFolderPair(baseName);
         string miscDir = Path.Combine(stagingDir, "MISC");
@@ -189,11 +189,4 @@ public class NoritsuMrkWriter
         throw new InvalidOperationException($"Cannot find a non-colliding folder name for {baseName}");
     }
 
-    public static string GetShortId(string orderId)
-    {
-        int dash = orderId.LastIndexOf('-');
-        if (dash >= 0 && dash < orderId.Length - 1)
-            return orderId[(dash + 1)..];
-        return orderId;
-    }
 }

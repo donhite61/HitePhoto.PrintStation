@@ -1,6 +1,9 @@
+using HitePhoto.PrintStation.Core.Processing;
+using HitePhoto.Shared.Models;
+
 namespace HitePhoto.PrintStation.Core.Services;
 
 public interface IEmailSender
 {
-    Task SendOrderReadyEmailAsync(int orderId, string customerEmail, string customerName, string templateName = "");
+    Task<EmailResult> SendOrderReadyEmailAsync(Order order, EmailTemplate? template = null);
 }

@@ -1,4 +1,5 @@
 using HitePhoto.PrintStation.Core.Models;
+using HitePhoto.PrintStation.Core.Processing;
 using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Services;
@@ -25,7 +26,7 @@ public class NotificationService : INotificationService
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
-    public void NotifyCustomer(int orderId, string operatorName)
+    public void NotifyCustomer(int orderId, string operatorName, EmailTemplate? templateOverride = null)
     {
         var order = _orders.GetOrder(orderId);
         if (order is null)
@@ -49,7 +50,32 @@ public class NotificationService : INotificationService
                     orderId: order.ExternalOrderId);
                 return;
             }
-            // TODO: call _emailService with order details
+
+            var fullOrder = _orders.GetFullOrder(orderId);
+            if (fullOrder is null)
+            {
+                AlertCollector.Error(AlertCategory.Database,
+                    $"Cannot load full order {orderId} for email",
+                    orderId: order.ExternalOrderId,
+                    detail: $"Attempted: load full order for email template. " +
+                            $"Expected: order with customer details. " +
+                            $"Found: null from GetFullOrder. " +
+                            $"Context: sending notification email. " +
+                            $"State: order {order.ExternalOrderId}, dbId={orderId}.");
+                return;
+            }
+
+            var template = templateOverride
+                ?? _settings.GetDefaultTemplate(fullOrder.DeliveryMethodId == DeliveryMethodId.Ship);
+            var result = _emailSender.SendOrderReadyEmailAsync(fullOrder, template).GetAwaiter().GetResult();
+            if (!result.Success)
+            {
+                AlertCollector.Warn(AlertCategory.Network,
+                    $"Email failed for {order.ExternalOrderId}: {result.ErrorMessage}",
+                    orderId: order.ExternalOrderId);
+                return;
+            }
+
             method = "Email";
         }
 

@@ -103,6 +103,7 @@ public partial class SettingsWindow : Window
         SmtpPassBox.Password = _settings.SmtpPassword;
         EmailFromBox.Text = _settings.NotificationFromEmail;
         PopulateTemplateList();
+        RefreshDefaultCombos();
 
         // Diagnostics
         DevModeCheck.IsChecked = _settings.DeveloperMode;
@@ -201,6 +202,8 @@ public partial class SettingsWindow : Window
         _settings.NotificationFromEmail = EmailFromBox.Text.Trim();
         SaveCurrentTemplate();
         _settings.EmailTemplates = _editableTemplates.ToList();
+        _settings.DefaultPickupTemplate = (DefaultPickupCombo.SelectedItem as EmailTemplate)?.Name ?? "Pickup";
+        _settings.DefaultShippedTemplate = (DefaultShippedCombo.SelectedItem as EmailTemplate)?.Name ?? "Shipped";
         var first = _settings.EmailTemplates.FirstOrDefault();
         if (first != null)
         {
@@ -286,6 +289,24 @@ public partial class SettingsWindow : Window
         _editableTemplates = _settings.EmailTemplates
             .Select(t => new EmailTemplate { Name = t.Name, Subject = t.Subject, Body = t.Body })
             .ToList();
+
+        // Seed defaults on first run
+        if (_editableTemplates.Count == 0)
+        {
+            _editableTemplates.Add(new EmailTemplate
+            {
+                Name = "Pickup",
+                Subject = "Your Hite Photo order is ready at {StoreName}",
+                Body = "Hi {CustomerName},\n\nYour order #{OrderId} is ready for pickup at {StoreName}.\nWe are open 10-6 Mon-Fri, we are closed on weekends\n\nThank you!\nHite Photo\n6704 Orchard Lake Rd.\nWest Bloomfield, MI 48322\n248-851-6340"
+            });
+            _editableTemplates.Add(new EmailTemplate
+            {
+                Name = "Shipped",
+                Subject = "Your Hite Photo order has shipped",
+                Body = "Hi {CustomerName},\n\nYour order #{OrderId} has been shipped.\n\nThank you!\nHite Photo"
+            });
+        }
+
         TemplateListBox.ItemsSource = _editableTemplates;
         if (_editableTemplates.Count > 0)
             TemplateListBox.SelectedIndex = 0;
@@ -320,24 +341,37 @@ public partial class SettingsWindow : Window
     private void TemplateField_Changed(object sender, TextChangedEventArgs e)
     {
         if (_suppressTemplateSync) return;
-        SaveCurrentTemplate();
+        // Update the in-memory object without refreshing the ListBox (avoids cursor jump)
+        if (TemplateListBox.SelectedItem is EmailTemplate tmpl)
+        {
+            tmpl.Name = TemplateNameBox.Text.Trim();
+            tmpl.Subject = TemplateSubjectBox.Text;
+            tmpl.Body = TemplateBodyBox.Text;
+        }
+    }
+
+    private void TemplateName_LostFocus(object sender, RoutedEventArgs e)
+    {
+        // Refresh ListBox display and combos when user finishes editing the name
+        RefreshTemplateListDisplay();
+    }
+
+    private void RefreshTemplateListDisplay()
+    {
+        var idx = TemplateListBox.SelectedIndex;
+        TemplateListBox.ItemsSource = null;
+        TemplateListBox.ItemsSource = _editableTemplates;
+        TemplateListBox.SelectedIndex = idx;
+        RefreshDefaultCombos();
     }
 
     private void SaveCurrentTemplate()
     {
         if (TemplateListBox.SelectedItem is EmailTemplate tmpl)
         {
-            var oldName = tmpl.Name;
             tmpl.Name = TemplateNameBox.Text.Trim();
             tmpl.Subject = TemplateSubjectBox.Text;
             tmpl.Body = TemplateBodyBox.Text;
-            if (oldName != tmpl.Name)
-            {
-                var idx = TemplateListBox.SelectedIndex;
-                TemplateListBox.ItemsSource = null;
-                TemplateListBox.ItemsSource = _editableTemplates;
-                TemplateListBox.SelectedIndex = idx;
-            }
         }
     }
 
@@ -353,6 +387,7 @@ public partial class SettingsWindow : Window
         TemplateListBox.ItemsSource = null;
         TemplateListBox.ItemsSource = _editableTemplates;
         TemplateListBox.SelectedItem = tmpl;
+        RefreshDefaultCombos();
     }
 
     private void RemoveTemplate_Click(object sender, RoutedEventArgs e)
@@ -368,6 +403,64 @@ public partial class SettingsWindow : Window
         TemplateListBox.ItemsSource = _editableTemplates;
         if (_editableTemplates.Count > 0)
             TemplateListBox.SelectedIndex = 0;
+        RefreshDefaultCombos();
+    }
+
+    private void RefreshDefaultCombos()
+    {
+        // Preserve current selections by object reference before re-binding
+        var prevPickup = DefaultPickupCombo.SelectedItem as EmailTemplate;
+        var prevShipped = DefaultShippedCombo.SelectedItem as EmailTemplate;
+
+        DefaultPickupCombo.ItemsSource = null;
+        DefaultPickupCombo.ItemsSource = _editableTemplates;
+        DefaultShippedCombo.ItemsSource = null;
+        DefaultShippedCombo.ItemsSource = _editableTemplates;
+
+        // Restore by object reference first, then by name, then first item
+        DefaultPickupCombo.SelectedItem = prevPickup
+            ?? _editableTemplates.FirstOrDefault(t => t.Name.Equals(_settings.DefaultPickupTemplate, StringComparison.OrdinalIgnoreCase))
+            ?? _editableTemplates.FirstOrDefault();
+        DefaultShippedCombo.SelectedItem = prevShipped
+            ?? _editableTemplates.FirstOrDefault(t => t.Name.Equals(_settings.DefaultShippedTemplate, StringComparison.OrdinalIgnoreCase))
+            ?? _editableTemplates.FirstOrDefault();
+    }
+
+    private async void SendTestEmail_Click(object sender, RoutedEventArgs e)
+    {
+        var testAddress = TestEmailBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(testAddress))
+        {
+            TestEmailResult.Text = "Enter an email address first.";
+            return;
+        }
+
+        TestEmailResult.Text = "Sending...";
+
+        var template = TemplateListBox.SelectedItem as EmailTemplate;
+        var testOrder = new HitePhoto.Shared.Models.Order
+        {
+            ExternalOrderId = "TEST-001",
+            CustomerFirstName = "Test",
+            CustomerLastName = "Customer",
+            CustomerEmail = testAddress,
+            CustomerPhone = "555-0100",
+            StoreName = "Hite Photo",
+            OrderedAt = DateTime.Now
+        };
+
+        try
+        {
+            var emailService = new Core.Processing.EmailService(_settings);
+            var result = await emailService.SendOrderReadyEmailAsync(testOrder, template);
+            TestEmailResult.Text = result.Success
+                ? $"Test email sent to {testAddress}"
+                : $"Failed: {result.ErrorMessage}";
+        }
+        catch (Exception ex)
+        {
+            TestEmailResult.Text = $"Error: {ex.Message}";
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════

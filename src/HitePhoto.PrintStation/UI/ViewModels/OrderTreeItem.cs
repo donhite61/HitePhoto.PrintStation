@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using HitePhoto.PrintStation.Core;
 using HitePhoto.Shared.Models;
 
 namespace HitePhoto.PrintStation.UI.ViewModels;
@@ -222,7 +223,7 @@ public class OrderTreeItem : INotifyPropertyChanged
 
     // ── Computed display properties ──
 
-    public string ShortId => StripPrefix(ExternalOrderId);
+    public string ShortId => OrderHelpers.GetShortId(ExternalOrderId);
 
     public string DisplayLabel =>
         string.IsNullOrWhiteSpace(CustomerName)
@@ -233,14 +234,6 @@ public class OrderTreeItem : INotifyPropertyChanged
 
     public string DateLabel => OrderedAt?.ToString("MM/dd HH:mm") ?? "";
 
-    private static string StripPrefix(string orderId)
-    {
-        if (string.IsNullOrEmpty(orderId)) return "";
-        int dash = orderId.LastIndexOf('-');
-        if (dash > 0 && dash < orderId.Length - 1)
-            return orderId[(dash + 1)..];
-        return orderId;
-    }
 
     public ObservableCollection<SizeTreeItem> Sizes { get; } = new();
 

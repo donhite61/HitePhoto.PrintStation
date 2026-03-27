@@ -9,13 +9,14 @@ namespace HitePhoto.PrintStation.Core;
 public static class OrderHelpers
 {
     /// <summary>
-    /// Strip "HITEPHOTO-" prefix from external order ID for folder naming.
+    /// Strip vendor prefix from external order ID (e.g. "HITEPHOTO-123" → "123", "DAKIS-789" → "789").
     /// </summary>
     public static string GetShortId(string externalOrderId)
     {
-        const string prefix = "HITEPHOTO-";
-        return externalOrderId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            ? externalOrderId.Substring(prefix.Length)
+        if (string.IsNullOrEmpty(externalOrderId)) return "";
+        int dash = externalOrderId.LastIndexOf('-');
+        return (dash > 0 && dash < externalOrderId.Length - 1)
+            ? externalOrderId[(dash + 1)..]
             : externalOrderId;
     }
 

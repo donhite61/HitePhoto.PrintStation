@@ -27,6 +27,18 @@ public record UnifiedOrder
     public bool IsInvoiceOnly { get; init; }
     public bool IsRush { get; init; }
 
+    // Delivery
+    public int DeliveryMethodId { get; init; } = 1; // 1=pickup, 2=ship, 3=inter_store
+    public string? ShippingFirstName { get; init; }
+    public string? ShippingLastName { get; init; }
+    public string? ShippingAddress1 { get; init; }
+    public string? ShippingAddress2 { get; init; }
+    public string? ShippingCity { get; init; }
+    public string? ShippingState { get; init; }
+    public string? ShippingZip { get; init; }
+    public string? ShippingCountry { get; init; }
+    public string? ShippingMethod { get; init; }
+
     // Pixfizz-specific
     public string? PixfizzJobId { get; init; }
     public string? PixfizzBookId { get; init; }

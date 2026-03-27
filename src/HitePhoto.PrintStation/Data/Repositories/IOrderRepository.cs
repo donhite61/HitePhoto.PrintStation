@@ -6,6 +6,7 @@ namespace HitePhoto.PrintStation.Data.Repositories;
 public interface IOrderRepository
 {
     OrderRecord? GetOrder(int orderId);
+    HitePhoto.Shared.Models.Order? GetFullOrder(int orderId);
     int? FindOrderId(string externalOrderId, int storeId);
     List<OrderItemRecord> GetNoritsuItems(int orderId);
     void SetHold(int orderId, bool isHeld);

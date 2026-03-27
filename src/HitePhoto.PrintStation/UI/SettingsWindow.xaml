@@ -458,31 +458,13 @@
             <TabItem Header="Notifications">
                 <ScrollViewer Margin="12">
                     <StackPanel MaxWidth="650">
-                        <TextBlock Text="Email Notifications (SMTP)" Foreground="{DynamicResource TextHeading}"
-                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
                         <CheckBox x:Name="EmailEnabledCheck" Content="Enable email notifications" Margin="0,0,0,12"/>
-
-                        <TextBlock Text="Pixfizz Notification Mode" Foreground="{DynamicResource TextHeading}"
-                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                        <ComboBox x:Name="PixfizzNotifyCombo" Width="200" HorizontalAlignment="Left" Margin="0,0,0,16">
-                            <ComboBoxItem Content="Pixfizz"/>
-                            <ComboBoxItem Content="Email"/>
-                        </ComboBox>
-
-                        <Label Content="SMTP Server" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
-                        <TextBox x:Name="SmtpHostBox" Margin="0,0,0,8"/>
-                        <Label Content="SMTP Port" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
-                        <TextBox x:Name="SmtpPortBox" Margin="0,0,0,8" Width="80" HorizontalAlignment="Left"/>
-                        <Label Content="SMTP Username" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
-                        <TextBox x:Name="SmtpUserBox" Margin="0,0,0,8"/>
-                        <Label Content="SMTP Password" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
-                        <PasswordBox x:Name="SmtpPassBox" Margin="0,0,0,8"/>
-                        <Label Content="From email address" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
-                        <TextBox x:Name="EmailFromBox" Margin="0,0,0,8"/>
 
                         <!-- Email Templates -->
                         <TextBlock Text="Email Templates" Foreground="{DynamicResource TextHeading}"
-                                   FontSize="14" FontWeight="SemiBold" Margin="0,8,0,4"/>
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Create multiple templates for different notification types (pickup, shipped, etc)."
+                                   Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,0,0,6"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <ListBox x:Name="TemplateListBox" Width="180" Height="80"
                                      DisplayMemberPath="Name"
@@ -494,8 +476,10 @@
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <Label Content="Template Name" Foreground="{DynamicResource TextSecondary}" Padding="0,2" Width="100"/>
-                            <TextBox x:Name="TemplateNameBox" Width="200" TextChanged="TemplateField_Changed"/>
+                            <Label Content="Template Name" Foreground="{DynamicResource TextSecondary}" Padding="0,4" Width="100" VerticalAlignment="Center"/>
+                            <TextBox x:Name="TemplateNameBox" Width="200"
+                                     LostFocus="TemplateName_LostFocus"
+                                     TextChanged="TemplateField_Changed"/>
                         </StackPanel>
                         <Label Content="Subject" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
                         <TextBox x:Name="TemplateSubjectBox" Margin="0,0,0,8" TextChanged="TemplateField_Changed"/>
@@ -506,6 +490,51 @@
                                  AcceptsReturn="True" TextWrapping="Wrap"
                                  Height="200" VerticalScrollBarVisibility="Auto"
                                  TextChanged="TemplateField_Changed"/>
+
+                        <!-- Default template pickers -->
+                        <Grid Margin="0,0,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="160"/>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="160"/>
+                            </Grid.ColumnDefinitions>
+                            <Label Grid.Column="0" Content="Default for pickup:" Foreground="{DynamicResource TextSecondary}" Padding="0,4" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="1" x:Name="DefaultPickupCombo" DisplayMemberPath="Name" VerticalAlignment="Center"/>
+                            <Label Grid.Column="3" Content="Default for shipped:" Foreground="{DynamicResource TextSecondary}" Padding="0,4" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="4" x:Name="DefaultShippedCombo" DisplayMemberPath="Name" VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <!-- Pixfizz Notification Mode -->
+                        <TextBlock Text="Pixfizz Notification Mode" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="PixfizzNotifyCombo" Width="200" HorizontalAlignment="Left" Margin="0,0,0,16">
+                            <ComboBoxItem Content="Pixfizz"/>
+                            <ComboBoxItem Content="Email"/>
+                        </ComboBox>
+
+                        <!-- SMTP Settings -->
+                        <TextBlock Text="SMTP Settings" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <Label Content="SMTP Server" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="SmtpHostBox" Margin="0,0,0,8"/>
+                        <Label Content="SMTP Port" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="SmtpPortBox" Margin="0,0,0,8" Width="80" HorizontalAlignment="Left"/>
+                        <Label Content="SMTP Username" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="SmtpUserBox" Margin="0,0,0,8"/>
+                        <Label Content="SMTP Password" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <PasswordBox x:Name="SmtpPassBox" Margin="0,0,0,8"/>
+                        <Label Content="From email address" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="EmailFromBox" Margin="0,0,0,16"/>
+
+                        <!-- Test -->
+                        <TextBlock Text="Test" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <Label Content="Send a test email to:" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="TestEmailBox" Width="250" HorizontalAlignment="Left" Margin="0,0,0,8"/>
+                        <Button Content="Send Test" Width="80" HorizontalAlignment="Left" Click="SendTestEmail_Click"/>
+                        <TextBlock x:Name="TestEmailResult" Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,6,0,0"/>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

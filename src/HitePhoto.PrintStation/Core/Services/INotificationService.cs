@@ -1,3 +1,5 @@
+using HitePhoto.PrintStation.Core.Processing;
+
 namespace HitePhoto.PrintStation.Core.Services;
 
 /// <summary>
@@ -7,5 +9,5 @@ namespace HitePhoto.PrintStation.Core.Services;
 /// </summary>
 public interface INotificationService
 {
-    void NotifyCustomer(int orderId, string operatorName);
+    void NotifyCustomer(int orderId, string operatorName, EmailTemplate? templateOverride = null);
 }

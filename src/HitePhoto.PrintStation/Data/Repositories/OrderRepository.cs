@@ -37,6 +37,41 @@ public class OrderRepository : IOrderRepository
             IsHeld: reader.GetInt32(6) == 1);
     }
 
+    public HitePhoto.Shared.Models.Order? GetFullOrder(int orderId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT o.id, o.external_order_id, o.ordered_at,
+                   o.customer_first_name, o.customer_last_name,
+                   o.customer_email, o.customer_phone,
+                   o.pickup_store_id, o.folder_path,
+                   s.store_name, o.delivery_method_id
+            FROM orders o
+            LEFT JOIN stores s ON s.id = o.pickup_store_id
+            WHERE o.id = @id
+            """;
+        cmd.Parameters.AddWithValue("@id", orderId);
+
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return null;
+
+        return new HitePhoto.Shared.Models.Order
+        {
+            Id = reader.GetInt32(0),
+            ExternalOrderId = reader.GetString(1),
+            OrderedAt = reader.IsDBNull(2) ? null : DateTime.Parse(reader.GetString(2)),
+            CustomerFirstName = reader.IsDBNull(3) ? null : reader.GetString(3),
+            CustomerLastName = reader.IsDBNull(4) ? null : reader.GetString(4),
+            CustomerEmail = reader.IsDBNull(5) ? null : reader.GetString(5),
+            CustomerPhone = reader.IsDBNull(6) ? null : reader.GetString(6),
+            PickupStoreId = reader.GetInt32(7),
+            FolderPath = reader.IsDBNull(8) ? null : reader.GetString(8),
+            StoreName = reader.IsDBNull(9) ? null : reader.GetString(9),
+            DeliveryMethodId = reader.IsDBNull(10) ? Core.DeliveryMethodId.Pickup : reader.GetInt32(10)
+        };
+    }
+
     public List<OrderItemRecord> GetNoritsuItems(int orderId)
     {
         var items = new List<OrderItemRecord>();
@@ -304,14 +339,20 @@ public class OrderRepository : IOrderRepository
                     order_status_id, status_code, pickup_store_id,
                     total_amount, payment_status, special_instructions,
                     order_type, is_rush, ordered_at, folder_path, download_status,
-                    pixfizz_job_id
+                    pixfizz_job_id,
+                    delivery_method_id, shipping_first_name, shipping_last_name,
+                    shipping_address1, shipping_address2, shipping_city,
+                    shipping_state, shipping_zip, shipping_country, shipping_method
                 ) VALUES (
                     @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
                     1, 'new', @store,
                     @total, @paid, @notes,
                     @type, @rush, @ordered, @folder, @status,
-                    @jobId
+                    @jobId,
+                    @deliveryMethod, @shipFname, @shipLname,
+                    @shipAddr1, @shipAddr2, @shipCity,
+                    @shipState, @shipZip, @shipCountry, @shipMethod
                 );
                 SELECT last_insert_rowid();
                 """;
@@ -335,6 +376,16 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@folder", order.FolderPath ?? "");
             cmd.Parameters.AddWithValue("@status", order.DownloadStatus);
             cmd.Parameters.AddWithValue("@jobId", (object?)order.PixfizzJobId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@deliveryMethod", order.DeliveryMethodId);
+            cmd.Parameters.AddWithValue("@shipFname", order.ShippingFirstName ?? "");
+            cmd.Parameters.AddWithValue("@shipLname", order.ShippingLastName ?? "");
+            cmd.Parameters.AddWithValue("@shipAddr1", (object?)order.ShippingAddress1 ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@shipAddr2", (object?)order.ShippingAddress2 ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@shipCity", (object?)order.ShippingCity ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@shipState", (object?)order.ShippingState ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@shipZip", (object?)order.ShippingZip ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@shipCountry", (object?)order.ShippingCountry ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@shipMethod", (object?)order.ShippingMethod ?? DBNull.Value);
             orderId = Convert.ToInt32(cmd.ExecuteScalar()!);
         }
 
