@@ -210,6 +210,8 @@ public class OrderDb
             download_status           TEXT DEFAULT 'pending',
             is_transfer               INTEGER NOT NULL DEFAULT 0,
             transfer_store_id         INTEGER DEFAULT NULL,
+            pixfizz_job_id            TEXT DEFAULT NULL,
+            is_received_pushed        INTEGER NOT NULL DEFAULT 0,
             is_notified               INTEGER NOT NULL DEFAULT 0,
             notified_at               TEXT DEFAULT NULL,
             created_at                TEXT NOT NULL DEFAULT (datetime('now')),
@@ -467,6 +469,10 @@ public class OrderDb
         // Migration 003: Add category/sub_category columns to order_items (for gift items)
         AddColumnIfMissing(conn, "order_items", "category", "TEXT DEFAULT ''");
         AddColumnIfMissing(conn, "order_items", "sub_category", "TEXT DEFAULT ''");
+
+        // Migration 004: Add pixfizz_job_id and received tracking to orders
+        AddColumnIfMissing(conn, "orders", "pixfizz_job_id", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "is_received_pushed", "INTEGER NOT NULL DEFAULT 0");
     }
 
     private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)

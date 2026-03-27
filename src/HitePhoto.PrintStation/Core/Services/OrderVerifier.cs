@@ -162,9 +162,12 @@ public class OrderVerifier : IOrderVerifier
         foreach (var kvp in dbList)
         {
             _history.AddNote(kvp.Value.Id, "Verify: order folder not found on disk", "system");
-            AlertCollector.Warn(AlertCategory.DataQuality,
+            AlertCollector.Error(AlertCategory.DataQuality,
                 $"Order {kvp.Key} in DB but folder missing from disk",
-                orderId: kvp.Key);
+                orderId: kvp.Key,
+                detail: $"Attempted: find folder for order {kvp.Key}. Expected: folder at '{kvp.Value.FolderPath}'. " +
+                        $"Found: folder missing. Context: source {kvp.Value.SourceCode}, DB id {kvp.Value.Id}. " +
+                        $"State: order is in database but files are gone.");
             errors++;
         }
 
@@ -307,7 +310,6 @@ public class OrderVerifier : IOrderVerifier
             new Dictionary<string, string> { ["folder_path"] = dir });
         var order = _dakisParser.Parse(raw);
 
-        // Check after parse — parser resolves the real ID from the YML
         var existingId = _orders.FindOrderId(order.ExternalOrderId, _settings.StoreId);
         if (existingId != null) return;
 

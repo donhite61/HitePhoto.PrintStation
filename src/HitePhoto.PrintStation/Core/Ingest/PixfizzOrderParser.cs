@@ -77,39 +77,19 @@ public class PixfizzOrderParser
 
             var expectedPath = CalculateExpectedPath(folderPath, item.FormatString ?? item.SizeLabel ?? "", item.Quantity, item.ImageFilename);
 
-            if (OrderHelpers.VerifyFile(expectedPath) == null)
+            items[i] = item with { ImageFilepath = expectedPath };
+
+            var verifyError = OrderHelpers.VerifyFile(expectedPath);
+            if (verifyError != null)
             {
-                // File is at the expected calculated path
-                items[i] = item with { ImageFilepath = expectedPath };
-            }
-            else
-            {
-                // Not at expected path — scan disk for the file (handles old folder structures)
-                var diskPath = FindFileOnDisk(folderPath, item.ImageFilename);
-                if (diskPath != null)
-                {
-                    items[i] = item with { ImageFilepath = diskPath };
-                    AlertCollector.Warn(AlertCategory.DataQuality,
-                        $"Pixfizz file in wrong folder: {item.ImageFilename}",
-                        orderId: raw.ExternalOrderId,
-                        detail: $"Attempted: find file at '{expectedPath}'. " +
-                                $"Expected: file at calculated path for size '{item.SizeLabel}'. " +
-                                $"Found: file at '{diskPath}'. " +
-                                $"Context: order {raw.ExternalOrderId}, qty {item.Quantity}. " +
-                                $"State: using found location — file may print at wrong size.");
-                }
-                else
-                {
-                    // File genuinely missing
-                    items[i] = item with { ImageFilepath = expectedPath };
-                    AlertCollector.Error(AlertCategory.DataQuality,
-                        $"Pixfizz file not found: {item.ImageFilename}",
-                        orderId: raw.ExternalOrderId,
-                        detail: $"Attempted: find file at calculated path '{expectedPath}' then scanned prints/ folder. " +
-                                $"Expected: valid JPEG on disk. Found: not found anywhere. " +
-                                $"Context: order {raw.ExternalOrderId}, size '{item.SizeLabel}', qty {item.Quantity}. " +
-                                $"State: file path set to expected location but file is missing.");
-                }
+                AlertCollector.Error(AlertCategory.DataQuality,
+                    $"Pixfizz file not at expected path: {item.ImageFilename}",
+                    orderId: raw.ExternalOrderId,
+                    detail: $"Attempted: verify file at '{expectedPath}'. " +
+                            $"Expected: valid JPEG at calculated path for size '{item.SizeLabel}'. " +
+                            $"Found: {verifyError}. " +
+                            $"Context: order {raw.ExternalOrderId}, qty {item.Quantity}. " +
+                            $"State: file missing or invalid — operator must fix.");
             }
         }
 
@@ -169,24 +149,6 @@ public class PixfizzOrderParser
             $"{formatString} format",
             $"{quantity} prints",
             imageFilename);
-    }
-
-    /// <summary>
-    /// Scan prints/ folder recursively for a file by name. Returns full path if found, null if not.
-    /// Used as fallback when the calculated path doesn't match (e.g., old folder structures).
-    /// </summary>
-    private static string? FindFileOnDisk(string folderPath, string imageFilename)
-    {
-        var printsRoot = Path.Combine(folderPath, "prints");
-        if (!Directory.Exists(printsRoot)) return null;
-
-        foreach (var file in Directory.GetFiles(printsRoot, imageFilename, SearchOption.AllDirectories))
-        {
-            if (OrderHelpers.VerifyFile(file) == null)
-                return file;
-        }
-
-        return null;
     }
 
     private static void ValidateOrder(UnifiedOrder order)

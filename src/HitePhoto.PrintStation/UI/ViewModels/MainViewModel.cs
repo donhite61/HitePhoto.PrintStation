@@ -397,9 +397,21 @@ public class MainViewModel : ViewModelBase
                 ImageCount = group.Sum(i => i.Quantity),
                 PrintedCount = printedCount,
                 MissingFileCount = missingCount,
-                ChannelNumber = group.First().ChannelNumber
+                ChannelNumber = group.First().ChannelNumber,
+                Items = group.Select(i => new HitePhoto.Shared.Models.OrderItem
+                {
+                    Id = i.Id,
+                    SizeLabel = i.SizeLabel,
+                    MediaType = i.MediaType,
+                    Quantity = i.Quantity,
+                    ImageFilename = i.ImageFilename,
+                    ImageFilepath = i.ImageFilepath,
+                    ChannelNumber = i.ChannelNumber,
+                    IsPrinted = i.IsPrinted
+                }).ToList()
             };
 
+            sizeItem.ParentOrder = treeItem;
             treeItem.Sizes.Add(sizeItem);
             totalImages += sizeItem.ImageCount;
             if (missingCount > 0) hasMissing = true;

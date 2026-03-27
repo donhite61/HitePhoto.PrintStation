@@ -303,13 +303,15 @@ public class OrderRepository : IOrderRepository
                     customer_first_name, customer_last_name, customer_email, customer_phone,
                     order_status_id, status_code, pickup_store_id,
                     total_amount, payment_status, special_instructions,
-                    order_type, is_rush, ordered_at, folder_path, download_status
+                    order_type, is_rush, ordered_at, folder_path, download_status,
+                    pixfizz_job_id
                 ) VALUES (
                     @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
                     1, 'new', @store,
                     @total, @paid, @notes,
-                    @type, @rush, @ordered, @folder, @status
+                    @type, @rush, @ordered, @folder, @status,
+                    @jobId
                 );
                 SELECT last_insert_rowid();
                 """;
@@ -332,6 +334,7 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@ordered", order.OrderedAt?.ToString("O") ?? DateTime.Now.ToString("O"));
             cmd.Parameters.AddWithValue("@folder", order.FolderPath ?? "");
             cmd.Parameters.AddWithValue("@status", order.DownloadStatus);
+            cmd.Parameters.AddWithValue("@jobId", (object?)order.PixfizzJobId ?? DBNull.Value);
             orderId = Convert.ToInt32(cmd.ExecuteScalar()!);
         }
 
@@ -392,5 +395,35 @@ public class OrderRepository : IOrderRepository
             });
         }
         return channels;
+    }
+
+    public List<(int Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff)
+    {
+        var results = new List<(int, string, string)>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, external_order_id, pixfizz_job_id
+            FROM orders
+            WHERE source_code = 'pixfizz'
+              AND pixfizz_job_id IS NOT NULL
+              AND pixfizz_job_id != ''
+              AND is_received_pushed = 0
+              AND created_at <= @cutoff
+            """;
+        cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("O"));
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add((reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
+        return results;
+    }
+
+    public void MarkReceivedPushed(int orderId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET is_received_pushed = 1 WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", orderId);
+        cmd.ExecuteNonQuery();
     }
 }

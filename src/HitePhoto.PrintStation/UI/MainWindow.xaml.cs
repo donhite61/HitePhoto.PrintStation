@@ -37,6 +37,11 @@ public partial class MainWindow : Window
     // Cancellation for async ingest
     private CancellationTokenSource _ingestCts = new();
 
+    // Click-verify: debounce + background thread
+    private readonly DispatcherTimer _verifyDebounce;
+    private OrderTreeItem? _pendingVerifyOrder;
+    private CancellationTokenSource _verifyCts = new();
+
     // Currently selected (for detail panel)
     private OrderTreeItem? _selectedOrderItem;
     private SizeTreeItem? _selectedSizeItem;
@@ -68,6 +73,34 @@ public partial class MainWindow : Window
                 UpdateStatusBar();
                 _vm.NeedsRefresh = false;
             }
+        };
+
+        // Verify debounce — wait 300ms after last click before running verify on background thread
+        _verifyDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _verifyDebounce.Tick += (_, _) =>
+        {
+            _verifyDebounce.Stop();
+            var order = _pendingVerifyOrder;
+            if (order == null) return;
+
+            _verifyCts.Cancel();
+            _verifyCts = new CancellationTokenSource();
+            var ct = _verifyCts.Token;
+
+            Task.Run(() =>
+            {
+                if (ct.IsCancellationRequested) return;
+                _vm.VerifyOrder(order);
+                if (_vm.NeedsRefresh)
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        _vm.LoadOrders();
+                        UpdateStatusBar();
+                        _vm.NeedsRefresh = false;
+                    });
+                }
+            }, ct);
         };
 
         // Search debounce
@@ -204,15 +237,36 @@ public partial class MainWindow : Window
     {
         if (selectedItem is OrderTreeItem orderItem)
         {
+            var isNewSelection = _selectedOrderItem?.DbId != orderItem.DbId;
             _selectedOrderItem = orderItem;
             _vm.SelectedOrder = orderItem;
+
+            if (isNewSelection)
+            {
+                _pendingVerifyOrder = orderItem;
+                _verifyDebounce.Stop();
+                _verifyDebounce.Start();
+            }
+
             ShowOrderDetail(orderItem);
             ShowSizeDetail(null);
         }
         else if (selectedItem is SizeTreeItem sizeItem)
         {
             _selectedSizeItem = sizeItem;
+
+            if (sizeItem.ParentOrder != null && _selectedOrderItem?.DbId != sizeItem.ParentOrder.DbId)
+            {
+                _selectedOrderItem = sizeItem.ParentOrder;
+                _vm.SelectedOrder = sizeItem.ParentOrder;
+                _pendingVerifyOrder = sizeItem.ParentOrder;
+                _verifyDebounce.Stop();
+                _verifyDebounce.Start();
+                ShowOrderDetail(sizeItem.ParentOrder);
+            }
+
             ShowSizeDetail(sizeItem);
+            LoadSizeThumbnails(sizeItem);
         }
     }
 
@@ -271,6 +325,64 @@ public partial class MainWindow : Window
         if (allItems.Count == 0) return;
 
         foreach (var item in allItems.Take(30))
+        {
+            if (string.IsNullOrEmpty(item.ImageFilepath)) continue;
+
+            var border = new Border
+            {
+                Width = 80, Height = 80,
+                Margin = new Thickness(3),
+                BorderThickness = new Thickness(1),
+                BorderBrush = (Brush)FindResource("BorderBrush"),
+                Background = (Brush)FindResource("SurfaceBg"),
+                CornerRadius = new CornerRadius(3),
+                ToolTip = item.ImageFilename ?? Path.GetFileName(item.ImageFilepath)
+            };
+
+            if (File.Exists(item.ImageFilepath))
+            {
+                try
+                {
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.DecodePixelWidth = 80;
+                    bmp.UriSource = new Uri(item.ImageFilepath);
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    border.Child = new Image { Source = bmp, Stretch = Stretch.Uniform };
+                }
+                catch
+                {
+                    border.Child = new TextBlock
+                    {
+                        Text = "?",
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Foreground = (Brush)FindResource("TextMuted")
+                    };
+                }
+            }
+            else
+            {
+                border.Child = new TextBlock
+                {
+                    Text = "Missing", FontSize = 9,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = (Brush)FindResource("AccentRed")
+                };
+            }
+
+            ThumbnailPanel.Children.Add(border);
+        }
+    }
+
+    private void LoadSizeThumbnails(SizeTreeItem sizeItem)
+    {
+        ThumbnailPanel.Children.Clear();
+
+        foreach (var item in sizeItem.Items.Take(30))
         {
             if (string.IsNullOrEmpty(item.ImageFilepath)) continue;
 

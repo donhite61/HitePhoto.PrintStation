@@ -50,8 +50,6 @@ public class IngestOrderWriter
 
             _history.AddNote(orderId, $"Order received at {DateTime.Now:g}");
             AppLog.Info($"Inserted {sourceCode} order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
-
-            _verifier.VerifyOrder(order.ExternalOrderId, folderPath, sourceCode, orderId);
         }
         else
         {

@@ -112,10 +112,7 @@ public class PixfizzIngestService
         // Step 4: Write download_complete marker
         IngestConstants.WriteMarker(folderPath, IngestConstants.MarkerDownloadComplete);
 
-        // Step 5: Save raw API JSON for later /received marking
-        SaveRawJson(folderPath, raw.RawData, orderNumber);
-
-        // Step 6: Read TXT from disk, parse via PixfizzOrderParser
+        // Step 5: Read TXT from disk, parse via PixfizzOrderParser
         var txtPath = Path.Combine(folderPath, "darkroom_ticket.txt");
         if (!File.Exists(txtPath))
         {
@@ -142,7 +139,7 @@ public class PixfizzIngestService
 
         var order = _parser.Parse(parseRaw);
 
-        // Step 7: Write to SQLite
+        // Step 6: Write to SQLite
         _writer.WriteToSqlite(order, _settings.StoreId, "pixfizz", order.FolderPath ?? "");
     }
 
@@ -154,66 +151,29 @@ public class PixfizzIngestService
         _verifier.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId.Value);
     }
 
-    private static void SaveRawJson(string folderPath, string rawData, string orderNumber)
-    {
-        try
-        {
-            var rawPath = Path.Combine(folderPath, "pixfizz_raw.json");
-            if (!File.Exists(rawPath))
-                File.WriteAllText(rawPath, rawData);
-        }
-        catch (Exception ex)
-        {
-            AlertCollector.Warn(AlertCategory.General,
-                $"Could not write pixfizz_raw.json for {orderNumber}", ex: ex);
-        }
-    }
-
     /// <summary>
-    /// Find orders that have been verified for > 24 hours and mark them as received on the OHD API.
+    /// Find Pixfizz orders older than 24 hours that haven't been marked received on the OHD API.
     /// </summary>
     private async Task MarkOldOrdersReceivedAsync(CancellationToken ct)
     {
         if (_settings.DeveloperMode) return;
 
-        var outputRoot = _settings.OrderOutputPath;
-        if (string.IsNullOrEmpty(outputRoot) || !Directory.Exists(outputRoot)) return;
-
         var cutoff = DateTime.Now.AddHours(-24);
+        var unreceived = _orders.GetUnreceivedPixfizzOrders(cutoff);
 
-        foreach (var dir in Directory.GetDirectories(outputRoot))
+        foreach (var (id, externalOrderId, jobId) in unreceived)
         {
-            // Must have download_complete but not received_pushed
-            if (!IngestConstants.MarkerExists(dir, IngestConstants.MarkerDownloadComplete))
-                continue;
-            if (IngestConstants.MarkerExists(dir, IngestConstants.MarkerReceivedPushed))
-                continue;
-
-            // Check marker age
-            var markerPath = Path.Combine(dir, "metadata", IngestConstants.MarkerDownloadComplete);
-            var markerTime = File.GetCreationTime(markerPath);
-            if (markerTime > cutoff)
-                continue; // Not 24 hours old yet
-
-            // Find the job ID from pixfizz_raw.json
-            var rawPath = Path.Combine(dir, "pixfizz_raw.json");
-            if (!File.Exists(rawPath)) continue;
-
             try
             {
-                var rawJson = await File.ReadAllTextAsync(rawPath, ct);
-                using var doc = System.Text.Json.JsonDocument.Parse(rawJson);
-                var jobId = JsonUtils.GetStr(doc.RootElement, "job_id");
-                if (string.IsNullOrEmpty(jobId)) continue;
-
                 await _receivedPusher.MarkReceivedAsync(jobId, ct);
-                IngestConstants.WriteMarker(dir, IngestConstants.MarkerReceivedPushed);
+                _orders.MarkReceivedPushed(id);
+                AppLog.Info($"Marked Pixfizz order {externalOrderId} (job {jobId}) as received");
             }
             catch (Exception ex)
             {
                 AlertCollector.Warn(AlertCategory.Network,
-                    $"Failed to mark received for {Path.GetFileName(dir)}",
-                    ex: ex);
+                    $"Failed to mark received for {externalOrderId}",
+                    orderId: externalOrderId, ex: ex);
                 // Will retry next cycle
             }
         }

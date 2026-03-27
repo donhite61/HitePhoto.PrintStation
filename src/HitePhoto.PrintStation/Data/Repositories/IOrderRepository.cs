@@ -59,6 +59,14 @@ public interface IOrderRepository
     /// Used by ChangeSizeWindow for the channel dropdown.
     /// </summary>
     List<Core.Models.ChannelInfo> GetAllChannels();
+
+    /// <summary>
+    /// Get Pixfizz orders older than cutoff that have a job_id but haven't been marked received.
+    /// </summary>
+    List<(int Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff);
+
+    /// <summary>Mark a Pixfizz order as received-pushed.</summary>
+    void MarkReceivedPushed(int orderId);
 }
 
 public record OrderRecord(

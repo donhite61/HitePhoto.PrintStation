@@ -19,6 +19,8 @@ public class SizeTreeItem : INotifyPropertyChanged
     private int? _channelNumber;
     private bool _isSelected;
 
+    public OrderTreeItem? ParentOrder { get; set; }
+
     public string SizeLabel
     {
         get => _sizeLabel;

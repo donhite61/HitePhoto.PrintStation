@@ -142,7 +142,7 @@ public class DakisOrderParser
                 }
                 catch (Exception ex)
                 {
-                    AlertCollector.Warn(AlertCategory.Parsing,
+                    AlertCollector.Error(AlertCategory.Parsing,
                         "Failed to parse Dakis order date",
                         orderId: info.OrderId,
                         detail: $"Attempted: parse date {oYear}-{oMonth}-{oDay}. " +
@@ -154,7 +154,7 @@ public class DakisOrderParser
 
             if (!info.OrderedAt.HasValue)
             {
-                AlertCollector.Warn(AlertCategory.DataQuality,
+                AlertCollector.Error(AlertCategory.DataQuality,
                     "Dakis order has no parseable date",
                     orderId: info.OrderId,
                     detail: $"Attempted: parse date from :year:/:month:/:day:. Expected: valid date. " +
@@ -349,14 +349,24 @@ public class DakisOrderParser
             }
         }
 
-        // Aggregate print counts by size label from :photos: → :prints:
-        // Each photo can have multiple prints; we group by size for expected counts
-        var sizeCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // One item per photo per print entry — YML is source of truth
         var photosList = YList(root, ":photos:");
         if (photosList != null)
         {
             foreach (var photo in photosList)
             {
+                var filename = YStr(photo, ":filename:");
+                if (string.IsNullOrWhiteSpace(filename))
+                {
+                    AlertCollector.Error(AlertCategory.DataQuality,
+                        "Photo entry missing :filename:",
+                        orderId: info.OrderId,
+                        detail: $"Attempted: read :filename: from photo entry. Expected: image filename. " +
+                                $"Found: empty. Context: order {info.OrderId}. " +
+                                $"State: skipping this photo — cannot calculate file path.");
+                    continue;
+                }
+
                 var printsList = YList(photo, ":prints:");
                 if (printsList == null) continue;
 
@@ -365,11 +375,11 @@ public class DakisOrderParser
                     var sizeLabel = YStr(print, ":text:");
                     if (string.IsNullOrWhiteSpace(sizeLabel))
                     {
-                        AlertCollector.Warn(AlertCategory.DataQuality,
-                            "Print entry missing :text: (size label)",
+                        AlertCollector.Error(AlertCategory.DataQuality,
+                            $"Print entry missing :text: for {filename}",
                             orderId: info.OrderId,
-                            detail: $"Attempted: read :text: from print entry. Expected: size label string. " +
-                                    $"Found: empty. Context: order {info.OrderId}, photo in :photos: list. " +
+                            detail: $"Attempted: read :text: from print entry. Expected: size label. " +
+                                    $"Found: empty. Context: order {info.OrderId}, photo '{filename}'. " +
                                     $"State: skipping this print entry.");
                         continue;
                     }
@@ -377,11 +387,11 @@ public class DakisOrderParser
                     int qty = YInt(print, ":quantity:");
                     if (qty <= 0)
                     {
-                        AlertCollector.Warn(AlertCategory.DataQuality,
-                            $"Print entry has invalid quantity: {qty}",
+                        AlertCollector.Error(AlertCategory.DataQuality,
+                            $"Print entry has invalid quantity for {filename}",
                             orderId: info.OrderId,
                             detail: $"Attempted: read :quantity:. Expected: > 0. Found: {qty}. " +
-                                    $"Context: order {info.OrderId}, size '{sizeLabel}'. " +
+                                    $"Context: order {info.OrderId}, size '{sizeLabel}', photo '{filename}'. " +
                                     $"State: skipping this print entry.");
                         continue;
                     }
@@ -393,90 +403,53 @@ public class DakisOrderParser
                         fulfillmentStoreId != info.CurrentStoreId)
                         continue;
 
-                    if (sizeCounts.ContainsKey(sizeLabel))
-                        sizeCounts[sizeLabel] += qty;
-                    else
-                        sizeCounts[sizeLabel] = qty;
-                }
-            }
-        }
+                    // Calculate expected path — Dakis converts originals to JPG in prints/
+                    var printFilename = filename;
+                    var expectedPath = "";
 
-        // Create one item per size with expected count
-        foreach (var kvp in sizeCounts)
-        {
-            items.Add(new UnifiedOrderItem
-            {
-                ExternalLineId = $"{info.OrderId}_{kvp.Key}",
-                SizeLabel = kvp.Key,
-                FormatString = kvp.Key,
-                ExpectedPrintCount = kvp.Value,
-                Quantity = kvp.Value,
-                IsNoritsu = true,
-                FulfillmentStore = info.CurrentStoreId,
-                Options = options
-            });
-        }
-
-        // Scan prints/ disk folder and attach images
-        if (!string.IsNullOrEmpty(folderPath))
-        {
-            var printsRoot = Path.Combine(folderPath, "prints");
-            if (Directory.Exists(printsRoot))
-            {
-                foreach (var productDir in Directory.GetDirectories(printsRoot))
-                {
-                    string formatString = StripFormatSuffix(Path.GetFileName(productDir));
-
-                    var existing = items.FirstOrDefault(i =>
-                        i.SizeLabel != null &&
-                        (i.SizeLabel.Equals(formatString, StringComparison.OrdinalIgnoreCase) ||
-                         i.SizeLabel.Replace(".", "").Equals(formatString.Replace(".", ""), StringComparison.OrdinalIgnoreCase)));
-
-                    if (existing == null)
+                    if (!string.IsNullOrEmpty(folderPath))
                     {
-                        // Disk folder with no YML match — create items from disk
-                        foreach (var img in ScanImages(productDir))
-                            items.Add(img with
-                            {
-                                ExternalLineId = $"{info.OrderId}_{formatString}_{Path.GetFileName(img.ImageFilepath ?? "")}",
-                                SizeLabel = formatString,
-                                FormatString = formatString,
-                                IsNoritsu = true,
-                                FulfillmentStore = info.CurrentStoreId,
-                                Options = options
-                            });
-                    }
-                    else
-                    {
-                        // Merge disk images into YML-declared size
-                        var idx = items.IndexOf(existing);
-                        var images = ScanImages(productDir);
-                        if (images.Count > 0)
+                        var printDir = Path.Combine(folderPath, "prints", $"{sizeLabel} format", $"{qty} prints");
+                        expectedPath = Path.Combine(printDir, filename);
+
+                        // Dakis converts non-JPG originals to JPG in the prints folder
+                        if (OrderHelpers.VerifyFile(expectedPath) != null)
                         {
-                            items[idx] = images[0] with
+                            var jpgName = Path.ChangeExtension(filename, ".jpg");
+                            var jpgPath = Path.Combine(printDir, jpgName);
+                            if (OrderHelpers.VerifyFile(jpgPath) == null)
                             {
-                                ExternalLineId = existing.ExternalLineId,
-                                SizeLabel = existing.SizeLabel,
-                                FormatString = existing.FormatString,
-                                ExpectedPrintCount = existing.ExpectedPrintCount,
-                                IsNoritsu = true,
-                                FulfillmentStore = existing.FulfillmentStore,
-                                Options = existing.Options
-                            };
-                            for (int i = 1; i < images.Count; i++)
-                            {
-                                items.Add(images[i] with
-                                {
-                                    ExternalLineId = $"{info.OrderId}_{existing.SizeLabel}_{i}",
-                                    SizeLabel = existing.SizeLabel,
-                                    FormatString = existing.FormatString,
-                                    IsNoritsu = true,
-                                    FulfillmentStore = existing.FulfillmentStore,
-                                    Options = existing.Options
-                                });
+                                printFilename = jpgName;
+                                expectedPath = jpgPath;
                             }
                         }
+
+                        var verifyError = OrderHelpers.VerifyFile(expectedPath);
+                        if (verifyError != null)
+                        {
+                            AlertCollector.Error(AlertCategory.DataQuality,
+                                $"Dakis file not at expected path: {filename}",
+                                orderId: info.OrderId,
+                                detail: $"Attempted: verify file at '{expectedPath}'. " +
+                                        $"Expected: valid image for size '{sizeLabel}'. " +
+                                        $"Found: {verifyError}. " +
+                                        $"Context: order {info.OrderId}, qty {qty}. " +
+                                        $"State: file missing or invalid — operator must fix.");
+                        }
                     }
+
+                    items.Add(new UnifiedOrderItem
+                    {
+                        ExternalLineId = $"{info.OrderId}_{sizeLabel}_{printFilename}",
+                        SizeLabel = sizeLabel,
+                        FormatString = sizeLabel,
+                        Quantity = qty,
+                        ImageFilename = printFilename,
+                        ImageFilepath = expectedPath,
+                        IsNoritsu = true,
+                        FulfillmentStore = info.CurrentStoreId,
+                        Options = options
+                    });
                 }
             }
         }
@@ -720,50 +693,6 @@ public class DakisOrderParser
                 return YStr(store, ":id:");
         }
         return null;
-    }
-
-    // ── Disk scan helpers ────────────────────────────────────────────────
-
-    private static string StripFormatSuffix(string folderName)
-        => folderName.EndsWith(" format", StringComparison.OrdinalIgnoreCase)
-            ? folderName[..^7].Trim()
-            : folderName.Trim();
-
-    private static List<UnifiedOrderItem> ScanImages(string productDir)
-    {
-        var results = new List<UnifiedOrderItem>();
-
-        foreach (var qtyDir in Directory.GetDirectories(productDir))
-        {
-            int qty = ParseQty(Path.GetFileName(qtyDir));
-            foreach (var imageFile in Directory.GetFiles(qtyDir).Where(IsImageFile))
-            {
-                results.Add(new UnifiedOrderItem
-                {
-                    ImageFilename = Path.GetFileName(imageFile),
-                    ImageFilepath = imageFile,
-                    Quantity = qty
-                });
-            }
-        }
-
-        foreach (var imageFile in Directory.GetFiles(productDir).Where(IsImageFile))
-        {
-            results.Add(new UnifiedOrderItem
-            {
-                ImageFilename = Path.GetFileName(imageFile),
-                ImageFilepath = imageFile,
-                Quantity = 1
-            });
-        }
-
-        return results;
-    }
-
-    private static int ParseQty(string dirName)
-    {
-        var parts = dirName.Split(' ');
-        return parts.Length > 0 && int.TryParse(parts[0], out int qty) && qty > 0 ? qty : 1;
     }
 
     private static bool IsImageFile(string path)

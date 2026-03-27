@@ -123,7 +123,7 @@ public class DakisIngestService : IDisposable
         var ymlPath = Path.Combine(folderPath, "order.yml");
         if (!File.Exists(ymlPath))
         {
-            AlertCollector.Warn(AlertCategory.Parsing,
+            AlertCollector.Error(AlertCategory.Parsing,
                 $"order.yml not found in {orderId}",
                 orderId: orderId);
             return;

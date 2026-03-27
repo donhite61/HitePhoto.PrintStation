@@ -43,19 +43,11 @@ public static class OrderHelpers
         if (!File.Exists(filepath))
             return $"File not found: {filepath}";
 
-        var info = new FileInfo(filepath);
-        if (info.Length < 1024)
-            return $"File too small ({info.Length} bytes): {filepath}";
-
         try
         {
-            using var stream = File.OpenRead(filepath);
-            var header = new byte[2];
-            if (stream.Read(header, 0, 2) < 2)
-                return $"Cannot read file header: {filepath}";
-
-            if (header[0] != 0xFF || header[1] != 0xD8)
-                return $"Not a valid JPEG (bad magic bytes): {filepath}";
+            var info = new FileInfo(filepath);
+            if (info.Length < 1024)
+                return $"File too small ({info.Length} bytes): {filepath}";
         }
         catch (IOException ex)
         {
