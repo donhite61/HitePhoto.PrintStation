@@ -253,6 +253,55 @@ public static class AutoUpdater
         Application.Current.Shutdown();
     }
 
+    public static async Task<string?> UploadUpdateAsync(AppSettings settings, string publishDir)
+    {
+        return await Task.Run(() =>
+        {
+            try
+            {
+                var versionPath = Path.Combine(publishDir, "version.txt");
+                var zipPath = Path.Combine(publishDir, "PrintStation.zip");
+
+                if (!File.Exists(versionPath))
+                    return "version.txt not found in publish folder.";
+                if (!File.Exists(zipPath))
+                    return "PrintStation.zip not found in publish folder.";
+
+                if (!string.IsNullOrWhiteSpace(settings.UpdateLocalFolder))
+                {
+                    var localDir = settings.UpdateLocalFolder;
+                    Directory.CreateDirectory(localDir);
+                    File.Copy(versionPath, Path.Combine(localDir, "version.txt"), overwrite: true);
+                    File.Copy(zipPath, Path.Combine(localDir, "PrintStation.zip"), overwrite: true);
+                }
+
+                if (!string.IsNullOrWhiteSpace(settings.UpdateSftpFolder) &&
+                    !string.IsNullOrWhiteSpace(settings.UpdateSftpHost))
+                {
+                    using var client = CreateClient(settings);
+                    client.Connect();
+                    var folder = settings.UpdateSftpFolder.TrimEnd('/');
+
+                    if (!client.Exists(folder))
+                        client.CreateDirectory(folder);
+
+                    using (var fs = File.OpenRead(versionPath))
+                        client.UploadFile(fs, $"{folder}/version.txt", true);
+                    using (var fs = File.OpenRead(zipPath))
+                        client.UploadFile(fs, $"{folder}/PrintStation.zip", true);
+
+                    client.Disconnect();
+                }
+
+                return (string?)null;
+            }
+            catch (Exception ex)
+            {
+                return $"{ex.GetType().Name}: {ex.Message}";
+            }
+        });
+    }
+
     private static SftpClient CreateClient(AppSettings settings)
     {
         var client = new SftpClient(

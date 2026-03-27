@@ -29,7 +29,7 @@ public class PrintService : IPrintService
         _noritsuOutputRoot = noritsuOutputRoot;
     }
 
-    public SendResult SendToPrinter(int orderId)
+    public SendResult SendToPrinter(int orderId, HashSet<string>? sizeFilter = null)
     {
         var sent = new List<SentItem>();
         var skipped = new List<SkippedItem>();
@@ -45,9 +45,10 @@ public class PrintService : IPrintService
             return new SendResult(sent, skipped);
         }
 
-        // Group by size/media
+        // Group by size/media, optionally filter to selected sizes
         var sizeGroups = items
-            .Where(i => !i.IsPrinted) // skip already-printed items
+            .Where(i => !i.IsPrinted)
+            .Where(i => sizeFilter == null || sizeFilter.Contains($"{i.SizeLabel}|{i.MediaType}"))
             .GroupBy(i => new { i.SizeLabel, i.MediaType })
             .ToList();
 

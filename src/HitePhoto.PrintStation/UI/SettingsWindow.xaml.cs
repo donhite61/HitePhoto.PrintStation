@@ -106,6 +106,7 @@ public partial class SettingsWindow : Window
 
         // Diagnostics
         DevModeCheck.IsChecked = _settings.DeveloperMode;
+        PublishSection.Visibility = _settings.DeveloperMode ? Visibility.Visible : Visibility.Collapsed;
         LoggingCheck.IsChecked = _settings.EnableLogging;
 
         // Correction strengths
@@ -677,6 +678,106 @@ public partial class SettingsWindow : Window
         {
             MessageBox.Show($"Could not clear log: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private async void Publish_Click(object sender, RoutedEventArgs e)
+    {
+        // Find publish.ps1 — walk up from exe dir
+        string? scriptPath = null;
+        var dir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+        while (dir != null)
+        {
+            var candidate = Path.Combine(dir.FullName, "publish.ps1");
+            if (File.Exists(candidate)) { scriptPath = candidate; break; }
+            dir = dir.Parent;
+        }
+
+        if (scriptPath == null)
+        {
+            MessageBox.Show("Could not find publish.ps1.\nPlace it in the repo root.",
+                "Publish", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        PublishBtn.IsEnabled = false;
+        PublishBtn.Content = "Building...";
+        PublishStatus.Text = "";
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell",
+                Arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\"",
+                WorkingDirectory = Path.GetDirectoryName(scriptPath),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            var proc = Process.Start(psi)!;
+            var stdout = await proc.StandardOutput.ReadToEndAsync();
+            var stderr = await proc.StandardError.ReadToEndAsync();
+            await proc.WaitForExitAsync();
+
+            if (proc.ExitCode != 0)
+            {
+                PublishStatus.Text = "Build failed";
+                PublishStatus.Foreground = (Brush)FindResource("AccentRed");
+                MessageBox.Show($"Build failed:\n\n{stderr}\n{stdout}", "Publish Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            var publishDir = Path.Combine(Path.GetDirectoryName(scriptPath)!, "publish");
+
+            bool hasLocal = !string.IsNullOrWhiteSpace(_settings.UpdateLocalFolder);
+            bool hasSftp = !string.IsNullOrWhiteSpace(_settings.UpdateSftpFolder) &&
+                           !string.IsNullOrWhiteSpace(_settings.UpdateSftpHost);
+
+            if (hasLocal || hasSftp)
+            {
+                PublishBtn.Content = "Uploading...";
+                var error = await Core.AutoUpdater.UploadUpdateAsync(_settings, publishDir);
+                if (error != null)
+                {
+                    PublishStatus.Text = "Upload failed";
+                    PublishStatus.Foreground = (Brush)FindResource("AccentRed");
+                    MessageBox.Show($"Build succeeded but upload failed:\n\n{error}", "Upload Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                PublishStatus.Text = "Built and uploaded!";
+                PublishStatus.Foreground = (Brush)FindResource("AccentGreen");
+            }
+            else
+            {
+                PublishStatus.Text = "Built (no upload path configured)";
+                PublishStatus.Foreground = (Brush)FindResource("AccentGreen");
+
+                if (Directory.Exists(publishDir))
+                    Process.Start(new ProcessStartInfo { FileName = publishDir, UseShellExecute = true });
+            }
+        }
+        catch (Exception ex)
+        {
+            PublishStatus.Text = "Error";
+            PublishStatus.Foreground = (Brush)FindResource("AccentRed");
+            MessageBox.Show($"Failed to run publish script:\n\n{ex.Message}", "Publish Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            PublishBtn.IsEnabled = true;
+            PublishBtn.Content = "Build, Package and Upload";
+        }
+    }
+
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        await Core.AutoUpdater.CheckAndPromptAsync(_settings);
     }
 
     private void AlertHistory_Click(object sender, RoutedEventArgs e)

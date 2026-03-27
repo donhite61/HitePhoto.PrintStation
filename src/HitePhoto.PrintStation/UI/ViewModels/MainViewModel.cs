@@ -371,7 +371,7 @@ public class MainViewModel : ViewModelBase
                 var error = OrderHelpers.VerifyFile(item.ImageFilepath);
                 if (error != null) missingCount++;
             }
-            if (item.IsPrinted) printedCount++;
+            if (item.IsPrinted) printedCount += item.Quantity;
             totalQty += item.Quantity;
 
             orderItems.Add(new HitePhoto.Shared.Models.OrderItem
@@ -584,12 +584,12 @@ public class MainViewModel : ViewModelBase
     //  Printing
     // ══════════════════════════════════════════════════════════════════════
 
-    public SendResult PrintOrder(int orderId, string externalOrderId, string folderPath, string sourceCode)
+    public SendResult PrintOrder(int orderId, string externalOrderId, string folderPath, string sourceCode,
+        HashSet<string>? sizeFilter = null)
     {
-        // Verify before printing — same check every order gets
         _verifier.VerifyOrder(externalOrderId, folderPath, sourceCode, orderId);
 
-        var result = _printService.SendToPrinter(orderId);
+        var result = _printService.SendToPrinter(orderId, sizeFilter);
         NeedsRefresh = true;
         return result;
     }
@@ -602,6 +602,12 @@ public class MainViewModel : ViewModelBase
         _orders.SaveChannelMapping(routingKey, channelNumber, layoutName);
         _orders.UpdateItemChannels(sizeLabel, mediaType, channelNumber);
         _channelNamesDirty = true;
+    }
+
+    public void MarkDone(int orderId)
+    {
+        _orders.UpdateOrderStatus(orderId, "picked_up");
+        _history.AddNote(orderId, "Marked done by operator", "operator");
     }
 
     public void UnassignChannel(string sizeLabel, string mediaType)

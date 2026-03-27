@@ -436,6 +436,20 @@
                         </Grid>
                         <Label Content="Remote folder path" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
                         <TextBox x:Name="UpdateSftpFolderBox" Margin="0,0,0,8" FontFamily="Consolas" FontSize="11"/>
+
+                        <Button Content="Check for Updates Now" Width="180" HorizontalAlignment="Left"
+                                Margin="0,8,0,0" Click="CheckUpdate_Click"/>
+
+                        <StackPanel x:Name="PublishSection" Visibility="Collapsed" Margin="0,16,0,0">
+                            <TextBlock Text="Build, Package and Upload (dev mode only)" Foreground="{DynamicResource TextHeading}"
+                                       FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <TextBlock Text="Builds Release, creates version.txt + PrintStation.zip, uploads to configured paths. Only visible in developer mode."
+                                       Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="PublishBtn" Content="Build, Package and Upload" Width="200" Click="Publish_Click"/>
+                                <TextBlock x:Name="PublishStatus" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"/>
+                            </StackPanel>
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -524,6 +538,7 @@
                             <Button x:Name="SeedBtn" Content="Seed Orders from Disk" Width="180" Click="SeedFromDisk_Click"/>
                             <TextBlock x:Name="SeedResult" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"/>
                         </StackPanel>
+
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

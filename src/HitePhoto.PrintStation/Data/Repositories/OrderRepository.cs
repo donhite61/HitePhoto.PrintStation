@@ -402,6 +402,16 @@ public class OrderRepository : IOrderRepository
         return channels;
     }
 
+    public void UpdateOrderStatus(int orderId, string statusCode)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET status_code = @status, updated_at = datetime('now') WHERE id = @id";
+        cmd.Parameters.AddWithValue("@status", statusCode);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        cmd.ExecuteNonQuery();
+    }
+
     public void SaveChannelMapping(string routingKey, int channelNumber, string? layoutName = null)
     {
         using var conn = _db.OpenConnection();

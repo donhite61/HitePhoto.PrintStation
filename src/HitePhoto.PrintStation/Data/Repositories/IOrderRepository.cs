@@ -63,6 +63,7 @@ public interface IOrderRepository
     /// <summary>
     /// Save or update a channel mapping. Upserts by routing_key.
     /// </summary>
+    void UpdateOrderStatus(int orderId, string statusCode);
     void SaveChannelMapping(string routingKey, int channelNumber, string? layoutName = null);
     void DeleteChannelMapping(string routingKey);
     string? GetLayoutName(string routingKey);

@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -50,6 +51,8 @@ public partial class MainWindow : Window
     // Currently selected (for detail panel)
     private OrderTreeItem? _selectedOrderItem;
     private SizeTreeItem? _selectedSizeItem;
+    private OrderTreeItem? _lastClickedOrder; // anchor for shift-select
+    private SizeTreeItem? _lastClickedSize;
 
     public MainWindow(MainViewModel vm, AppSettings settings, SettingsManager settingsManager,
         Data.Repositories.IOrderRepository orders, Data.CorrectionStore correctionStore,
@@ -186,6 +189,8 @@ public partial class MainWindow : Window
                     _vm.StartDakisWatcher();
                     _dakisScanTimer.Start(); // fallback scan
                 }
+
+                _ = Core.AutoUpdater.CheckAndPromptAsync(_settings);
             });
         });
     }
@@ -299,50 +304,191 @@ public partial class MainWindow : Window
     //  Tree selection
     // ══════════════════════════════════════════════════════════════════════
 
-    private void PendingTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
-        => HandleTreeSelection(e.NewValue);
-
-    private void PrintedTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
-        => HandleTreeSelection(e.NewValue);
-
-    private void OtherStoreTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
-        => HandleTreeSelection(e.NewValue);
-
-    private void HandleTreeSelection(object? selectedItem)
+    private void Tree_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (selectedItem is OrderTreeItem orderItem)
+        // Find the data item that was clicked
+        var hit = e.OriginalSource as DependencyObject;
+        object? dataItem = null;
+        while (hit != null)
         {
-            var isNewSelection = _selectedOrderItem?.DbId != orderItem.DbId;
+            if (hit is FrameworkElement fe && fe.DataContext is OrderTreeItem or SizeTreeItem)
+            {
+                dataItem = fe.DataContext;
+                break;
+            }
+            hit = VisualTreeHelper.GetParent(hit);
+        }
+        if (dataItem == null) return;
+
+        // Don't intercept expander arrow clicks
+        var expanderHit = e.OriginalSource as DependencyObject;
+        while (expanderHit != null)
+        {
+            if (expanderHit is System.Windows.Controls.Primitives.ToggleButton) return;
+            expanderHit = VisualTreeHelper.GetParent(expanderHit);
+        }
+
+        // Determine which collection this tree belongs to
+        var collection = sender == PendingTree ? _vm.PendingOrders
+                       : sender == PrintedTree ? _vm.PrintedOrders
+                       : _vm.OtherStoreOrders;
+
+        bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
+
+        if (dataItem is OrderTreeItem orderItem)
+        {
+            if (ctrl)
+            {
+                orderItem.IsSelected = !orderItem.IsSelected;
+                if (orderItem.IsSelected)
+                    _lastClickedOrder = orderItem;
+            }
+            else if (shift && _lastClickedOrder != null)
+            {
+                int from = collection.IndexOf(_lastClickedOrder);
+                int to = collection.IndexOf(orderItem);
+                if (from >= 0 && to >= 0)
+                {
+                    ClearAllSelections();
+                    int lo = Math.Min(from, to);
+                    int hi = Math.Max(from, to);
+                    for (int i = lo; i <= hi; i++)
+                        collection[i].IsSelected = true;
+                }
+            }
+            else
+            {
+                ClearAllSelections();
+                orderItem.IsSelected = true;
+                _lastClickedOrder = orderItem;
+            }
+
             _selectedOrderItem = orderItem;
             _vm.SelectedOrder = orderItem;
 
-            if (isNewSelection)
+            var selectedOrders = GetSelectedOrders();
+            if (selectedOrders.Count > 1)
+            {
+                ShowMultiSelectMessage(selectedOrders.Count);
+            }
+            else
             {
                 _pendingVerifyOrder = orderItem;
                 _verifyDebounce.Stop();
                 _verifyDebounce.Start();
+                ShowOrderDetail(orderItem);
+            }
+            ShowSizeDetail(null);
+            e.Handled = true;
+        }
+        else if (dataItem is SizeTreeItem sizeItem)
+        {
+            if (ctrl)
+            {
+                sizeItem.IsSelected = !sizeItem.IsSelected;
+                if (sizeItem.IsSelected)
+                    _lastClickedSize = sizeItem;
+            }
+            else if (shift && _lastClickedSize != null
+                     && sizeItem.ParentOrder != null
+                     && _lastClickedSize.ParentOrder == sizeItem.ParentOrder)
+            {
+                var sizes = sizeItem.ParentOrder.Sizes;
+                int from = sizes.IndexOf(_lastClickedSize);
+                int to = sizes.IndexOf(sizeItem);
+                if (from >= 0 && to >= 0)
+                {
+                    ClearAllSelections();
+                    int lo = Math.Min(from, to);
+                    int hi = Math.Max(from, to);
+                    for (int i = lo; i <= hi; i++)
+                        sizes[i].IsSelected = true;
+                }
+            }
+            else
+            {
+                ClearAllSelections();
+                sizeItem.IsSelected = true;
+                _lastClickedSize = sizeItem;
             }
 
-            ShowOrderDetail(orderItem);
-            ShowSizeDetail(null);
-        }
-        else if (selectedItem is SizeTreeItem sizeItem)
-        {
             _selectedSizeItem = sizeItem;
 
-            if (sizeItem.ParentOrder != null && _selectedOrderItem?.DbId != sizeItem.ParentOrder.DbId)
+            if (sizeItem.ParentOrder != null)
             {
-                _selectedOrderItem = sizeItem.ParentOrder;
-                _vm.SelectedOrder = sizeItem.ParentOrder;
-                _pendingVerifyOrder = sizeItem.ParentOrder;
-                _verifyDebounce.Stop();
-                _verifyDebounce.Start();
+                _lastClickedOrder = sizeItem.ParentOrder;
+
+                if (_selectedOrderItem?.DbId != sizeItem.ParentOrder.DbId)
+                {
+                    _selectedOrderItem = sizeItem.ParentOrder;
+                    _vm.SelectedOrder = sizeItem.ParentOrder;
+                    _pendingVerifyOrder = sizeItem.ParentOrder;
+                    _verifyDebounce.Stop();
+                    _verifyDebounce.Start();
+                }
                 ShowOrderDetail(sizeItem.ParentOrder);
             }
 
-            ShowSizeDetail(sizeItem);
+            var selectedSizes = GetSelectedSizes();
+            if (selectedSizes.Count > 1)
+                ShowMultiSelectMessage(selectedSizes.Count, isSizes: true);
+            else
+                ShowSizeDetail(sizeItem);
+
             LoadSizeThumbnails(sizeItem);
+            e.Handled = true;
         }
+    }
+
+    private void ClearAllSelections()
+    {
+        foreach (var o in _vm.PendingOrders)
+        {
+            o.IsSelected = false;
+            foreach (var s in o.Sizes) s.IsSelected = false;
+        }
+        foreach (var o in _vm.PrintedOrders)
+        {
+            o.IsSelected = false;
+            foreach (var s in o.Sizes) s.IsSelected = false;
+        }
+        foreach (var o in _vm.OtherStoreOrders)
+        {
+            o.IsSelected = false;
+            foreach (var s in o.Sizes) s.IsSelected = false;
+        }
+    }
+
+    private List<OrderTreeItem> GetSelectedOrders()
+    {
+        var selected = new List<OrderTreeItem>();
+        selected.AddRange(_vm.PendingOrders.Where(o => o.IsSelected));
+        selected.AddRange(_vm.PrintedOrders.Where(o => o.IsSelected));
+        selected.AddRange(_vm.OtherStoreOrders.Where(o => o.IsSelected));
+        return selected;
+    }
+
+    private List<SizeTreeItem> GetSelectedSizes()
+    {
+        var selected = new List<SizeTreeItem>();
+        foreach (var o in _vm.PendingOrders)
+            selected.AddRange(o.Sizes.Where(s => s.IsSelected));
+        foreach (var o in _vm.PrintedOrders)
+            selected.AddRange(o.Sizes.Where(s => s.IsSelected));
+        foreach (var o in _vm.OtherStoreOrders)
+            selected.AddRange(o.Sizes.Where(s => s.IsSelected));
+        return selected;
+    }
+
+    private void ShowMultiSelectMessage(int count, bool isSizes = false)
+    {
+        DetailEmpty.Text = isSizes ? $"{count} sizes selected" : $"{count} orders selected";
+        DetailEmpty.Visibility = Visibility.Visible;
+        DetailContent.Visibility = Visibility.Collapsed;
+        SizeDetailPanel.Visibility = Visibility.Collapsed;
+        ThumbnailPanel.Children.Clear();
+        NotesListBox.ItemsSource = null;
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -353,6 +499,7 @@ public partial class MainWindow : Window
     {
         if (treeItem == null)
         {
+            DetailEmpty.Text = "Select an order or size";
             DetailEmpty.Visibility = Visibility.Visible;
             DetailContent.Visibility = Visibility.Collapsed;
             return;
@@ -643,17 +790,87 @@ public partial class MainWindow : Window
 
     private void HoldButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedOrderItem == null) return;
-        _vm.ToggleHold("operator");
+        var selected = GetSelectedOrders();
+        if (selected.Count == 0 && _selectedOrderItem != null)
+            selected = new List<OrderTreeItem> { _selectedOrderItem };
+        if (selected.Count == 0) return;
+
+        foreach (var order in selected)
+        {
+            _vm.SelectedOrder = order;
+            _vm.ToggleHold("operator");
+            order.IsHeld = !order.IsHeld; // reflect immediately
+        }
         _vm.LoadOrders();
         UpdateStatusBar();
     }
 
+    private void DoneButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenDoneConfirmForSelected(cursorOverEmail: false);
+    }
+
+    private void OpenDoneConfirmForSelected(bool cursorOverEmail)
+    {
+        var selected = GetSelectedOrders();
+        if (selected.Count == 0 && _selectedOrderItem != null)
+            selected = new List<OrderTreeItem> { _selectedOrderItem };
+        if (selected.Count == 0) return;
+
+        // For single order, show the confirm dialog with cursor positioning
+        if (selected.Count == 1)
+        {
+            var order = selected[0];
+            var win = new DoneConfirmWindow(
+                order.CustomerName, order.ShortId,
+                alreadyDone: order.StatusCode == "picked_up",
+                alreadyEmailed: false,
+                cursorOverEmail: cursorOverEmail)
+            { Owner = this };
+
+            if (win.ShowDialog() == true)
+                ApplyDoneAction(selected, win.Result);
+        }
+        else
+        {
+            // Batch: one confirm for all
+            var names = string.Join(", ", selected.Take(5).Select(o => o.ShortId));
+            if (selected.Count > 5) names += $" +{selected.Count - 5} more";
+
+            var action = cursorOverEmail ? "mark printed + email" : "mark printed";
+            var result = MessageBox.Show(
+                $"{action.ToUpperInvariant()} {selected.Count} orders?\n\n{names}",
+                "Batch Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+                ApplyDoneAction(selected, cursorOverEmail ? DoneAction.MarkDoneAndEmail : DoneAction.MarkDone);
+        }
+
+        _vm.LoadOrders();
+        UpdateStatusBar();
+    }
+
+    private void ApplyDoneAction(List<OrderTreeItem> orders, DoneAction action)
+    {
+        foreach (var order in orders)
+        {
+            if (action == DoneAction.MarkDone || action == DoneAction.MarkDoneAndEmail)
+            {
+                _vm.MarkDone(order.DbId);
+                order.StatusCode = "picked_up";
+            }
+            if (action == DoneAction.MarkDoneAndEmail)
+            {
+                // TODO: send email via NotificationService
+                AlertCollector.Info(AlertCategory.General,
+                    $"Email for {order.ShortId} not yet wired", orderId: order.ExternalOrderId);
+            }
+        }
+    }
+
     private void NotifyButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedOrderItem == null) return;
-        // TODO: delegate to NotificationService via ViewModel
-        MessageBox.Show("Notification not yet wired.", "TODO", MessageBoxButton.OK, MessageBoxImage.Information);
+        OpenDoneConfirmForSelected(cursorOverEmail: true);
     }
 
     private void TransferButton_Click(object sender, RoutedEventArgs e)
@@ -665,37 +882,44 @@ public partial class MainWindow : Window
 
     private async void PrintSelectedButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedOrderItem == null) return;
+        var orders = GetSelectedOrders();
+        if (orders.Count == 0 && _selectedOrderItem != null)
+            orders = new List<OrderTreeItem> { _selectedOrderItem };
+        if (orders.Count == 0) return;
 
-        if (_settings.DeveloperMode)
-        {
-            MessageBox.Show("Printing is disabled in developer mode.", "Dev Mode",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
+        // Size filter only applies when printing a single order with specific sizes selected
+        var selectedSizes = GetSelectedSizes();
+        var sizeFilter = orders.Count == 1 && selectedSizes.Count > 0
+            ? selectedSizes.Select(s => $"{s.SizeLabel}|{s.MediaType}").ToHashSet()
+            : null;
 
-        var order = _selectedOrderItem;
         PrintBtn.IsEnabled = false;
         PrintBtn.Content = "Printing...";
 
+        int totalSent = 0;
+        int totalSkipped = 0;
+        var allSkipReasons = new List<string>();
+
         try
         {
-            var result = await Task.Run(() => _vm.PrintOrder(
-                order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode));
-
-            var sentCount = result.Sent.Count;
-            var skippedCount = result.Skipped.Count;
-
-            if (sentCount > 0)
+            foreach (var order in orders)
             {
-                var channels = string.Join(", ", result.Sent.Select(s => $"Ch {s.ChannelNumber:D3}").Distinct());
-                _vm.StatusText = $"Sent {sentCount} item(s) to {channels}";
+                var result = await Task.Run(() => _vm.PrintOrder(
+                    order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode, sizeFilter));
+
+                totalSent += result.Sent.Count;
+                totalSkipped += result.Skipped.Count;
+
+                foreach (var s in result.Skipped)
+                    allSkipReasons.Add($"{order.ShortId} — {s.SizeLabel}: {s.Reason}");
             }
 
-            if (skippedCount > 0)
+            if (totalSent > 0)
+                _vm.StatusText = $"Sent {totalSent} item(s) across {orders.Count} order(s)";
+
+            if (totalSkipped > 0)
             {
-                var reasons = string.Join("\n", result.Skipped.Select(s => $"{s.SizeLabel}: {s.Reason}"));
-                MessageBox.Show($"Skipped {skippedCount} size group(s):\n\n{reasons}",
+                MessageBox.Show($"Skipped {totalSkipped} size group(s):\n\n{string.Join("\n", allSkipReasons)}",
                     "Print — Some Sizes Skipped", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
 
@@ -705,7 +929,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             AlertCollector.Error(Core.AlertCategory.Printing,
-                $"Print failed for {order.ExternalOrderId}", ex: ex);
+                "Batch print failed", ex: ex);
             MessageBox.Show($"Print failed: {ex.Message}", "Error",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
