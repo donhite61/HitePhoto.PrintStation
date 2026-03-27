@@ -1,6 +1,6 @@
 # HitePhoto PrintStation — Roadmap
 
-**Last updated:** 2026-03-24 (Session 53)
+**Last updated:** 2026-03-27 (Session 61)
 **Read this before starting any work.**
 
 ## What This Is
@@ -37,23 +37,30 @@ Two stores (BH + WB), each running their own PrintStation. MariaDB on Dell serve
 
 ## Where We Are
 
+**Last status update:** Session 61 (2026-03-27)
+
 | Component | State |
 |-----------|-------|
-| **PrintStation UI** | Shell done — 3-tab tree, detail panel, settings, themes |
-| **Processing** | Ported — ImageProcessor, NoritsuMrkWriter, LayoutProcessor, ImagePreparer |
-| **Color Correction** | Ported — full pipeline, 6-up page view, CorrectionStore |
-| **Email/Notify** | Ported — EmailService, PixfizzNotifier |
-| **Alerts/Logging** | Ported — AlertCollector, AppLog |
-| **SQLite schema** | Done — OrderDb.cs with all tables |
-| **Decision makers** | In progress |
-| **Services** | Not started |
-| **Ingest (Pixfizz)** | Not started — will port from IngestService |
-| **Ingest (Dakis)** | Not started — will port from IngestService |
+| **PrintStation UI** | Done — 3-tab tree, detail panel, multi-select, context menu, settings, themes |
+| **Processing** | Done — NoritsuMrkWriter, LayoutProcessor, ImagePreparer, multi-select print, mark printed/unprinted |
+| **Color Correction** | Done — full pipeline, 6-up page view, CorrectionStore |
+| **Email/Notify** | Done — EmailService wired via NotificationService, template chooser + preview, pickup/shipped, Send Test |
+| **Alerts/Logging** | Done — AlertCollector, AppLog, alert panel, alert history, ON CONFLICT dedup |
+| **SQLite schema** | Done — all tables including delivery_methods, shipping address columns |
+| **Decision makers** | Done — Hold, FilesNeeded, Channel, Fulfillment |
+| **Services** | Done — Print, Hold, Notification, OrderVerifier |
+| **Ingest (Pixfizz)** | Done — OHD API poll, FTP download, TXT parse, SQLite write, received push |
+| **Ingest (Dakis)** | Done — folder watch, YML parse, shipping/delivery fields, SQLite write |
+| **Channel mapping** | Done — search dropdown, CSV + DB + layout channels, click-to-assign |
+| **Layout designer** | Done — new/edit/delete in Settings, live preview |
+| **Auto-updater** | Wired — startup check + Settings button, needs end-to-end test |
+| **Inter-store transfers** | Not started |
 | **MariaDB sync** | Not started |
+| **Test project** | Not started — planned next session |
 
 ## Build Phases
 
-### Phase 1 — Core Foundation (IN PROGRESS)
+### Phase 1 — Core Foundation (COMPLETE)
 
 Walk through each workflow step by step, validate assumptions, build decision makers and services.
 
@@ -103,17 +110,18 @@ Walk through each workflow step by step, validate assumptions, build decision ma
 - `IPrintEligibility` — single pre-print gate, calls the others
 - `IFulfillmentDecision` — in-house vs outlab vendor
 
-### Phase 2 — Full Feature Parity with PrintRouter
+### Phase 2 — Full Feature Parity with PrintRouter (NEARLY COMPLETE)
 
-- Hold/release with history
-- Inter-store transfers (SFTP)
-- Customer notifications (email + Pixfizz API)
-- Channel mapping UI (learn new mappings, edit existing)
-- Layout system (multi-up tiling for wallets etc.)
-- Auto-updater
-- Settings UI for all configuration
+- ~~Hold/release with history~~ DONE
+- Inter-store transfers (SFTP) — NOT STARTED
+- ~~Customer notifications (email + Pixfizz API)~~ DONE (Pixfizz API call still TODO)
+- ~~Channel mapping UI (learn new mappings, edit existing)~~ DONE
+- ~~Layout system (multi-up tiling for wallets etc.)~~ DONE
+- ~~Auto-updater~~ WIRED (needs end-to-end test)
+- ~~Settings UI for all configuration~~ DONE
+- PrintRouter has been SHUT DOWN — PrintStation is the replacement
 
-### Phase 3 — MariaDB Sync
+### Phase 3 — MariaDB Sync (NEXT UP)
 
 - Bidirectional sync connector between local SQLite and MariaDB
 - Push: status changes, holds, printed flags, notes → MariaDB
