@@ -47,4 +47,5 @@ public class LayoutDefinition
 
     public string PrintSizeDisplay => $"{PrintWidth} x {PrintHeight}";
     public string GridDisplay => $"{Rows} x {Columns}";
+    public string CalculatedPageSizeDisplay => $"{CalculatedPageWidth:F3} x {CalculatedPageHeight:F3} in";
 }

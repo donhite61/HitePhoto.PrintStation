@@ -320,6 +320,7 @@ public class MainViewModel : ViewModelBase
         DbId = order.Id,
         ExternalOrderId = order.ExternalOrderId,
         CustomerName = $"{order.CustomerFirstName} {order.CustomerLastName}".Trim(),
+        CustomerPhone = order.CustomerPhone,
         SourceCode = order.SourceCode,
         StatusCode = order.StatusCode,
         StoreName = order.StoreName,
@@ -335,6 +336,7 @@ public class MainViewModel : ViewModelBase
         var name = $"{row.CustomerFirstName} {row.CustomerLastName}".Trim();
         if (existing.ExternalOrderId != row.ExternalOrderId) existing.ExternalOrderId = row.ExternalOrderId;
         if (existing.CustomerName != name) existing.CustomerName = name;
+        if (existing.CustomerPhone != row.CustomerPhone) existing.CustomerPhone = row.CustomerPhone;
         if (existing.SourceCode != row.SourceCode) existing.SourceCode = row.SourceCode;
         if (existing.StatusCode != row.StatusCode) existing.StatusCode = row.StatusCode;
         if (existing.StoreName != row.StoreName) existing.StoreName = row.StoreName;
@@ -346,96 +348,97 @@ public class MainViewModel : ViewModelBase
         if (existing.OrderedAt != orderedAt) existing.OrderedAt = orderedAt;
     }
 
-    /// <summary>
-    /// Diff size children in place — match by SizeLabel+MediaType, update or add/remove.
-    /// </summary>
+    private record SizeGroupResult(
+        string SizeLabel, string MediaType,
+        int ImageCount, int PrintedCount, int MissingCount,
+        int ChannelNumber, string ChannelName,
+        List<HitePhoto.Shared.Models.OrderItem> Items);
+
+    private SizeGroupResult ProcessSizeGroup(IEnumerable<ItemRow> group, string sizeLabel, string mediaType, bool verifyFiles)
+    {
+        int missingCount = 0;
+        int printedCount = 0;
+        var orderItems = new List<HitePhoto.Shared.Models.OrderItem>();
+        int totalQty = 0;
+        int channelNumber = 0;
+        bool first = true;
+
+        foreach (var item in group)
+        {
+            if (first) { channelNumber = item.ChannelNumber; first = false; }
+            if (verifyFiles && !string.IsNullOrEmpty(item.ImageFilepath))
+            {
+                var error = OrderHelpers.VerifyFile(item.ImageFilepath);
+                if (error != null) missingCount++;
+            }
+            if (item.IsPrinted) printedCount++;
+            totalQty += item.Quantity;
+
+            orderItems.Add(new HitePhoto.Shared.Models.OrderItem
+            {
+                Id = item.Id,
+                SizeLabel = item.SizeLabel,
+                MediaType = item.MediaType,
+                Quantity = item.Quantity,
+                ImageFilename = item.ImageFilename,
+                ImageFilepath = item.ImageFilepath,
+                ChannelNumber = item.ChannelNumber,
+                IsPrinted = item.IsPrinted
+            });
+        }
+
+        var chName = channelNumber > 0 && _channelNames.TryGetValue(channelNumber, out var n) ? n : "";
+        return new SizeGroupResult(sizeLabel, mediaType, totalQty, printedCount, missingCount, channelNumber, chName, orderItems);
+    }
+
     private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
     {
         var groups = items
             .GroupBy(i => new { Size = string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel, i.MediaType })
             .ToList();
 
-        // Lookup existing sizes by composite key
         var existingByKey = new Dictionary<string, SizeTreeItem>();
         foreach (var sz in treeItem.Sizes)
             existingByKey[$"{sz.SizeLabel}|{sz.MediaType}"] = sz;
 
-        var seenKeys = new HashSet<string>();
         int totalImages = 0;
         bool hasMissing = false;
 
         for (int i = 0; i < groups.Count; i++)
         {
             var group = groups[i];
-            var key = $"{group.Key.Size}|{group.Key.MediaType}";
-            seenKeys.Add(key);
+            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.MediaType, verifyFiles);
+            var key = $"{r.SizeLabel}|{r.MediaType}";
 
-            int missingCount = 0;
-            int printedCount = 0;
-            foreach (var item in group)
-            {
-                if (verifyFiles && !string.IsNullOrEmpty(item.ImageFilepath))
-                {
-                    var error = OrderHelpers.VerifyFile(item.ImageFilepath);
-                    if (error != null) missingCount++;
-                }
-                if (item.IsPrinted) printedCount++;
-            }
-
-            var newItems = group.Select(it => new HitePhoto.Shared.Models.OrderItem
-            {
-                Id = it.Id,
-                SizeLabel = it.SizeLabel,
-                MediaType = it.MediaType,
-                Quantity = it.Quantity,
-                ImageFilename = it.ImageFilename,
-                ImageFilepath = it.ImageFilepath,
-                ChannelNumber = it.ChannelNumber,
-                IsPrinted = it.IsPrinted
-            }).ToList();
-
-            int imageCount = group.Sum(it => it.Quantity);
-            totalImages += imageCount;
-            if (missingCount > 0) hasMissing = true;
+            totalImages += r.ImageCount;
+            if (r.MissingCount > 0) hasMissing = true;
 
             if (existingByKey.TryGetValue(key, out var existing))
             {
-                // Update existing size in place
-                var chNum = group.First().ChannelNumber;
-                var chName = chNum > 0 && _channelNames.TryGetValue(chNum, out var n) ? n : "";
-                if (existing.ImageCount != imageCount) existing.ImageCount = imageCount;
-                if (existing.PrintedCount != printedCount) existing.PrintedCount = printedCount;
-                if (existing.MissingFileCount != missingCount) existing.MissingFileCount = missingCount;
-                if (existing.ChannelNumber != chNum) existing.ChannelNumber = chNum;
-                if (existing.ChannelName != chName) existing.ChannelName = chName;
-                existing.Items = newItems;
+                if (existing.ImageCount != r.ImageCount) existing.ImageCount = r.ImageCount;
+                if (existing.PrintedCount != r.PrintedCount) existing.PrintedCount = r.PrintedCount;
+                if (existing.MissingFileCount != r.MissingCount) existing.MissingFileCount = r.MissingCount;
+                if (existing.ChannelNumber != r.ChannelNumber) existing.ChannelNumber = r.ChannelNumber;
+                if (existing.ChannelName != r.ChannelName) existing.ChannelName = r.ChannelName;
+                existing.Items = r.Items;
 
-                // Ensure correct position
                 int currentIndex = treeItem.Sizes.IndexOf(existing);
                 if (currentIndex != i)
                     treeItem.Sizes.Move(currentIndex, i);
             }
             else
             {
-                // New size group
-                var newChNum = group.First().ChannelNumber;
                 var sizeItem = new SizeTreeItem
                 {
-                    SizeLabel = group.Key.Size,
-                    MediaType = group.Key.MediaType,
-                    ImageCount = imageCount,
-                    PrintedCount = printedCount,
-                    MissingFileCount = missingCount,
-                    ChannelNumber = newChNum,
-                    ChannelName = newChNum > 0 && _channelNames.TryGetValue(newChNum, out var nn) ? nn : "",
-                    Items = newItems,
-                    ParentOrder = treeItem
+                    SizeLabel = r.SizeLabel, MediaType = r.MediaType,
+                    ImageCount = r.ImageCount, PrintedCount = r.PrintedCount,
+                    MissingFileCount = r.MissingCount, ChannelNumber = r.ChannelNumber,
+                    ChannelName = r.ChannelName, Items = r.Items, ParentOrder = treeItem
                 };
                 treeItem.Sizes.Insert(i, sizeItem);
             }
         }
 
-        // Remove sizes that no longer exist
         for (int i = treeItem.Sizes.Count - 1; i >= groups.Count; i--)
             treeItem.Sizes.RemoveAt(i);
 
@@ -495,51 +498,21 @@ public class MainViewModel : ViewModelBase
         bool hasMissing = false;
 
         var groups = items
-            .GroupBy(i => new { Size = string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel, i.MediaType })
-            .ToList();
+            .GroupBy(i => new { Size = string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel, i.MediaType });
 
         foreach (var group in groups)
         {
-            int missingCount = 0;
-            int printedCount = 0;
-
-            foreach (var item in group)
-            {
-                if (verifyFiles && !string.IsNullOrEmpty(item.ImageFilepath))
-                {
-                    var error = OrderHelpers.VerifyFile(item.ImageFilepath);
-                    if (error != null) missingCount++;
-                }
-                if (item.IsPrinted) printedCount++;
-            }
-
-            var chNum = group.First().ChannelNumber;
+            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.MediaType, verifyFiles);
             var sizeItem = new SizeTreeItem
             {
-                SizeLabel = group.Key.Size,
-                MediaType = group.Key.MediaType,
-                ImageCount = group.Sum(i => i.Quantity),
-                PrintedCount = printedCount,
-                MissingFileCount = missingCount,
-                ChannelNumber = chNum,
-                ChannelName = chNum > 0 && _channelNames.TryGetValue(chNum, out var name) ? name : "",
-                Items = group.Select(i => new HitePhoto.Shared.Models.OrderItem
-                {
-                    Id = i.Id,
-                    SizeLabel = i.SizeLabel,
-                    MediaType = i.MediaType,
-                    Quantity = i.Quantity,
-                    ImageFilename = i.ImageFilename,
-                    ImageFilepath = i.ImageFilepath,
-                    ChannelNumber = i.ChannelNumber,
-                    IsPrinted = i.IsPrinted
-                }).ToList()
+                SizeLabel = r.SizeLabel, MediaType = r.MediaType,
+                ImageCount = r.ImageCount, PrintedCount = r.PrintedCount,
+                MissingFileCount = r.MissingCount, ChannelNumber = r.ChannelNumber,
+                ChannelName = r.ChannelName, Items = r.Items, ParentOrder = treeItem
             };
-
-            sizeItem.ParentOrder = treeItem;
             treeItem.Sizes.Add(sizeItem);
-            totalImages += sizeItem.ImageCount;
-            if (missingCount > 0) hasMissing = true;
+            totalImages += r.ImageCount;
+            if (r.MissingCount > 0) hasMissing = true;
         }
 
         treeItem.TotalImages = totalImages;
@@ -623,11 +596,19 @@ public class MainViewModel : ViewModelBase
 
     public List<Core.Models.ChannelInfo> GetAllChannels() => _orders.GetAllChannels();
 
-    public void AssignChannel(string sizeLabel, string mediaType, int channelNumber)
+    public void AssignChannel(string sizeLabel, string mediaType, int channelNumber, string? layoutName = null)
     {
         var routingKey = OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
-        _orders.SaveChannelMapping(routingKey, channelNumber);
+        _orders.SaveChannelMapping(routingKey, channelNumber, layoutName);
         _orders.UpdateItemChannels(sizeLabel, mediaType, channelNumber);
+        _channelNamesDirty = true;
+    }
+
+    public void UnassignChannel(string sizeLabel, string mediaType)
+    {
+        var routingKey = OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
+        _orders.DeleteChannelMapping(routingKey);
+        _orders.UpdateItemChannels(sizeLabel, mediaType, 0);
         _channelNamesDirty = true;
     }
 

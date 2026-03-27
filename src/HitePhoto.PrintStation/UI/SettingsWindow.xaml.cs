@@ -450,6 +450,67 @@ public partial class SettingsWindow : Window
             .ToList();
     }
 
+    private List<Core.Models.ChannelInfo> GetChannelsForDesigner()
+    {
+        var channels = new List<Core.Models.ChannelInfo>();
+        if (!string.IsNullOrWhiteSpace(_settings.ChannelsCsvPath))
+        {
+            var reader = new Core.Processing.ChannelsCsvReader(_settings.ChannelsCsvPath);
+            channels = reader.Load();
+        }
+        if (channels.Count == 0)
+        {
+            var repo = App.Services.GetRequiredService<Data.Repositories.IOrderRepository>();
+            channels = repo.GetAllChannels();
+        }
+        return channels;
+    }
+
+    private void NewLayout_Click(object sender, RoutedEventArgs e)
+    {
+        var channels = GetChannelsForDesigner();
+        var win = new LayoutDesignerWindow(channels, _settings) { Owner = this };
+        if (win.ShowDialog() == true && win.Result != null)
+        {
+            _settings.Layouts ??= new();
+            _settings.Layouts.RemoveAll(l => l.Name.Equals(win.Result.Name, StringComparison.OrdinalIgnoreCase));
+            _settings.Layouts.Add(win.Result);
+            _settingsManager.Save(_settings);
+            RefreshLayoutGrid();
+        }
+    }
+
+    private void EditLayout_Click(object sender, RoutedEventArgs e)
+    {
+        if (LayoutGrid.SelectedItem is not LayoutGridRow row) return;
+        var existing = _settings.Layouts?.FirstOrDefault(l =>
+            l.Name.Equals(row.Name, StringComparison.OrdinalIgnoreCase));
+        if (existing == null) return;
+
+        var channels = GetChannelsForDesigner();
+        var win = new LayoutDesignerWindow(channels, _settings, existing) { Owner = this };
+        if (win.ShowDialog() == true && win.Result != null)
+        {
+            _settings.Layouts!.Remove(existing);
+            _settings.Layouts.RemoveAll(l => l.Name.Equals(win.Result.Name, StringComparison.OrdinalIgnoreCase));
+            _settings.Layouts.Add(win.Result);
+            _settingsManager.Save(_settings);
+            RefreshLayoutGrid();
+        }
+    }
+
+    private void DeleteLayout_Click(object sender, RoutedEventArgs e)
+    {
+        if (LayoutGrid.SelectedItem is not LayoutGridRow row) return;
+        if (MessageBox.Show($"Delete layout '{row.Name}'?", "Delete Layout",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        _settings.Layouts?.RemoveAll(l => l.Name.Equals(row.Name, StringComparison.OrdinalIgnoreCase));
+        _settingsManager.Save(_settings);
+        RefreshLayoutGrid();
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  Controls tab — slot layout
     // ══════════════════════════════════════════════════════════════════════

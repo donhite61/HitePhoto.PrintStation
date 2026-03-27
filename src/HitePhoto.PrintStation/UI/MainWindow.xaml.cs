@@ -361,11 +361,12 @@ public partial class MainWindow : Window
         DetailEmpty.Visibility = Visibility.Collapsed;
         DetailContent.Visibility = Visibility.Visible;
 
-        DetailOrderId.Text = treeItem.ExternalOrderId;
+        DetailOrderId.Text = treeItem.ShortId;
+        DetailCustomerName.Text = treeItem.CustomerName;
+        DetailPhone.Text = treeItem.CustomerPhone;
         DetailStatus.Text = treeItem.StatusCode;
         DetailSource.Text = treeItem.SourceCode;
         DetailStore.Text = treeItem.StoreName;
-        DetailCustomerName.Text = treeItem.CustomerName;
         DetailOrderedAt.Text = treeItem.OrderedAt?.ToString("yyyy-MM-dd HH:mm") ?? "";
         DetailItemCount.Text = $"{treeItem.TotalImages}";
 
@@ -397,45 +398,47 @@ public partial class MainWindow : Window
     //  Channel assignment
     // ══════════════════════════════════════════════════════════════════════
 
-    private List<(string Display, int Channel)> _channelEntries = new();
-    private List<(string Display, int Channel)> _filteredChannelEntries = new();
+    private List<(string Display, int Channel, string? LayoutName)> _channelEntries = new();
+    private List<(string Display, int Channel, string? LayoutName)> _filteredChannelEntries = new();
     private bool _channelEntriesLoaded;
 
     private void LoadChannelEntries()
     {
         _channelEntries.Clear();
 
-        // Layouts first
+        // Special options first
+        _channelEntries.Add(("— Unassigned —", 0, null));
+        _channelEntries.Add(("— Skip (no print) —", -1, null));
+
+        // Layouts
         foreach (var l in _settings.Layouts)
         {
             _channelEntries.Add((
                 $"[Layout] {l.Name}  ({l.PrintSizeDisplay} {l.GridDisplay} → CH {l.TargetChannelNumber:D3})",
-                l.TargetChannelNumber));
+                l.TargetChannelNumber, l.Name));
         }
 
         // Channels from Noritsu CSV
         if (!string.IsNullOrWhiteSpace(_settings.ChannelsCsvPath))
         {
             var reader = new Core.Processing.ChannelsCsvReader(_settings.ChannelsCsvPath);
-            var csvChannels = reader.Load();
-            foreach (var c in csvChannels)
+            foreach (var c in reader.Load())
             {
                 _channelEntries.Add((
                     $"{c.ChannelNumber:D3}  {c.SizeLabel}  {c.MediaType}  {c.Description}".Trim(),
-                    c.ChannelNumber));
+                    c.ChannelNumber, null));
             }
         }
 
         // Existing mappings from DB (in case CSV doesn't cover everything)
-        var dbChannels = _vm.GetAllChannels();
         var existingNumbers = new HashSet<int>(_channelEntries.Select(e => e.Channel));
-        foreach (var c in dbChannels)
+        foreach (var c in _vm.GetAllChannels())
         {
             if (!existingNumbers.Contains(c.ChannelNumber))
             {
                 _channelEntries.Add((
                     $"{c.ChannelNumber:D3}  {c.SizeLabel}  {c.MediaType}  {c.Description}".Trim(),
-                    c.ChannelNumber));
+                    c.ChannelNumber, null));
             }
         }
 
@@ -477,15 +480,24 @@ public partial class MainWindow : Window
         if (_selectedSizeItem == null || ChannelList.SelectedIndex < 0) return;
 
         var selected = _filteredChannelEntries[ChannelList.SelectedIndex];
-        _vm.AssignChannel(_selectedSizeItem.SizeLabel, _selectedSizeItem.MediaType, selected.Channel);
 
-        // Update the tree immediately
+        if (selected.Channel == 0)
+        {
+            // Unassign — delete the mapping
+            _vm.UnassignChannel(_selectedSizeItem.SizeLabel, _selectedSizeItem.MediaType);
+        }
+        else
+        {
+            _vm.AssignChannel(_selectedSizeItem.SizeLabel, _selectedSizeItem.MediaType,
+                selected.Channel, selected.LayoutName);
+        }
+
         _selectedSizeItem.ChannelNumber = selected.Channel;
         SizeDetailChannel.Text = _selectedSizeItem.ChannelLabel;
         ChannelList.Visibility = Visibility.Collapsed;
         ChannelSearchBox.Text = "";
 
-        _channelEntriesLoaded = false; // invalidate cache
+        _channelEntriesLoaded = false;
         _vm.LoadOrders();
         UpdateStatusBar();
     }
@@ -506,7 +518,7 @@ public partial class MainWindow : Window
 
             var border = new Border
             {
-                Width = 80, Height = 80,
+                Width = 110, Height = 110,
                 Margin = new Thickness(3),
                 BorderThickness = new Thickness(1),
                 BorderBrush = (Brush)FindResource("BorderBrush"),
@@ -522,7 +534,7 @@ public partial class MainWindow : Window
                     var bmp = new BitmapImage();
                     bmp.BeginInit();
                     bmp.CacheOption = BitmapCacheOption.OnLoad;
-                    bmp.DecodePixelWidth = 80;
+                    bmp.DecodePixelWidth = 110;
                     bmp.UriSource = new Uri(item.ImageFilepath);
                     bmp.EndInit();
                     bmp.Freeze();

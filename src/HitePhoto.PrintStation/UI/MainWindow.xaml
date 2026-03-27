@@ -278,23 +278,30 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
-                            <TextBlock x:Name="DetailEmpty" Grid.RowSpan="4"
+                            <TextBlock x:Name="DetailEmpty" Grid.RowSpan="5"
                                        Text="Select an order or size"
                                        Foreground="{DynamicResource TextMuted}" FontSize="13"
                                        FontStyle="Italic"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
                             <StackPanel x:Name="DetailContent" Grid.Row="0" Visibility="Collapsed" Margin="10,8,10,0">
-                                <!-- Row 1: Order ID + Status + Source + Store + Date + Items — all horizontal -->
+                                <!-- Line 1: Order ID, Customer Name, Phone -->
                                 <WrapPanel Orientation="Horizontal">
-                                    <TextBlock x:Name="DetailOrderId" FontSize="16"
+                                    <TextBlock x:Name="DetailOrderId" FontSize="18"
                                                FontWeight="SemiBold" Foreground="{DynamicResource TextHeading}"
-                                               VerticalAlignment="Center" Margin="0,0,16,0"/>
-                                    <TextBlock x:Name="DetailCustomerName" FontSize="14"
+                                               VerticalAlignment="Center" Margin="0,0,20,0"/>
+                                    <TextBlock x:Name="DetailCustomerName" FontSize="16"
                                                Foreground="{DynamicResource TextPrimary}"
-                                               VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                               VerticalAlignment="Center" Margin="0,0,20,0"/>
+                                    <TextBlock x:Name="DetailPhone" FontSize="14"
+                                               Foreground="{DynamicResource TextSecondary}"
+                                               VerticalAlignment="Center"/>
+                                </WrapPanel>
+                                <!-- Line 2: Status, Source, Store, Date, Items -->
+                                <WrapPanel Orientation="Horizontal" Margin="0,2,0,0">
                                     <TextBlock Text="Status:" Foreground="{DynamicResource TextLabel}" FontSize="11"
                                                VerticalAlignment="Center" Margin="0,0,3,0"/>
                                     <TextBlock x:Name="DetailStatus" Foreground="{DynamicResource AccentGreen}" FontSize="11"
@@ -352,9 +359,9 @@
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal" Margin="0,1">
-                                            <TextBlock Text="{Binding CreatedAt, StringFormat='{}{0:MM/dd HH:mm}'}"
+                                            <TextBlock Text="{Binding CreatedAt}"
                                                        Foreground="{DynamicResource TextMuted}" FontSize="10"/>
-                                            <TextBlock Text="{Binding NoteText}"
+                                            <TextBlock Text="{Binding Note}"
                                                        Foreground="{DynamicResource TextPrimary}" FontSize="11"
                                                        Margin="8,0,0,0" TextWrapping="NoWrap"/>
                                         </StackPanel>
@@ -362,8 +369,9 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
 
-                            <!-- Thumbnail strip -->
-                            <Border Grid.Row="3" Background="{DynamicResource WindowBg}">
+                            <!-- Thumbnail strip (pinned to bottom) -->
+                            <Border Grid.Row="4" Background="{DynamicResource WindowBg}"
+                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Disabled">
                                     <WrapPanel x:Name="ThumbnailPanel" Orientation="Horizontal" Margin="6,4"/>

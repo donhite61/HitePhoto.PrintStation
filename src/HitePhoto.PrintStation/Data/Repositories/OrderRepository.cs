@@ -402,19 +402,21 @@ public class OrderRepository : IOrderRepository
         return channels;
     }
 
-    public void SaveChannelMapping(string routingKey, int channelNumber)
+    public void SaveChannelMapping(string routingKey, int channelNumber, string? layoutName = null)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO channel_mappings (routing_key, channel_number, updated_at)
-            VALUES (@key, @channel, datetime('now','localtime'))
+            INSERT INTO channel_mappings (routing_key, channel_number, layout_name, updated_at)
+            VALUES (@key, @channel, @layout, datetime('now','localtime'))
             ON CONFLICT(routing_key) DO UPDATE SET
                 channel_number = @channel,
+                layout_name = @layout,
                 updated_at = datetime('now','localtime')
             """;
         cmd.Parameters.AddWithValue("@key", routingKey);
         cmd.Parameters.AddWithValue("@channel", channelNumber);
+        cmd.Parameters.AddWithValue("@layout", (object?)layoutName ?? DBNull.Value);
         cmd.ExecuteNonQuery();
     }
 

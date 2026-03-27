@@ -84,6 +84,7 @@ public class SizeTreeItem : INotifyPropertyChanged
 
     public string ChannelLabel =>
         !ChannelNumber.HasValue || ChannelNumber == 0 ? "(unmapped)"
+        : ChannelNumber == -1 ? "(skip)"
         : !string.IsNullOrEmpty(ChannelName) ? $"Ch {ChannelNumber:D3} — {ChannelName}"
         : $"Ch {ChannelNumber:D3}";
 
@@ -109,6 +110,7 @@ public class OrderTreeItem : INotifyPropertyChanged
     private int _dbId;
     private string _externalOrderId = "";
     private string _customerName = "";
+    private string _customerPhone = "";
     private string _sourceCode = "";
     private string _statusCode = "";
     private string _storeName = "";
@@ -138,6 +140,12 @@ public class OrderTreeItem : INotifyPropertyChanged
     {
         get => _customerName;
         set { _customerName = value; OnPropertyChanged(); OnPropertyChanged(nameof(DisplayLabel)); }
+    }
+
+    public string CustomerPhone
+    {
+        get => _customerPhone;
+        set { _customerPhone = value; OnPropertyChanged(); }
     }
 
     public string SourceCode

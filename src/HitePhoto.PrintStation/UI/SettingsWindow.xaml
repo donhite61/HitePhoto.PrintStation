@@ -238,9 +238,12 @@
                         </DataGrid.Columns>
                     </DataGrid>
                     <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
-                        <TextBlock Text="Layout editing not yet ported — use PrintRouter to manage layouts"
-                                   Foreground="{DynamicResource TextMuted}" FontSize="11"
-                                   VerticalAlignment="Center"/>
+                        <Button Content="New Layout" Width="100" Margin="0,0,8,0"
+                                Click="NewLayout_Click"/>
+                        <Button Content="Edit Layout" Width="100" Margin="0,0,8,0"
+                                Click="EditLayout_Click"/>
+                        <Button Content="Delete Layout" Width="100"
+                                Click="DeleteLayout_Click"/>
                     </StackPanel>
                 </Grid>
             </TabItem>
