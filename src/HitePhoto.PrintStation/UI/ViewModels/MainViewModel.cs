@@ -638,7 +638,6 @@ public class MainViewModel : ViewModelBase
     public void RunDakisScan()
     {
         _dakisIngest.ScanFolder();
-        NeedsRefresh = true;
     }
 
     public void StartDakisWatcher() => _dakisIngest.StartWatching();

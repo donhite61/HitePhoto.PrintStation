@@ -143,7 +143,15 @@ public partial class MainWindow : Window
         _dakisScanTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
         _dakisScanTimer.Tick += (_, _) =>
         {
-            Task.Run(() => _vm.RunDakisScan());
+            Task.Run(() =>
+            {
+                _vm.RunDakisScan();
+                Dispatcher.Invoke(() =>
+                {
+                    _vm.LoadOrders();
+                    UpdateStatusBar();
+                });
+            });
         };
 
         Loaded += MainWindow_Loaded;
@@ -309,6 +317,9 @@ public partial class MainWindow : Window
 
     private void Tree_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // Close channel popup when clicking anywhere in the tree
+        if (ChannelPopup.IsOpen) ChannelPopup.IsOpen = false;
+
         // Find the data item that was clicked
         var hit = e.OriginalSource as DependencyObject;
         object? dataItem = null;
@@ -622,15 +633,6 @@ public partial class MainWindow : Window
         ChannelPopup.IsOpen = true;
     }
 
-    private void ChannelSearchBox_LostFocus(object sender, RoutedEventArgs e)
-    {
-        // Delay close so clicks on the ChannelList can register first
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
-        {
-            if (!ChannelSearchBox.IsFocused && !ChannelList.IsMouseOver)
-                ChannelPopup.IsOpen = false;
-        });
-    }
 
     private void ChannelList_MouseClick(object sender, MouseButtonEventArgs e)
     {
