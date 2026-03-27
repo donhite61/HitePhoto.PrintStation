@@ -1,0 +1,46 @@
+:format_version: 4
+:id: "TEST-BAD-CUST"
+:type: "KioskPrintingOrder"
+:comment: "Test: missing customer name — should trigger error"
+:been_paid: true
+:payment_date: "2026-03-27"
+:charged_price: "5.00"
+:year: 2026
+:month: 3
+:day: 27
+:hour: 14
+:minute: 0
+:second: 0
+:server_time_offset: "0"
+:customer:
+  :id: "CUST-BAD"
+  :first_name: ""
+  :last_name: ""
+  :phone: "555-0000"
+  :email: ""
+  :company: ""
+:shipping:
+  :pickup_in_store: true
+  :method: "pickup"
+:store:
+  :name: "Belmont Heights"
+:fulfillment:
+  :billing_store: "1"
+  :current_store: "1"
+  :fulfillment_type: "normal"
+:shopping_cart:
+  :channel: "kiosk"
+:all_stores:
+  - :id: "1"
+    :name: "Belmont Heights"
+  - :id: "2"
+    :name: "Westchester/Bluff"
+:print_formats:
+  - :text: "4x6"
+    :quantity: 1
+:photos:
+  - :filename: "test-photo-bad.jpg"
+    :prints:
+      - :text: "4x6"
+        :quantity: 1
+        :fulfillment_store_id: "1"

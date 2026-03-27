@@ -1,0 +1,53 @@
+:format_version: 4
+:id: "TEST-INTER-001"
+:type: "KioskPrintingOrder"
+:comment: "Test inter-store: placed at BH, prints at WB"
+:been_paid: true
+:payment_date: "2026-03-27"
+:charged_price: "15.00"
+:year: 2026
+:month: 3
+:day: 27
+:hour: 13
+:minute: 0
+:second: 0
+:server_time_offset: "0"
+:customer:
+  :id: "CUST-004"
+  :first_name: "Alice"
+  :last_name: "Williams"
+  :phone: "555-0404"
+  :email: "alice@example.com"
+  :company: ""
+  :billing_address_1: "321 Elm St"
+  :billing_city: "Long Beach"
+  :billing_state: "CA"
+  :billing_postal_code: "90803"
+  :billing_country: "US"
+:shipping:
+  :pickup_in_store: true
+  :method: "pickup"
+:store:
+  :name: "Belmont Heights"
+:fulfillment:
+  :billing_store: "1"
+  :current_store: "2"
+  :fulfillment_type: "inter_store"
+  :fulfillers:
+    - "2"
+:shopping_cart:
+  :channel: "kiosk"
+:all_stores:
+  - :id: "1"
+    :name: "Belmont Heights"
+  - :id: "2"
+    :name: "Westchester/Bluff"
+:print_formats:
+  - :text: "4x6"
+    :quantity: 5
+:photos:
+  - :filename: "test-photo-4.jpg"
+    :prints:
+      - :text: "4x6"
+        :quantity: 5
+        :fulfillment_store_id: "2"

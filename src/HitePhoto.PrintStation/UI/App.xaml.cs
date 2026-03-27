@@ -17,8 +17,23 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        AppLog.Enabled = true;
-        AppLog.Info("PrintStation starting");
+        // Parse --profile from command line
+        string? profile = null;
+        var args = Environment.GetCommandLineArgs();
+        for (int i = 1; i < args.Length; i++)
+        {
+            if (args[i] == "--profile" && i + 1 < args.Length)
+                profile = args[++i];
+        }
+
+        // Load settings (profile-aware)
+        var settingsManager = new SettingsManager(profile);
+        var settings = settingsManager.Load();
+
+        // Init logging (must happen before anything else logs)
+        AppLog.Init(settings.LogDirectory);
+        AppLog.Enabled = settings.EnableLogging;
+        AppLog.Info($"PrintStation starting{(profile != null ? $" [profile: {profile}]" : "")}");
 
         // Exception handlers
         DispatcherUnhandledException += (_, args) =>
@@ -42,10 +57,6 @@ public partial class App : Application
             args.SetObserved();
         };
 
-        // Load settings
-        var settingsManager = new SettingsManager();
-        var settings = settingsManager.Load();
-
         // Build DI container
         var services = new ServiceCollection();
 
@@ -53,8 +64,11 @@ public partial class App : Application
         services.AddSingleton(settings);
         services.AddSingleton(settingsManager);
 
-        // Data layer
-        services.AddSingleton<OrderDb>();
+        // Data layer — use explicit SQLite path if configured
+        if (!string.IsNullOrEmpty(settings.SqlitePath))
+            services.AddSingleton(new OrderDb(settings.SqlitePath));
+        else
+            services.AddSingleton<OrderDb>();
         services.AddSingleton<IOrderRepository, OrderRepository>();
         services.AddSingleton<IHistoryRepository, HistoryRepository>();
         services.AddSingleton<IAlertRepository, AlertRepository>();
@@ -129,6 +143,8 @@ public partial class App : Application
         try
         {
             var mainWindow = Services.GetRequiredService<MainWindow>();
+            if (profile != null)
+                mainWindow.Title += $" [{profile}]";
             mainWindow.Show();
         }
         catch (Exception ex)

@@ -383,7 +383,8 @@ public class MainViewModel : ViewModelBase
                 ImageFilename = item.ImageFilename,
                 ImageFilepath = item.ImageFilepath,
                 ChannelNumber = item.ChannelNumber,
-                IsPrinted = item.IsPrinted
+                IsPrinted = item.IsPrinted,
+                OptionsJson = item.OptionsJson
             });
         }
 
@@ -637,7 +638,7 @@ public class MainViewModel : ViewModelBase
     public void RunDakisScan()
     {
         _dakisIngest.ScanFolder();
-        LoadOrders();
+        NeedsRefresh = true;
     }
 
     public void StartDakisWatcher() => _dakisIngest.StartWatching();

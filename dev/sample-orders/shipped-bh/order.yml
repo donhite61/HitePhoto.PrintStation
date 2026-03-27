@@ -1,0 +1,59 @@
+:format_version: 4
+:id: "TEST-SHIP-001"
+:type: "KioskPrintingOrder"
+:comment: "Test shipped order"
+:been_paid: true
+:payment_date: "2026-03-27"
+:charged_price: "24.99"
+:year: 2026
+:month: 3
+:day: 27
+:hour: 12
+:minute: 0
+:second: 0
+:server_time_offset: "0"
+:customer:
+  :id: "CUST-003"
+  :first_name: "Bob"
+  :last_name: "Johnson"
+  :phone: "555-0303"
+  :email: "bob@example.com"
+  :company: ""
+  :billing_address_1: "789 Pine Blvd"
+  :billing_city: "Torrance"
+  :billing_state: "CA"
+  :billing_postal_code: "90501"
+  :billing_country: "US"
+  :shipping_first_name: "Bob"
+  :shipping_last_name: "Johnson"
+  :address_1: "789 Pine Blvd"
+  :address_2: ""
+  :city: "Torrance"
+  :state: "CA"
+  :postal_code: "90501"
+  :country: "US"
+:shipping:
+  :pickup_in_store: false
+  :method: "USPS Priority"
+:store:
+  :name: "Belmont Heights"
+:fulfillment:
+  :billing_store: "1"
+  :current_store: "1"
+  :fulfillment_type: "normal"
+:shopping_cart:
+  :channel: "online"
+:all_stores:
+  - :id: "1"
+    :name: "Belmont Heights"
+  - :id: "2"
+    :name: "Westchester/Bluff"
+:print_formats:
+  - :text: "8x10"
+    :quantity: 3
+:photos:
+  - :filename: "test-photo-3.jpg"
+    :prints:
+      - :text: "8x10"
+        :quantity: 3
+        :fulfillment_store_id: "1"

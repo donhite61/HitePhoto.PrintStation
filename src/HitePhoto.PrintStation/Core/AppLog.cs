@@ -4,7 +4,8 @@ using System.IO;
 namespace HitePhoto.PrintStation.Core;
 
 /// <summary>
-/// Simple file logger. Writes to %LOCALAPPDATA%\HitePhoto.PrintStation\printstation.log.
+/// Simple file logger. Defaults to %LOCALAPPDATA%\HitePhoto.PrintStation\printstation.log.
+/// Call Init(logDirectory) before first use to override the log directory.
 /// Rolls the file when it exceeds 5 MB.
 /// </summary>
 public static class AppLog
@@ -13,9 +14,17 @@ public static class AppLog
     private static readonly object _lock = new();
     private const long MaxFileSize = 5 * 1024 * 1024; // 5 MB
 
-    private static string LogPath => Path.Combine(
+    private static string _logDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "HitePhoto.PrintStation", "printstation.log");
+        "HitePhoto.PrintStation");
+
+    private static string LogPath => Path.Combine(_logDir, "printstation.log");
+
+    public static void Init(string? logDirectory)
+    {
+        if (!string.IsNullOrWhiteSpace(logDirectory))
+            _logDir = logDirectory;
+    }
 
     public static bool Enabled
     {

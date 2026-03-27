@@ -1,0 +1,37 @@
+:format_version: 4
+:id: "TEST-BAD-ITEMS"
+:type: "KioskPrintingOrder"
+:comment: "Test: no print_formats or photo_gift_orders — should trigger error"
+:been_paid: true
+:payment_date: "2026-03-27"
+:charged_price: "0.00"
+:year: 2026
+:month: 3
+:day: 27
+:hour: 14
+:minute: 30
+:second: 0
+:server_time_offset: "0"
+:customer:
+  :id: "CUST-005"
+  :first_name: "Empty"
+  :last_name: "Order"
+  :phone: "555-0505"
+  :email: "empty@example.com"
+  :company: ""
+:shipping:
+  :pickup_in_store: true
+  :method: "pickup"
+:store:
+  :name: "Belmont Heights"
+:fulfillment:
+  :billing_store: "1"
+  :current_store: "1"
+  :fulfillment_type: "normal"
+:shopping_cart:
+  :channel: "kiosk"
+:all_stores:
+  - :id: "1"
+    :name: "Belmont Heights"
+  - :id: "2"
+    :name: "Westchester/Bluff"

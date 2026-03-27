@@ -247,9 +247,9 @@ public class OrderVerifier : IOrderVerifier
                 unmatched.Remove(match);
 
                 bool needsRepair = false;
-                if (!string.Equals(match.MediaType, dbItem.MediaType, StringComparison.OrdinalIgnoreCase)) needsRepair = true;
+                if (!string.Equals(match.MediaType ?? "", dbItem.MediaType ?? "", StringComparison.OrdinalIgnoreCase)) needsRepair = true;
                 if (match.Quantity != dbItem.Quantity) needsRepair = true;
-                if (!string.Equals(match.ImageFilepath, dbItem.ImageFilepath, StringComparison.OrdinalIgnoreCase)) needsRepair = true;
+                if (!string.Equals(match.ImageFilepath ?? "", dbItem.ImageFilepath ?? "", StringComparison.OrdinalIgnoreCase)) needsRepair = true;
                 if (match.IsNoritsu != dbItem.IsNoritsu) needsRepair = true;
 
                 if (needsRepair)

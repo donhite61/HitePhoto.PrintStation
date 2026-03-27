@@ -161,8 +161,9 @@ public partial class MainWindow : Window
         _vm.LoadOrders();
         UpdateStatusBar();
 
-        // Step 7: Start timers
-        _refreshTimer.Start();
+        // Step 7: Start timers (0 = disabled)
+        if (_settings.RefreshIntervalSeconds > 0)
+            _refreshTimer.Start();
 
         // Step 8: Kick off background verify (discovers missing orders + validates existing)
         Task.Run(() =>
@@ -519,6 +520,9 @@ public partial class MainWindow : Window
         DetailOrderedAt.Text = treeItem.OrderedAt?.ToString("yyyy-MM-dd HH:mm") ?? "";
         DetailItemCount.Text = $"{treeItem.TotalImages}";
 
+        // Order options (Glossy, Matte, etc.)
+        LoadOrderOptions(treeItem);
+
         // Notes from ViewModel
         NotesListBox.ItemsSource = _vm.OrderNotes;
 
@@ -618,6 +622,16 @@ public partial class MainWindow : Window
         ChannelPopup.IsOpen = true;
     }
 
+    private void ChannelSearchBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        // Delay close so clicks on the ChannelList can register first
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+        {
+            if (!ChannelSearchBox.IsFocused && !ChannelList.IsMouseOver)
+                ChannelPopup.IsOpen = false;
+        });
+    }
+
     private void ChannelList_MouseClick(object sender, MouseButtonEventArgs e)
     {
         if (ChannelList.SelectedIndex >= 0)
@@ -649,6 +663,40 @@ public partial class MainWindow : Window
         _channelEntriesLoaded = false;
         _vm.LoadOrders();
         UpdateStatusBar();
+    }
+
+    private void LoadOrderOptions(OrderTreeItem treeItem)
+    {
+        // Options are stored as JSON on each item but are order-level for Dakis prints.
+        // Grab from the first item that has options_json.
+        var firstItem = treeItem.Sizes
+            .SelectMany(s => s.Items)
+            .FirstOrDefault(i => !string.IsNullOrEmpty(i.OptionsJson) && i.OptionsJson != "[]");
+
+        if (firstItem == null)
+        {
+            OptionsPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        try
+        {
+            var options = System.Text.Json.JsonSerializer.Deserialize<List<HitePhoto.Shared.Parsers.OrderItemOption>>(
+                firstItem.OptionsJson!);
+            if (options == null || options.Count == 0)
+            {
+                OptionsPanel.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            OptionsList.ItemsSource = options.Select(o =>
+                string.IsNullOrEmpty(o.Key) ? o.Value : $"{o.Key}: {o.Value}").ToList();
+            OptionsPanel.Visibility = Visibility.Visible;
+        }
+        catch
+        {
+            OptionsPanel.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void LoadThumbnails(OrderTreeItem treeItem)
@@ -762,7 +810,12 @@ public partial class MainWindow : Window
         if (settingsWindow.ShowDialog() == true)
         {
             ApplySettings();
-            _refreshTimer.Interval = TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds);
+            _refreshTimer.Stop();
+            if (_settings.RefreshIntervalSeconds > 0)
+            {
+                _refreshTimer.Interval = TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds);
+                _refreshTimer.Start();
+            }
             _pixfizzPollTimer.Interval = TimeSpan.FromSeconds(_settings.PollIntervalSeconds);
             _vm.LoadOrders();
         }
@@ -1205,7 +1258,8 @@ public partial class MainWindow : Window
 
     private void StartTimers()
     {
-        _refreshTimer.Start();
+        if (_settings.RefreshIntervalSeconds > 0)
+            _refreshTimer.Start();
         _pixfizzPollTimer.Start();
         _dakisScanTimer.Start();
     }

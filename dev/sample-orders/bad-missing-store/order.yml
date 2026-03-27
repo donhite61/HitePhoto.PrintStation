@@ -1,0 +1,38 @@
+:format_version: 4
+:id: "TEST-BAD-STORE"
+:type: "KioskPrintingOrder"
+:comment: "Test: no billing_store — should trigger error"
+:been_paid: true
+:payment_date: "2026-03-27"
+:charged_price: "10.00"
+:year: 2026
+:month: 3
+:day: 27
+:hour: 15
+:minute: 0
+:second: 0
+:server_time_offset: "0"
+:customer:
+  :id: "CUST-006"
+  :first_name: "No"
+  :last_name: "Store"
+  :phone: "555-0606"
+  :email: "nostore@example.com"
+  :company: ""
+:shipping:
+  :pickup_in_store: true
+  :method: "pickup"
+:store:
+  :name: ""
+:fulfillment:
+  :fulfillment_type: "normal"
+:shopping_cart:
+  :channel: "kiosk"
+:print_formats:
+  - :text: "4x6"
+    :quantity: 1
+:photos:
+  - :filename: "test-photo-nostore.jpg"
+    :prints:
+      - :text: "4x6"
+        :quantity: 1

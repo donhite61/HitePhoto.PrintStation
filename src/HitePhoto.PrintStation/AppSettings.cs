@@ -37,6 +37,10 @@ public class AppSettings
 
     // ── Logging ──
     public bool EnableLogging { get; set; } = true;
+    public string LogDirectory { get; set; } = "";
+
+    // ── Paths (profile override) ──
+    public string SqlitePath { get; set; } = "";
 
     // ── Routing ──
     [Obsolete("Routing now lives in SQLite channel_mappings table. Kept for JSON deserialization compatibility.")]

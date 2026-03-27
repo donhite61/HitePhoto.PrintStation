@@ -1,0 +1,51 @@
+:format_version: 4
+:id: "TEST-WB-001"
+:type: "KioskPrintingOrder"
+:comment: "Test pickup order at WB"
+:been_paid: true
+:payment_date: "2026-03-27"
+:charged_price: "8.50"
+:year: 2026
+:month: 3
+:day: 27
+:hour: 11
+:minute: 0
+:second: 0
+:server_time_offset: "0"
+:customer:
+  :id: "CUST-002"
+  :first_name: "Jane"
+  :last_name: "Smith"
+  :phone: "555-0202"
+  :email: "jane@example.com"
+  :company: ""
+  :billing_address_1: "456 Oak Ave"
+  :billing_city: "Westchester"
+  :billing_state: "CA"
+  :billing_postal_code: "90045"
+  :billing_country: "US"
+:shipping:
+  :pickup_in_store: true
+  :method: "pickup"
+:store:
+  :name: "Westchester/Bluff"
+:fulfillment:
+  :billing_store: "2"
+  :current_store: "2"
+  :fulfillment_type: "normal"
+:shopping_cart:
+  :channel: "kiosk"
+:all_stores:
+  - :id: "1"
+    :name: "Belmont Heights"
+  - :id: "2"
+    :name: "Westchester/Bluff"
+:print_formats:
+  - :text: "5x7"
+    :quantity: 1
+:photos:
+  - :filename: "test-photo-2.jpg"
+    :prints:
+      - :text: "5x7"
+        :quantity: 1
+        :fulfillment_store_id: "2"
