@@ -61,6 +61,19 @@ public interface IOrderRepository
     List<Core.Models.ChannelInfo> GetAllChannels();
 
     /// <summary>
+    /// Save or update a channel mapping. Upserts by routing_key.
+    /// </summary>
+    void SaveChannelMapping(string routingKey, int channelNumber);
+    void DeleteChannelMapping(string routingKey);
+    string? GetLayoutName(string routingKey);
+
+    /// <summary>
+    /// Update channel_number on all order_items matching this size+media.
+    /// Called after assigning a channel mapping so existing orders reflect the change.
+    /// </summary>
+    void UpdateItemChannels(string sizeLabel, string mediaType, int channelNumber);
+
+    /// <summary>
     /// Get Pixfizz orders older than cutoff that have a job_id but haven't been marked received.
     /// </summary>
     List<(int Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff);

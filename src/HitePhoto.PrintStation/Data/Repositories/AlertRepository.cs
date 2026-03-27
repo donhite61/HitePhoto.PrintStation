@@ -15,23 +15,64 @@ public class AlertRepository : IAlertRepository
     public void Insert(AlertRecord alert)
     {
         using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO alerts (severity, category, summary, order_id, detail, exception,
-                                source_method, source_file, source_line)
-            VALUES (@severity, @category, @summary, @orderId, @detail, @exception,
-                    @method, @file, @line)
+
+        // Dedup: if an unacknowledged alert with same category+summary+order_id exists,
+        // update its timestamp and details instead of inserting a duplicate row.
+        using var check = conn.CreateCommand();
+        check.CommandText = """
+            SELECT id FROM alerts
+            WHERE acknowledged = 0
+              AND category = @category
+              AND summary = @summary
+              AND order_id IS @orderId
+            LIMIT 1
             """;
-        cmd.Parameters.AddWithValue("@severity", alert.Severity);
-        cmd.Parameters.AddWithValue("@category", alert.Category);
-        cmd.Parameters.AddWithValue("@summary", alert.Summary);
-        cmd.Parameters.AddWithValue("@orderId", (object?)alert.OrderId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@detail", (object?)alert.Detail ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@exception", (object?)alert.Exception ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@method", (object?)alert.SourceMethod ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@file", (object?)alert.SourceFile ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@line", (object?)alert.SourceLine ?? DBNull.Value);
-        cmd.ExecuteNonQuery();
+        check.Parameters.AddWithValue("@category", alert.Category);
+        check.Parameters.AddWithValue("@summary", alert.Summary);
+        check.Parameters.AddWithValue("@orderId", (object?)alert.OrderId ?? DBNull.Value);
+        var existingId = check.ExecuteScalar();
+
+        if (existingId != null)
+        {
+            using var update = conn.CreateCommand();
+            update.CommandText = """
+                UPDATE alerts
+                SET created_at = datetime('now','localtime'),
+                    detail = @detail,
+                    exception = @exception,
+                    source_method = @method,
+                    source_file = @file,
+                    source_line = @line
+                WHERE id = @id
+                """;
+            update.Parameters.AddWithValue("@id", existingId);
+            update.Parameters.AddWithValue("@detail", (object?)alert.Detail ?? DBNull.Value);
+            update.Parameters.AddWithValue("@exception", (object?)alert.Exception ?? DBNull.Value);
+            update.Parameters.AddWithValue("@method", (object?)alert.SourceMethod ?? DBNull.Value);
+            update.Parameters.AddWithValue("@file", (object?)alert.SourceFile ?? DBNull.Value);
+            update.Parameters.AddWithValue("@line", (object?)alert.SourceLine ?? DBNull.Value);
+            update.ExecuteNonQuery();
+        }
+        else
+        {
+            using var insert = conn.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO alerts (severity, category, summary, order_id, detail, exception,
+                                    source_method, source_file, source_line)
+                VALUES (@severity, @category, @summary, @orderId, @detail, @exception,
+                        @method, @file, @line)
+                """;
+            insert.Parameters.AddWithValue("@severity", alert.Severity);
+            insert.Parameters.AddWithValue("@category", alert.Category);
+            insert.Parameters.AddWithValue("@summary", alert.Summary);
+            insert.Parameters.AddWithValue("@orderId", (object?)alert.OrderId ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@detail", (object?)alert.Detail ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@exception", (object?)alert.Exception ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@method", (object?)alert.SourceMethod ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@file", (object?)alert.SourceFile ?? DBNull.Value);
+            insert.Parameters.AddWithValue("@line", (object?)alert.SourceLine ?? DBNull.Value);
+            insert.ExecuteNonQuery();
+        }
     }
 
     public List<AlertRecord> GetRecent(int days)
@@ -49,7 +90,7 @@ public class AlertRepository : IAlertRepository
         return ReadAlerts(cmd);
     }
 
-    public List<AlertRecord> GetUnacknowledged()
+    public List<AlertRecord> GetUnacknowledged(int limit = 50)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -59,8 +100,18 @@ public class AlertRepository : IAlertRepository
             FROM alerts
             WHERE acknowledged = 0
             ORDER BY created_at DESC
+            LIMIT @limit
             """;
+        cmd.Parameters.AddWithValue("@limit", limit);
         return ReadAlerts(cmd);
+    }
+
+    public int CountUnacknowledged()
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM alerts WHERE acknowledged = 0";
+        return Convert.ToInt32(cmd.ExecuteScalar());
     }
 
     public void Acknowledge(int alertId)
@@ -69,6 +120,14 @@ public class AlertRepository : IAlertRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "UPDATE alerts SET acknowledged = 1 WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", alertId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void AcknowledgeAll()
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE alerts SET acknowledged = 1 WHERE acknowledged = 0";
         cmd.ExecuteNonQuery();
     }
 

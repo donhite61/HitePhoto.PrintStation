@@ -1,3 +1,5 @@
+using HitePhoto.PrintStation.Core;
+
 namespace HitePhoto.PrintStation.Core.Models;
 
 public class ChannelInfo
@@ -7,8 +9,7 @@ public class ChannelInfo
     public string MediaType { get; set; } = string.Empty;   // e.g. "luster"
     public string Description { get; set; } = string.Empty;
 
-    // Routing key used as dictionary key in RoutingMap
-    public string RoutingKey => $"size={SizeLabel}|media={MediaType}".ToLowerInvariant();
+    public string RoutingKey => OrderHelpers.BuildRoutingKey(SizeLabel, MediaType);
 
     /// <summary>Paper width in inches, parsed from SizeLabel (e.g. "4x6" → 4.0).</summary>
     public double WidthInches => ParseDimension(0);

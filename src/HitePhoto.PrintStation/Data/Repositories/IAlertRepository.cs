@@ -4,8 +4,10 @@ public interface IAlertRepository
 {
     void Insert(AlertRecord alert);
     List<AlertRecord> GetRecent(int days);
-    List<AlertRecord> GetUnacknowledged();
+    List<AlertRecord> GetUnacknowledged(int limit = 50);
+    int CountUnacknowledged();
     void Acknowledge(int alertId);
+    void AcknowledgeAll();
     void PurgeOlderThan(int days);
 }
 

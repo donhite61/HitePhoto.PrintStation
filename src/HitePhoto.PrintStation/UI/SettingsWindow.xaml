@@ -510,6 +510,7 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
                             <Button Content="Open Log File" Width="120" Click="OpenLog_Click"/>
                             <Button Content="Clear Log" Width="90" Margin="8,0,0,0" Click="ClearLog_Click"/>
+                            <Button Content="Alert History" Width="110" Margin="8,0,0,0" Click="AlertHistory_Click"/>
                         </StackPanel>
 
                         <TextBlock Text="Test Data" Foreground="{DynamicResource TextHeading}"

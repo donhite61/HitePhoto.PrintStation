@@ -17,6 +17,7 @@ public class SizeTreeItem : INotifyPropertyChanged
     private int _printedCount;
     private int _missingFileCount;
     private int? _channelNumber;
+    private string _channelName = "";
     private bool _isSelected;
 
     public OrderTreeItem? ParentOrder { get; set; }
@@ -57,6 +58,12 @@ public class SizeTreeItem : INotifyPropertyChanged
         set { _channelNumber = value; OnPropertyChanged(); OnPropertyChanged(nameof(ChannelLabel)); OnPropertyChanged(nameof(IsUnmapped)); }
     }
 
+    public string ChannelName
+    {
+        get => _channelName;
+        set { _channelName = value; OnPropertyChanged(); OnPropertyChanged(nameof(ChannelLabel)); }
+    }
+
     public bool IsSelected
     {
         get => _isSelected;
@@ -68,7 +75,7 @@ public class SizeTreeItem : INotifyPropertyChanged
     public string DisplayLabel =>
         string.IsNullOrEmpty(MediaType) ? SizeLabel : $"{SizeLabel} {MediaType}";
 
-    public string CountLabel => $"{ImageCount} image{(ImageCount != 1 ? "s" : "")}";
+    public string CountLabel => $"{Items.Count} file{(Items.Count != 1 ? "s" : "")}, {ImageCount} print{(ImageCount != 1 ? "s" : "")}";
 
     public string PrintedLabel =>
         PrintedCount > 0 ? $"Printed {PrintedCount}/{ImageCount}" : "";
@@ -76,7 +83,9 @@ public class SizeTreeItem : INotifyPropertyChanged
     public bool IsPrinted => PrintedCount > 0 && PrintedCount >= ImageCount;
 
     public string ChannelLabel =>
-        ChannelNumber.HasValue && ChannelNumber > 0 ? $"Ch {ChannelNumber:D3}" : "(unmapped)";
+        !ChannelNumber.HasValue || ChannelNumber == 0 ? "(unmapped)"
+        : !string.IsNullOrEmpty(ChannelName) ? $"Ch {ChannelNumber:D3} — {ChannelName}"
+        : $"Ch {ChannelNumber:D3}";
 
     public bool IsUnmapped => !ChannelNumber.HasValue || ChannelNumber == 0;
 

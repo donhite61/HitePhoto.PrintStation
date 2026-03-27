@@ -77,6 +77,7 @@ public static class AlertCollector
 {
     private static readonly object _lock = new();
     private static readonly List<AppAlert> _alerts = new();
+    private static readonly HashSet<string> _seen = new();
     private static IAlertRepository? _repository;
 
     /// <summary>
@@ -89,10 +90,19 @@ public static class AlertCollector
 
     public static void Add(AppAlert alert)
     {
+        // Dedup key: same category + summary + order = same alert.
+        // First occurrence goes to the UI queue. Repeats are logged + persisted only.
+        var dedupKey = $"{alert.Category}|{alert.Summary}|{alert.OrderId}";
+        bool isNew;
+
         lock (_lock)
         {
-            if (_alerts.Count >= 10_000) _alerts.RemoveAt(0);
-            _alerts.Add(alert);
+            isNew = _seen.Add(dedupKey);
+            if (isNew)
+            {
+                if (_alerts.Count >= 10_000) _alerts.RemoveAt(0);
+                _alerts.Add(alert);
+            }
         }
 
         // ALWAYS include ALL data in every log entry — exception is never optional.
@@ -212,5 +222,5 @@ public static class AlertCollector
 
     public static int Count { get { lock (_lock) return _alerts.Count; } }
 
-    public static void Clear() { lock (_lock) _alerts.Clear(); }
+    public static void Clear() { lock (_lock) { _alerts.Clear(); _seen.Clear(); } }
 }

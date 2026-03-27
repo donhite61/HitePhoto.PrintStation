@@ -378,7 +378,7 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT channel_number, size_label, media_type, description
+            SELECT routing_key, channel_number, layout_name
             FROM channel_mappings
             WHERE channel_number > 0
             ORDER BY channel_number
@@ -386,15 +386,71 @@ public class OrderRepository : IOrderRepository
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
+            var routingKey = reader.GetString(0);
+            var parts = routingKey.Split('|');
+            var sizeLabel = parts.Length > 0 ? parts[0] : "";
+            var mediaType = parts.Length > 1 ? parts[1] : "";
+
             channels.Add(new Core.Models.ChannelInfo
             {
-                ChannelNumber = reader.GetInt32(0),
-                SizeLabel = reader.IsDBNull(1) ? "" : reader.GetString(1),
-                MediaType = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                Description = reader.IsDBNull(3) ? "" : reader.GetString(3)
+                ChannelNumber = reader.GetInt32(1),
+                SizeLabel = sizeLabel,
+                MediaType = mediaType,
+                Description = reader.IsDBNull(2) ? "" : reader.GetString(2)
             });
         }
         return channels;
+    }
+
+    public void SaveChannelMapping(string routingKey, int channelNumber)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO channel_mappings (routing_key, channel_number, updated_at)
+            VALUES (@key, @channel, datetime('now','localtime'))
+            ON CONFLICT(routing_key) DO UPDATE SET
+                channel_number = @channel,
+                updated_at = datetime('now','localtime')
+            """;
+        cmd.Parameters.AddWithValue("@key", routingKey);
+        cmd.Parameters.AddWithValue("@channel", channelNumber);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void DeleteChannelMapping(string routingKey)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM channel_mappings WHERE routing_key = @key";
+        cmd.Parameters.AddWithValue("@key", routingKey);
+        cmd.ExecuteNonQuery();
+    }
+
+    public string? GetLayoutName(string routingKey)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT layout_name FROM channel_mappings WHERE routing_key = @key";
+        cmd.Parameters.AddWithValue("@key", routingKey);
+        var result = cmd.ExecuteScalar();
+        return result is string s ? s : null;
+    }
+
+    public void UpdateItemChannels(string sizeLabel, string mediaType, int channelNumber)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE order_items
+            SET channel_number = @channel
+            WHERE LOWER(size_label) = LOWER(@size)
+              AND LOWER(COALESCE(media_type,'')) = LOWER(@media)
+            """;
+        cmd.Parameters.AddWithValue("@channel", channelNumber);
+        cmd.Parameters.AddWithValue("@size", sizeLabel);
+        cmd.Parameters.AddWithValue("@media", mediaType);
+        cmd.ExecuteNonQuery();
     }
 
     public List<(int Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff)

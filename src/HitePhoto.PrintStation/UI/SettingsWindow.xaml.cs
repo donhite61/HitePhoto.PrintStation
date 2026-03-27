@@ -375,19 +375,16 @@ public partial class SettingsWindow : Window
 
     private void RefreshRoutingGrid()
     {
-        if (_settings.RoutingMap == null) return;
+        var repo = App.Services.GetRequiredService<Data.Repositories.IOrderRepository>();
+        var dbChannels = repo.GetAllChannels();
 
-        _routingRows = _settings.RoutingMap.Select(kvp =>
+        _routingRows = dbChannels.Select(c => new RoutingRuleRow
         {
-            var entry = kvp.Value;
-            return new RoutingRuleRow
-            {
-                RoutingKey = kvp.Key,
-                ChannelNumber = entry?.ChannelNumber ?? 0,
-                ChannelName = entry?.LayoutName ?? "",
-                Source = entry?.Source ?? ""
-            };
-        }).OrderBy(r => r.Source).ThenBy(r => r.RoutingKey).ToList();
+            RoutingKey = Core.OrderHelpers.BuildRoutingKey(c.SizeLabel, c.MediaType),
+            ChannelNumber = c.ChannelNumber,
+            ChannelName = $"{c.SizeLabel} {c.MediaType}".Trim(),
+            Source = c.Description
+        }).OrderBy(r => r.ChannelNumber).ThenBy(r => r.RoutingKey).ToList();
 
         ApplyRoutingFilter();
     }
@@ -437,8 +434,8 @@ public partial class SettingsWindow : Window
                 "Remove Routing Rule", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        _settings.RoutingMap.Remove(row.RoutingKey);
-        _settingsManager.Save(_settings);
+        var repo = App.Services.GetRequiredService<Data.Repositories.IOrderRepository>();
+        repo.DeleteChannelMapping(row.RoutingKey);
         RefreshRoutingGrid();
     }
 
@@ -619,6 +616,13 @@ public partial class SettingsWindow : Window
         {
             MessageBox.Show($"Could not clear log: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private void AlertHistory_Click(object sender, RoutedEventArgs e)
+    {
+        var alertRepo = App.Services.GetRequiredService<Data.Repositories.IAlertRepository>();
+        var win = new AlertHistoryWindow(alertRepo) { Owner = this };
+        win.Show();
     }
 
     // ══════════════════════════════════════════════════════════════════════

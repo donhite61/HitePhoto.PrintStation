@@ -158,6 +158,7 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
                     <Ellipse x:Name="DbStatusDot" Width="8" Height="8" Margin="0,0,6,0"/>
@@ -168,7 +169,14 @@
                            VerticalAlignment="Center" FontSize="11"
                            Foreground="{DynamicResource TextSecondary}"
                            HorizontalAlignment="Center"/>
-                <TextBlock x:Name="DevModeText" Grid.Column="2"
+                <Border x:Name="AlertBadge" Grid.Column="2" Background="{DynamicResource AccentRed}"
+                        CornerRadius="8" Padding="6,1" Margin="0,0,8,0" Cursor="Hand"
+                        MouseDown="AlertBadge_Click" Visibility="Collapsed"
+                        VerticalAlignment="Center">
+                    <TextBlock x:Name="AlertBadgeText" Text="0" Foreground="White"
+                               FontSize="10" FontWeight="Bold"/>
+                </Border>
+                <TextBlock x:Name="DevModeText" Grid.Column="3"
                            Text="DEV MODE" Foreground="{DynamicResource AccentRed}"
                            FontWeight="Bold" FontSize="11" VerticalAlignment="Center"
                            Visibility="Collapsed"/>
@@ -205,6 +213,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- Filter/Sort strip -->
@@ -263,106 +272,98 @@
                         <GridSplitter Grid.Column="1" Width="5"
                                       HorizontalAlignment="Stretch" Background="{DynamicResource SplitterBg}"/>
 
-                        <Grid Grid.Column="2">
+                        <Grid Grid.Column="2" Background="{DynamicResource PanelBg}">
                             <Grid.RowDefinitions>
-                                <RowDefinition/>
-                                <RowDefinition Height="5"/>
-                                <RowDefinition Height="130" MinHeight="80"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
 
-                            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto"
-                                          HorizontalScrollBarVisibility="Disabled"
-                                          Background="{DynamicResource PanelBg}">
-                                <StackPanel Margin="14,10">
-                                    <TextBlock x:Name="DetailEmpty"
-                                               Text="Select an order or size"
-                                               Foreground="{DynamicResource TextMuted}" FontSize="13"
-                                               FontStyle="Italic"
-                                               HorizontalAlignment="Center" Margin="0,40,0,0"/>
+                            <TextBlock x:Name="DetailEmpty" Grid.RowSpan="4"
+                                       Text="Select an order or size"
+                                       Foreground="{DynamicResource TextMuted}" FontSize="13"
+                                       FontStyle="Italic"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
-                                    <StackPanel x:Name="DetailContent" Visibility="Collapsed">
-                                        <TextBlock x:Name="DetailOrderId" FontSize="16"
-                                                   FontWeight="SemiBold" Foreground="{DynamicResource TextHeading}"/>
+                            <StackPanel x:Name="DetailContent" Grid.Row="0" Visibility="Collapsed" Margin="10,8,10,0">
+                                <!-- Row 1: Order ID + Status + Source + Store + Date + Items — all horizontal -->
+                                <WrapPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="DetailOrderId" FontSize="16"
+                                               FontWeight="SemiBold" Foreground="{DynamicResource TextHeading}"
+                                               VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                    <TextBlock x:Name="DetailCustomerName" FontSize="14"
+                                               Foreground="{DynamicResource TextPrimary}"
+                                               VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                    <TextBlock Text="Status:" Foreground="{DynamicResource TextLabel}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <TextBlock x:Name="DetailStatus" Foreground="{DynamicResource AccentGreen}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBlock Text="Source:" Foreground="{DynamicResource TextLabel}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <TextBlock x:Name="DetailSource" Foreground="{DynamicResource TextPrimary}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBlock Text="Store:" Foreground="{DynamicResource TextLabel}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <TextBlock x:Name="DetailStore" Foreground="{DynamicResource TextPrimary}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBlock Text="Ordered:" Foreground="{DynamicResource TextLabel}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <TextBlock x:Name="DetailOrderedAt" Foreground="{DynamicResource TextPrimary}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBlock Text="Items:" Foreground="{DynamicResource TextLabel}" FontSize="11"
+                                               VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <TextBlock x:Name="DetailItemCount" Foreground="{DynamicResource TextPrimary}" FontSize="11"
+                                               VerticalAlignment="Center"/>
+                                </WrapPanel>
+                            </StackPanel>
 
-                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                            <TextBlock Text="Status: " Foreground="{DynamicResource TextLabel}"/>
-                                            <TextBlock x:Name="DetailStatus" Foreground="{DynamicResource AccentGreen}"/>
+                            <!-- Size detail + channel assignment -->
+                            <StackPanel x:Name="SizeDetailPanel" Grid.Row="1" Visibility="Collapsed" Margin="10,6,10,0">
+                                <WrapPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="SizeDetailLabel" FontSize="14"
+                                               FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"
+                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                    <TextBlock x:Name="SizeDetailChannel" FontSize="12"
+                                               Foreground="{DynamicResource TextSecondary}"
+                                               VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                    <TextBox x:Name="ChannelSearchBox" Width="200" Padding="4,3" FontSize="11"
+                                             VerticalAlignment="Center" Margin="0,0,6,0"
+                                             TextChanged="ChannelSearch_TextChanged"
+                                             GotFocus="ChannelSearchBox_GotFocus"
+                                             LostFocus="ChannelSearchBox_LostFocus"/>
+                                    <Button x:Name="AssignChannelBtn" Content="Assign" Width="70" FontSize="11"
+                                            VerticalAlignment="Center"
+                                            Click="AssignChannel_Click"/>
+                                </WrapPanel>
+                                <ListBox x:Name="ChannelList" MaxHeight="140" Margin="0,4,0,0"
+                                         Visibility="Collapsed"
+                                         Background="{DynamicResource InputBg}"
+                                         BorderBrush="{DynamicResource InputBorder}"
+                                         Foreground="{DynamicResource TextPrimary}"
+                                         FontSize="11"/>
+                            </StackPanel>
+
+                            <!-- Notes (compact) -->
+                            <ListBox x:Name="NotesListBox" Grid.Row="2" MaxHeight="80" Margin="10,4,10,0"
+                                     Background="{DynamicResource SurfaceBg}"
+                                     BorderBrush="{DynamicResource BorderBrush}"
+                                     BorderThickness="0">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Margin="0,1">
+                                            <TextBlock Text="{Binding CreatedAt, StringFormat='{}{0:MM/dd HH:mm}'}"
+                                                       Foreground="{DynamicResource TextMuted}" FontSize="10"/>
+                                            <TextBlock Text="{Binding NoteText}"
+                                                       Foreground="{DynamicResource TextPrimary}" FontSize="11"
+                                                       Margin="8,0,0,0" TextWrapping="NoWrap"/>
                                         </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                            <TextBlock Text="Source: " Foreground="{DynamicResource TextLabel}"/>
-                                            <TextBlock x:Name="DetailSource" Foreground="{DynamicResource TextPrimary}"/>
-                                        </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                            <TextBlock Text="Store: " Foreground="{DynamicResource TextLabel}"/>
-                                            <TextBlock x:Name="DetailStore" Foreground="{DynamicResource TextPrimary}"/>
-                                        </StackPanel>
-                                        <Separator/>
-
-                                        <TextBlock Text="CUSTOMER" FontSize="10" Foreground="{DynamicResource TextSecondary}"
-                                                   FontWeight="Bold" Margin="0,0,0,4"/>
-                                        <TextBlock x:Name="DetailCustomerName" FontSize="14"
-                                                   Foreground="{DynamicResource TextPrimary}"/>
-                                        <TextBlock x:Name="DetailEmail" FontSize="12"
-                                                   Foreground="{DynamicResource TextPrimary}"/>
-                                        <TextBlock x:Name="DetailPhone" FontSize="12"
-                                                   Foreground="{DynamicResource TextPrimary}"/>
-                                        <Separator/>
-
-                                        <TextBlock Text="ORDER INFO" FontSize="10" Foreground="{DynamicResource TextSecondary}"
-                                                   FontWeight="Bold" Margin="0,0,0,4"/>
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
-                                            <TextBlock Text="Ordered: " Foreground="{DynamicResource TextLabel}"/>
-                                            <TextBlock x:Name="DetailOrderedAt" Foreground="{DynamicResource TextPrimary}"/>
-                                        </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
-                                            <TextBlock Text="Items: " Foreground="{DynamicResource TextLabel}"/>
-                                            <TextBlock x:Name="DetailItemCount" Foreground="{DynamicResource TextPrimary}"/>
-                                        </StackPanel>
-
-                                        <!-- Size detail -->
-                                        <StackPanel x:Name="SizeDetailPanel" Visibility="Collapsed">
-                                            <Separator/>
-                                            <TextBlock Text="SIZE DETAIL" FontSize="10" Foreground="{DynamicResource TextSecondary}"
-                                                       FontWeight="Bold" Margin="0,0,0,4"/>
-                                            <TextBlock x:Name="SizeDetailLabel" FontSize="14"
-                                                       FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
-                                            <TextBlock x:Name="SizeDetailChannel" FontSize="12"
-                                                       Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,0"/>
-                                        </StackPanel>
-
-                                        <!-- Notes -->
-                                        <Separator/>
-                                        <TextBlock Text="NOTES" FontSize="10" Foreground="{DynamicResource TextSecondary}"
-                                                   FontWeight="Bold" Margin="0,0,0,4"/>
-                                        <ListBox x:Name="NotesListBox" MaxHeight="150"
-                                                 Background="{DynamicResource SurfaceBg}"
-                                                 BorderBrush="{DynamicResource BorderBrush}">
-                                            <ListBox.ItemTemplate>
-                                                <DataTemplate>
-                                                    <StackPanel Margin="2">
-                                                        <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="{Binding CreatedAt, StringFormat='{}{0:MM/dd HH:mm}'}"
-                                                                       Foreground="{DynamicResource TextMuted}" FontSize="11"/>
-                                                            <TextBlock Text="{Binding EmployeeName}"
-                                                                       Foreground="{DynamicResource TextSecondary}" FontSize="11"
-                                                                       Margin="8,0,0,0"/>
-                                                        </StackPanel>
-                                                        <TextBlock Text="{Binding NoteText}"
-                                                                   Foreground="{DynamicResource TextPrimary}"
-                                                                   TextWrapping="Wrap" FontSize="12"/>
-                                                    </StackPanel>
-                                                </DataTemplate>
-                                            </ListBox.ItemTemplate>
-                                        </ListBox>
-                                    </StackPanel>
-                                </StackPanel>
-                            </ScrollViewer>
-
-                            <GridSplitter Grid.Row="1" Height="5"
-                                          HorizontalAlignment="Stretch" Background="{DynamicResource SplitterBg}"/>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
 
                             <!-- Thumbnail strip -->
-                            <Border Grid.Row="2" Background="{DynamicResource WindowBg}">
+                            <Border Grid.Row="3" Background="{DynamicResource WindowBg}">
                                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                               VerticalScrollBarVisibility="Disabled">
                                     <WrapPanel x:Name="ThumbnailPanel" Orientation="Horizontal" Margin="6,4"/>
@@ -391,6 +392,75 @@
                 </TabItem>
 
             </TabControl>
+
+            <!-- Alert Panel -->
+            <Border Grid.Row="2" x:Name="AlertPanel"
+                    Background="{DynamicResource AlertPanelBg}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="0,1,0,0"
+                    Visibility="Collapsed"
+                    MaxHeight="200">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Background="{DynamicResource ToolbarBg}" Padding="8,4">
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                                <TextBlock x:Name="AlertHeaderText" Text="Alerts (0)"
+                                           FontWeight="SemiBold" FontSize="12"
+                                           Foreground="{DynamicResource TextPrimary}"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Content="Dismiss All" FontSize="11" Padding="8,2"
+                                        Click="DismissAllAlerts_Click"/>
+                                <Button Content="Hide" FontSize="11" Padding="8,2" Margin="4,0,0,0"
+                                        Click="CollapseAlertPanel_Click"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="AlertList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="8,4" Margin="0,0,0,1"
+                                            Background="{Binding BackgroundBrush}">
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Content="X" FontSize="10"
+                                                    Padding="4,1" VerticalAlignment="Top"
+                                                    Click="DismissAlert_Click"
+                                                    Tag="{Binding Id}"/>
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding SeverityLabel}"
+                                                               FontWeight="Bold" FontSize="11"
+                                                               Foreground="{Binding SeverityBrush}"/>
+                                                    <TextBlock Text="{Binding TimestampText}"
+                                                               Foreground="{DynamicResource TextMuted}"
+                                                               FontSize="11" Margin="8,0,0,0"/>
+                                                    <TextBlock Text="{Binding OrderId}"
+                                                               Foreground="{DynamicResource AccentBlue}"
+                                                               FontSize="11" Margin="8,0,0,0"/>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Summary}"
+                                                           Foreground="{DynamicResource TextPrimary}"
+                                                           FontSize="12" TextWrapping="Wrap"/>
+                                                <Expander Header="Technical Detail" FontSize="10"
+                                                          Foreground="{DynamicResource TextMuted}"
+                                                          IsExpanded="{Binding IsDetailExpanded}">
+                                                    <TextBlock Text="{Binding TechnicalDetail}"
+                                                               FontFamily="Consolas" FontSize="10"
+                                                               Foreground="{DynamicResource TextSecondary}"
+                                                               TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                                </Expander>
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
         </Grid>
     </DockPanel>
 </Window>

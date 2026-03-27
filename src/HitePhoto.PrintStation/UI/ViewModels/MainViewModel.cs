@@ -34,6 +34,9 @@ public class MainViewModel : ViewModelBase
     public ObservableCollection<OrderTreeItem> PrintedOrders { get; } = new();
     public ObservableCollection<OrderTreeItem> OtherStoreOrders { get; } = new();
 
+    private Dictionary<int, string> _channelNames = new();
+    private bool _channelNamesDirty = true;
+
     // ── Selected state ──
     private OrderTreeItem? _selectedOrder;
     public OrderTreeItem? SelectedOrder
@@ -140,6 +143,7 @@ public class MainViewModel : ViewModelBase
         NeedsRefresh = result.Repaired > 0 || result.Errors > 0;
     }
 
+
     // ══════════════════════════════════════════════════════════════════════
     //  Data loading — reads from local SQLite only
     // ══════════════════════════════════════════════════════════════════════
@@ -151,13 +155,21 @@ public class MainViewModel : ViewModelBase
             using var conn = _db.OpenConnection();
             IsDbConnected = true;
 
+            if (_channelNamesDirty)
+            {
+                _channelNames = _orders.GetAllChannels()
+                    .GroupBy(c => c.ChannelNumber)
+                    .ToDictionary(g => g.Key, g => $"{g.First().SizeLabel} {g.First().MediaType}".Trim());
+                _channelNamesDirty = false;
+            }
+
             var pending = LoadOrdersWithStatus(conn, "new", "in_progress");
             var printed = LoadOrdersWithStatus(conn, "ready", "notified", "picked_up");
             var otherStore = LoadOtherStoreOrders(conn);
 
-            RebuildTree(PendingOrders, pending, verifyFiles: true);
-            RebuildTree(PrintedOrders, printed, verifyFiles: false);
-            RebuildTree(OtherStoreOrders, otherStore, verifyFiles: false);
+            DiffAndPatch(PendingOrders, pending, verifyFiles: true);
+            DiffAndPatch(PrintedOrders, printed, verifyFiles: false);
+            DiffAndPatch(OtherStoreOrders, otherStore, verifyFiles: false);
 
             var total = pending.Count + printed.Count + otherStore.Count;
             StatusText = $"{pending.Count} pending, {printed.Count} printed, {otherStore.Count} other store";
@@ -250,47 +262,186 @@ public class MainViewModel : ViewModelBase
     //  Tree building
     // ══════════════════════════════════════════════════════════════════════
 
-    private void RebuildTree(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders, bool verifyFiles)
+    /// <summary>
+    /// In-place diff-and-patch: updates existing tree items instead of clear-and-rebuild.
+    /// Preserves WPF selection, expansion, and scroll position.
+    /// </summary>
+    private void DiffAndPatch(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders, bool verifyFiles)
     {
         var filtered = ApplyFilters(orders);
         var sorted = ApplySort(filtered);
 
         if (sorted.Count == 0) { target.Clear(); return; }
 
-        // Batch-load all items for all orders in one query
         var orderIds = sorted.Select(o => o.Id).ToList();
         var allItems = BatchLoadItems(orderIds);
 
-        // Build all tree items FIRST, then swap into collection in one batch
-        var built = new List<OrderTreeItem>(sorted.Count);
+        // Lookup existing items by DbId for O(1) matching
+        var existingByDbId = new Dictionary<int, OrderTreeItem>();
+        foreach (var item in target)
+            existingByDbId[item.DbId] = item;
 
-        foreach (var order in sorted)
+        for (int i = 0; i < sorted.Count; i++)
         {
-            var treeItem = new OrderTreeItem
+            var row = sorted[i];
+            var items = allItems.TryGetValue(row.Id, out var list) ? list : new();
+
+            if (i < target.Count && target[i].DbId == row.Id)
             {
-                DbId = order.Id,
-                ExternalOrderId = order.ExternalOrderId,
-                CustomerName = $"{order.CustomerFirstName} {order.CustomerLastName}".Trim(),
-                SourceCode = order.SourceCode,
-                StatusCode = order.StatusCode,
-                StoreName = order.StoreName,
-                OrderedAt = order.OrderedAt != null && DateTime.TryParse(order.OrderedAt, out var dt) ? dt : null,
-                IsHeld = order.IsHeld,
-                IsTransfer = order.IsTransfer,
-                FolderPath = order.FolderPath,
-                IsExpanded = true
-            };
-
-            var items = allItems.TryGetValue(order.Id, out var list) ? list : new();
-            BuildSizeGroups(treeItem, items, verifyFiles);
-
-            built.Add(treeItem);
+                // Same item at same position — update in place
+                UpdateOrderProperties(target[i], row);
+                DiffSizes(target[i], items, verifyFiles);
+            }
+            else if (existingByDbId.TryGetValue(row.Id, out var existing))
+            {
+                // Item exists but at wrong position — move it
+                int oldIndex = target.IndexOf(existing);
+                if (oldIndex != i)
+                    target.Move(oldIndex, i);
+                UpdateOrderProperties(existing, row);
+                DiffSizes(existing, items, verifyFiles);
+            }
+            else
+            {
+                // New item — create and insert
+                var treeItem = CreateOrderTreeItem(row);
+                BuildSizeGroups(treeItem, items, verifyFiles);
+                target.Insert(i, treeItem);
+            }
         }
 
-        // Single batch update — minimizes WPF re-render events
-        target.Clear();
-        foreach (var item in built)
-            target.Add(item);
+        // Remove items that are no longer in the filtered/sorted set
+        while (target.Count > sorted.Count)
+            target.RemoveAt(target.Count - 1);
+    }
+
+    private static OrderTreeItem CreateOrderTreeItem(OrderRow order) => new()
+    {
+        DbId = order.Id,
+        ExternalOrderId = order.ExternalOrderId,
+        CustomerName = $"{order.CustomerFirstName} {order.CustomerLastName}".Trim(),
+        SourceCode = order.SourceCode,
+        StatusCode = order.StatusCode,
+        StoreName = order.StoreName,
+        OrderedAt = order.OrderedAt != null && DateTime.TryParse(order.OrderedAt, out var dt) ? dt : null,
+        IsHeld = order.IsHeld,
+        IsTransfer = order.IsTransfer,
+        FolderPath = order.FolderPath,
+        IsExpanded = true
+    };
+
+    private static void UpdateOrderProperties(OrderTreeItem existing, OrderRow row)
+    {
+        var name = $"{row.CustomerFirstName} {row.CustomerLastName}".Trim();
+        if (existing.ExternalOrderId != row.ExternalOrderId) existing.ExternalOrderId = row.ExternalOrderId;
+        if (existing.CustomerName != name) existing.CustomerName = name;
+        if (existing.SourceCode != row.SourceCode) existing.SourceCode = row.SourceCode;
+        if (existing.StatusCode != row.StatusCode) existing.StatusCode = row.StatusCode;
+        if (existing.StoreName != row.StoreName) existing.StoreName = row.StoreName;
+        if (existing.IsHeld != row.IsHeld) existing.IsHeld = row.IsHeld;
+        if (existing.IsTransfer != row.IsTransfer) existing.IsTransfer = row.IsTransfer;
+        if (existing.FolderPath != row.FolderPath) existing.FolderPath = row.FolderPath;
+
+        var orderedAt = row.OrderedAt != null && DateTime.TryParse(row.OrderedAt, out var dt) ? dt : (DateTime?)null;
+        if (existing.OrderedAt != orderedAt) existing.OrderedAt = orderedAt;
+    }
+
+    /// <summary>
+    /// Diff size children in place — match by SizeLabel+MediaType, update or add/remove.
+    /// </summary>
+    private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
+    {
+        var groups = items
+            .GroupBy(i => new { Size = string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel, i.MediaType })
+            .ToList();
+
+        // Lookup existing sizes by composite key
+        var existingByKey = new Dictionary<string, SizeTreeItem>();
+        foreach (var sz in treeItem.Sizes)
+            existingByKey[$"{sz.SizeLabel}|{sz.MediaType}"] = sz;
+
+        var seenKeys = new HashSet<string>();
+        int totalImages = 0;
+        bool hasMissing = false;
+
+        for (int i = 0; i < groups.Count; i++)
+        {
+            var group = groups[i];
+            var key = $"{group.Key.Size}|{group.Key.MediaType}";
+            seenKeys.Add(key);
+
+            int missingCount = 0;
+            int printedCount = 0;
+            foreach (var item in group)
+            {
+                if (verifyFiles && !string.IsNullOrEmpty(item.ImageFilepath))
+                {
+                    var error = OrderHelpers.VerifyFile(item.ImageFilepath);
+                    if (error != null) missingCount++;
+                }
+                if (item.IsPrinted) printedCount++;
+            }
+
+            var newItems = group.Select(it => new HitePhoto.Shared.Models.OrderItem
+            {
+                Id = it.Id,
+                SizeLabel = it.SizeLabel,
+                MediaType = it.MediaType,
+                Quantity = it.Quantity,
+                ImageFilename = it.ImageFilename,
+                ImageFilepath = it.ImageFilepath,
+                ChannelNumber = it.ChannelNumber,
+                IsPrinted = it.IsPrinted
+            }).ToList();
+
+            int imageCount = group.Sum(it => it.Quantity);
+            totalImages += imageCount;
+            if (missingCount > 0) hasMissing = true;
+
+            if (existingByKey.TryGetValue(key, out var existing))
+            {
+                // Update existing size in place
+                var chNum = group.First().ChannelNumber;
+                var chName = chNum > 0 && _channelNames.TryGetValue(chNum, out var n) ? n : "";
+                if (existing.ImageCount != imageCount) existing.ImageCount = imageCount;
+                if (existing.PrintedCount != printedCount) existing.PrintedCount = printedCount;
+                if (existing.MissingFileCount != missingCount) existing.MissingFileCount = missingCount;
+                if (existing.ChannelNumber != chNum) existing.ChannelNumber = chNum;
+                if (existing.ChannelName != chName) existing.ChannelName = chName;
+                existing.Items = newItems;
+
+                // Ensure correct position
+                int currentIndex = treeItem.Sizes.IndexOf(existing);
+                if (currentIndex != i)
+                    treeItem.Sizes.Move(currentIndex, i);
+            }
+            else
+            {
+                // New size group
+                var newChNum = group.First().ChannelNumber;
+                var sizeItem = new SizeTreeItem
+                {
+                    SizeLabel = group.Key.Size,
+                    MediaType = group.Key.MediaType,
+                    ImageCount = imageCount,
+                    PrintedCount = printedCount,
+                    MissingFileCount = missingCount,
+                    ChannelNumber = newChNum,
+                    ChannelName = newChNum > 0 && _channelNames.TryGetValue(newChNum, out var nn) ? nn : "",
+                    Items = newItems,
+                    ParentOrder = treeItem
+                };
+                treeItem.Sizes.Insert(i, sizeItem);
+            }
+        }
+
+        // Remove sizes that no longer exist
+        for (int i = treeItem.Sizes.Count - 1; i >= groups.Count; i--)
+            treeItem.Sizes.RemoveAt(i);
+
+        treeItem.TotalImages = totalImages;
+        treeItem.HasMissingFiles = hasMissing;
+        treeItem.HasUnmapped = treeItem.Sizes.Any(s => s.IsUnmapped);
     }
 
     private Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds)
@@ -336,37 +487,9 @@ public class MainViewModel : ViewModelBase
         return result;
     }
 
-    private static List<ItemRow> LoadItems(SqliteConnection conn, int orderId)
-    {
-        var items = new List<ItemRow>();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT id, size_label, media_type, quantity, image_filename,
-                   image_filepath, channel_number, is_noritsu, is_printed, options_json
-            FROM order_items WHERE order_id = @id
-            ORDER BY size_label, media_type
-            """;
-        cmd.Parameters.AddWithValue("@id", orderId);
 
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            items.Add(new ItemRow(
-                Id: reader.GetInt32(0),
-                SizeLabel: reader.IsDBNull(1) ? "" : reader.GetString(1),
-                MediaType: reader.IsDBNull(2) ? "" : reader.GetString(2),
-                Quantity: reader.GetInt32(3),
-                ImageFilename: reader.IsDBNull(4) ? "" : reader.GetString(4),
-                ImageFilepath: reader.IsDBNull(5) ? "" : reader.GetString(5),
-                ChannelNumber: reader.IsDBNull(6) ? 0 : reader.GetInt32(6),
-                IsNoritsu: reader.GetInt32(7) == 1,
-                IsPrinted: reader.GetInt32(8) == 1,
-                OptionsJson: reader.IsDBNull(9) ? "[]" : reader.GetString(9)));
-        }
-        return items;
-    }
 
-    private static void BuildSizeGroups(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
+    private void BuildSizeGroups(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
     {
         int totalImages = 0;
         bool hasMissing = false;
@@ -390,6 +513,7 @@ public class MainViewModel : ViewModelBase
                 if (item.IsPrinted) printedCount++;
             }
 
+            var chNum = group.First().ChannelNumber;
             var sizeItem = new SizeTreeItem
             {
                 SizeLabel = group.Key.Size,
@@ -397,7 +521,8 @@ public class MainViewModel : ViewModelBase
                 ImageCount = group.Sum(i => i.Quantity),
                 PrintedCount = printedCount,
                 MissingFileCount = missingCount,
-                ChannelNumber = group.First().ChannelNumber,
+                ChannelNumber = chNum,
+                ChannelName = chNum > 0 && _channelNames.TryGetValue(chNum, out var name) ? name : "",
                 Items = group.Select(i => new HitePhoto.Shared.Models.OrderItem
                 {
                     Id = i.Id,
@@ -497,6 +622,14 @@ public class MainViewModel : ViewModelBase
     }
 
     public List<Core.Models.ChannelInfo> GetAllChannels() => _orders.GetAllChannels();
+
+    public void AssignChannel(string sizeLabel, string mediaType, int channelNumber)
+    {
+        var routingKey = OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
+        _orders.SaveChannelMapping(routingKey, channelNumber);
+        _orders.UpdateItemChannels(sizeLabel, mediaType, channelNumber);
+        _channelNamesDirty = true;
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     //  Ingest

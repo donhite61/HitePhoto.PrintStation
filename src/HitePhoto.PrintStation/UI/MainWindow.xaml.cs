@@ -15,6 +15,7 @@ using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Models;
 using HitePhoto.PrintStation.Core.Processing;
 using HitePhoto.PrintStation.Data;
+using HitePhoto.PrintStation.Data.Repositories;
 using HitePhoto.PrintStation.UI.ViewModels;
 
 namespace HitePhoto.PrintStation.UI;
@@ -26,6 +27,10 @@ public partial class MainWindow : Window
     private readonly SettingsManager _settingsManager;
     private readonly Data.Repositories.IOrderRepository _orders;
     private readonly Data.CorrectionStore _correctionStore;
+    private readonly IAlertRepository _alertRepo;
+
+    private readonly System.Collections.ObjectModel.ObservableCollection<AlertItemViewModel> _sessionAlerts = new();
+    private int _nextAlertId;
 
     // Timers
     private readonly DispatcherTimer _refreshTimer;
@@ -47,7 +52,8 @@ public partial class MainWindow : Window
     private SizeTreeItem? _selectedSizeItem;
 
     public MainWindow(MainViewModel vm, AppSettings settings, SettingsManager settingsManager,
-        Data.Repositories.IOrderRepository orders, Data.CorrectionStore correctionStore)
+        Data.Repositories.IOrderRepository orders, Data.CorrectionStore correctionStore,
+        IAlertRepository alertRepo)
     {
         InitializeComponent();
 
@@ -58,6 +64,7 @@ public partial class MainWindow : Window
         _settingsManager = settingsManager;
         _orders = orders;
         _correctionStore = correctionStore;
+        _alertRepo = alertRepo;
 
         PendingTree.ItemsSource = _vm.PendingOrders;
         PrintedTree.ItemsSource = _vm.PrintedOrders;
@@ -115,6 +122,8 @@ public partial class MainWindow : Window
         _alertDrainTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _alertDrainTimer.Tick += (_, _) => DrainAlerts();
         _alertDrainTimer.Start();
+
+        AlertList.ItemsSource = _sessionAlerts;
 
         // Pixfizz poll timer
         _pixfizzPollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(_settings.PollIntervalSeconds) };
@@ -209,15 +218,81 @@ public partial class MainWindow : Window
 
     private void DrainAlerts()
     {
-        var alerts = AlertCollector.GetAndClear();
-        if (alerts.Count == 0) return;
+        var drained = AlertCollector.GetAndClear();
+        if (drained.Count == 0) return;
 
-        var errors = alerts.Where(a => a.Severity == AlertSeverity.Error).ToList();
-        if (errors.Count > 0)
+        var errorBrush = (Brush)FindResource("AccentRed");
+        var warnBrush = (Brush)FindResource("AccentOrange");
+        var errorBg = (Brush)FindResource("AlertErrorBg");
+        var warnBg = (Brush)FindResource("AlertWarnBg");
+
+        bool hasErrors = false;
+        foreach (var a in drained)
         {
-            var text = string.Join("\n\n", errors.Select(a => a.TechnicalDump()));
-            MessageBox.Show(text, $"Errors ({errors.Count})", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (a.Severity == AlertSeverity.Error) hasErrors = true;
+
+            _sessionAlerts.Insert(0, new AlertItemViewModel
+            {
+                Id = _nextAlertId++,
+                SeverityLabel = a.SeverityLabel,
+                Summary = a.Summary,
+                OrderId = a.OrderId,
+                TimestampText = a.Timestamp.ToString("HH:mm:ss"),
+                TechnicalDetail = a.TechnicalDump(),
+                SeverityBrush = a.Severity == AlertSeverity.Error ? errorBrush : warnBrush,
+                BackgroundBrush = a.Severity == AlertSeverity.Error ? errorBg : warnBg
+            });
         }
+
+        UpdateAlertPanel();
+
+        if (hasErrors)
+            AlertPanel.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateAlertPanel()
+    {
+        AlertHeaderText.Text = $"Alerts ({_sessionAlerts.Count})";
+
+        if (_sessionAlerts.Count > 0)
+        {
+            AlertBadge.Visibility = Visibility.Visible;
+            AlertBadgeText.Text = _sessionAlerts.Count.ToString();
+        }
+        else
+        {
+            AlertBadge.Visibility = Visibility.Collapsed;
+            AlertPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void AlertBadge_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        AlertPanel.Visibility = AlertPanel.Visibility == Visibility.Visible
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void DismissAlert_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is int index)
+        {
+            var item = _sessionAlerts.FirstOrDefault(a => a.Id == index);
+            if (item != null)
+                _sessionAlerts.Remove(item);
+            UpdateAlertPanel();
+        }
+    }
+
+    private void DismissAllAlerts_Click(object sender, RoutedEventArgs e)
+    {
+        _sessionAlerts.Clear();
+        UpdateAlertPanel();
+    }
+
+    private void CollapseAlertPanel_Click(object sender, RoutedEventArgs e)
+    {
+        AlertPanel.Visibility = Visibility.Collapsed;
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -304,85 +379,128 @@ public partial class MainWindow : Window
 
     private void ShowSizeDetail(SizeTreeItem? sizeItem)
     {
-        _selectedSizeItem = sizeItem;
-
         if (sizeItem == null)
         {
             SizeDetailPanel.Visibility = Visibility.Collapsed;
+            ChannelList.Visibility = Visibility.Collapsed;
             return;
         }
 
         SizeDetailPanel.Visibility = Visibility.Visible;
         SizeDetailLabel.Text = sizeItem.DisplayLabel;
         SizeDetailChannel.Text = sizeItem.ChannelLabel;
+        ChannelSearchBox.Text = "";
+        ChannelList.Visibility = Visibility.Collapsed;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Channel assignment
+    // ══════════════════════════════════════════════════════════════════════
+
+    private List<(string Display, int Channel)> _channelEntries = new();
+    private List<(string Display, int Channel)> _filteredChannelEntries = new();
+    private bool _channelEntriesLoaded;
+
+    private void LoadChannelEntries()
+    {
+        _channelEntries.Clear();
+
+        // Layouts first
+        foreach (var l in _settings.Layouts)
+        {
+            _channelEntries.Add((
+                $"[Layout] {l.Name}  ({l.PrintSizeDisplay} {l.GridDisplay} → CH {l.TargetChannelNumber:D3})",
+                l.TargetChannelNumber));
+        }
+
+        // Channels from Noritsu CSV
+        if (!string.IsNullOrWhiteSpace(_settings.ChannelsCsvPath))
+        {
+            var reader = new Core.Processing.ChannelsCsvReader(_settings.ChannelsCsvPath);
+            var csvChannels = reader.Load();
+            foreach (var c in csvChannels)
+            {
+                _channelEntries.Add((
+                    $"{c.ChannelNumber:D3}  {c.SizeLabel}  {c.MediaType}  {c.Description}".Trim(),
+                    c.ChannelNumber));
+            }
+        }
+
+        // Existing mappings from DB (in case CSV doesn't cover everything)
+        var dbChannels = _vm.GetAllChannels();
+        var existingNumbers = new HashSet<int>(_channelEntries.Select(e => e.Channel));
+        foreach (var c in dbChannels)
+        {
+            if (!existingNumbers.Contains(c.ChannelNumber))
+            {
+                _channelEntries.Add((
+                    $"{c.ChannelNumber:D3}  {c.SizeLabel}  {c.MediaType}  {c.Description}".Trim(),
+                    c.ChannelNumber));
+            }
+        }
+
+        _channelEntriesLoaded = true;
+    }
+
+    private void PopulateChannelList(string filter = "")
+    {
+        _filteredChannelEntries = string.IsNullOrWhiteSpace(filter)
+            ? _channelEntries
+            : _channelEntries.Where(e =>
+                e.Display.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        ChannelList.ItemsSource = _filteredChannelEntries.Select(e => e.Display).ToList();
+    }
+
+    private void ChannelSearch_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_channelEntriesLoaded) LoadChannelEntries();
+        PopulateChannelList(ChannelSearchBox.Text.Trim());
+        ChannelList.Visibility = Visibility.Visible;
+    }
+
+    private void ChannelSearchBox_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (!_channelEntriesLoaded) LoadChannelEntries();
+        PopulateChannelList();
+        ChannelList.Visibility = Visibility.Visible;
+    }
+
+    private void ChannelSearchBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!ChannelList.IsKeyboardFocusWithin)
+            ChannelList.Visibility = Visibility.Collapsed;
+    }
+
+    private void AssignChannel_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedSizeItem == null || ChannelList.SelectedIndex < 0) return;
+
+        var selected = _filteredChannelEntries[ChannelList.SelectedIndex];
+        _vm.AssignChannel(_selectedSizeItem.SizeLabel, _selectedSizeItem.MediaType, selected.Channel);
+
+        // Update the tree immediately
+        _selectedSizeItem.ChannelNumber = selected.Channel;
+        SizeDetailChannel.Text = _selectedSizeItem.ChannelLabel;
+        ChannelList.Visibility = Visibility.Collapsed;
+        ChannelSearchBox.Text = "";
+
+        _channelEntriesLoaded = false; // invalidate cache
+        _vm.LoadOrders();
+        UpdateStatusBar();
     }
 
     private void LoadThumbnails(OrderTreeItem treeItem)
-    {
-        ThumbnailPanel.Children.Clear();
-
-        var allItems = treeItem.Sizes.SelectMany(s => s.Items).ToList();
-        if (allItems.Count == 0) return;
-
-        foreach (var item in allItems.Take(30))
-        {
-            if (string.IsNullOrEmpty(item.ImageFilepath)) continue;
-
-            var border = new Border
-            {
-                Width = 80, Height = 80,
-                Margin = new Thickness(3),
-                BorderThickness = new Thickness(1),
-                BorderBrush = (Brush)FindResource("BorderBrush"),
-                Background = (Brush)FindResource("SurfaceBg"),
-                CornerRadius = new CornerRadius(3),
-                ToolTip = item.ImageFilename ?? Path.GetFileName(item.ImageFilepath)
-            };
-
-            if (File.Exists(item.ImageFilepath))
-            {
-                try
-                {
-                    var bmp = new BitmapImage();
-                    bmp.BeginInit();
-                    bmp.CacheOption = BitmapCacheOption.OnLoad;
-                    bmp.DecodePixelWidth = 80;
-                    bmp.UriSource = new Uri(item.ImageFilepath);
-                    bmp.EndInit();
-                    bmp.Freeze();
-                    border.Child = new Image { Source = bmp, Stretch = Stretch.Uniform };
-                }
-                catch
-                {
-                    border.Child = new TextBlock
-                    {
-                        Text = "?",
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Foreground = (Brush)FindResource("TextMuted")
-                    };
-                }
-            }
-            else
-            {
-                border.Child = new TextBlock
-                {
-                    Text = "Missing", FontSize = 9,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Foreground = (Brush)FindResource("AccentRed")
-                };
-            }
-
-            ThumbnailPanel.Children.Add(border);
-        }
-    }
+        => LoadThumbnailsFromItems(treeItem.Sizes.SelectMany(s => s.Items));
 
     private void LoadSizeThumbnails(SizeTreeItem sizeItem)
+        => LoadThumbnailsFromItems(sizeItem.Items);
+
+    private void LoadThumbnailsFromItems(IEnumerable<HitePhoto.Shared.Models.OrderItem> items)
     {
         ThumbnailPanel.Children.Clear();
 
-        foreach (var item in sizeItem.Items.Take(30))
+        foreach (var item in items.Take(30))
         {
             if (string.IsNullOrEmpty(item.ImageFilepath)) continue;
 

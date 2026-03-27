@@ -39,6 +39,7 @@ public class AppSettings
     public bool EnableLogging { get; set; } = true;
 
     // ── Routing ──
+    [Obsolete("Routing now lives in SQLite channel_mappings table. Kept for JSON deserialization compatibility.")]
     public Dictionary<string, RoutingEntry> RoutingMap { get; set; } = new();
     public List<LayoutDefinition> Layouts { get; set; } = new();
 

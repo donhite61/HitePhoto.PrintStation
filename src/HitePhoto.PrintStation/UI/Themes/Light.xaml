@@ -28,7 +28,7 @@
     <SolidColorBrush x:Key="ComboItemHover"  Color="#D0E0F0"/>
     <SolidColorBrush x:Key="ComboItemSelect" Color="#B0D0F0"/>
     <SolidColorBrush x:Key="PopupBg"         Color="#FFFFFF"/>
-    <SolidColorBrush x:Key="TreeSelection"   Color="#3366CC"/>
+    <SolidColorBrush x:Key="TreeSelection"   Color="#CCE0FF"/>
     <SolidColorBrush x:Key="ArrowColor"      Color="#666666"/>
     <SolidColorBrush x:Key="SeparatorBg"     Color="#DDDDDD"/>
     <SolidColorBrush x:Key="StatusError"     Color="#CC3333"/>
@@ -37,4 +37,7 @@
     <SolidColorBrush x:Key="TabHoverBg"      Color="#F0F0F0"/>
     <SolidColorBrush x:Key="HeldBg"          Color="#FFF3E0"/>
     <SolidColorBrush x:Key="MissingBg"       Color="#FFEBEE"/>
+    <SolidColorBrush x:Key="AlertPanelBg"   Color="#F8F0F0"/>
+    <SolidColorBrush x:Key="AlertErrorBg"   Color="#FFEBEE"/>
+    <SolidColorBrush x:Key="AlertWarnBg"    Color="#FFF8E1"/>
 </ResourceDictionary>

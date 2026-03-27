@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Microsoft.Extensions.DependencyInjection;
 using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Models;
 using HitePhoto.PrintStation.Core.Processing;
@@ -94,11 +95,13 @@ public partial class ChangeSizeWindow : Window
         int currentChannel = _items.FirstOrDefault()?.ChannelNumber ?? 0;
         int preselect = -1;
 
-        // Check layout assignment
-        var routingKey = $"size={_sizeLabel}|media={_items.FirstOrDefault()?.MediaType ?? ""}".ToLowerInvariant();
-        if (_settings.RoutingMap.TryGetValue(routingKey, out var entry) && !string.IsNullOrEmpty(entry?.LayoutName))
+        // Check layout assignment from DB
+        var routingKey = Core.OrderHelpers.BuildRoutingKey(_sizeLabel, _items.FirstOrDefault()?.MediaType ?? "");
+        var repo = App.Services.GetRequiredService<Data.Repositories.IOrderRepository>();
+        var layoutName = repo.GetLayoutName(routingKey);
+        if (!string.IsNullOrEmpty(layoutName))
             preselect = comboItems.FindIndex(i => i.Layout != null &&
-                i.Layout.Name.Equals(entry.LayoutName, StringComparison.OrdinalIgnoreCase));
+                i.Layout.Name.Equals(layoutName, StringComparison.OrdinalIgnoreCase));
 
         if (preselect < 0 && currentChannel == -1)
             preselect = comboItems.FindIndex(i => i.ChannelNumber == -1 && i.ChannelInfo == null && i.Layout == null);
