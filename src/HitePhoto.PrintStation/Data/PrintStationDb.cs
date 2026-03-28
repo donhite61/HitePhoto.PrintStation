@@ -457,4 +457,275 @@ public class PrintStationDb
             return false;
         }
     }
+
+    // ── Sync: pull queries ────────────────────────────────────────────────
+
+    /// <summary>Get all orders updated since a given timestamp (all stores).</summary>
+    public async Task<List<dynamic>> GetOrdersUpdatedSinceAsync(DateTime since)
+    {
+        const string sql = """
+            SELECT o.*,
+                   os.status_code AS StatusCode,
+                   src.source_code AS SourceCode
+            FROM orders o
+            JOIN order_statuses os ON os.id = o.order_status_id
+            JOIN order_sources src ON src.id = o.order_source_id
+            WHERE o.updated_at > @Since
+            ORDER BY o.updated_at ASC
+            """;
+
+        try
+        {
+            await using var conn = CreateConnection();
+            var rows = (await conn.QueryAsync(sql, new { Since = since })).ToList();
+            return rows;
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to pull orders from MariaDB",
+                detail: $"Attempted: SELECT orders updated since {since:o}. " +
+                        $"Expected: list of changed orders. " +
+                        $"Found: {ex.GetType().Name}. " +
+                        $"Context: sync pull. " +
+                        $"State: local SQLite unaffected.",
+                ex: ex);
+            return new List<dynamic>();
+        }
+    }
+
+    /// <summary>Get items for multiple orders in one query.</summary>
+    public async Task<List<dynamic>> GetOrderItemsForOrdersAsync(List<int> mariaDbOrderIds)
+    {
+        if (mariaDbOrderIds.Count == 0)
+            return new List<dynamic>();
+
+        const string sql = "SELECT * FROM order_items WHERE order_id IN @OrderIds ORDER BY order_id, id";
+
+        try
+        {
+            await using var conn = CreateConnection();
+            return (await conn.QueryAsync(sql, new { OrderIds = mariaDbOrderIds })).ToList();
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to pull order items from MariaDB",
+                detail: $"Attempted: SELECT items for {mariaDbOrderIds.Count} orders. " +
+                        $"Expected: item list. " +
+                        $"Found: {ex.GetType().Name}. " +
+                        $"Context: sync pull. " +
+                        $"State: local SQLite unaffected.",
+                ex: ex);
+            return new List<dynamic>();
+        }
+    }
+
+    /// <summary>Get notes created since a given timestamp, with employee name.</summary>
+    public async Task<List<dynamic>> GetOrderNotesSinceAsync(DateTime since)
+    {
+        const string sql = """
+            SELECT n.id, n.order_id, n.note_text, n.note_type, n.created_at,
+                   CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, '')) AS EmployeeName
+            FROM order_notes n
+            LEFT JOIN employees e ON e.id = n.employee_id
+            WHERE n.created_at > @Since
+            ORDER BY n.created_at ASC
+            """;
+
+        try
+        {
+            await using var conn = CreateConnection();
+            return (await conn.QueryAsync(sql, new { Since = since })).ToList();
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to pull order notes from MariaDB",
+                detail: $"Attempted: SELECT notes since {since:o}. " +
+                        $"Expected: note list. " +
+                        $"Found: {ex.GetType().Name}. " +
+                        $"Context: sync pull. " +
+                        $"State: local SQLite unaffected.",
+                ex: ex);
+            return new List<dynamic>();
+        }
+    }
+
+    // ── Sync: push (upsert) ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Upsert an order to MariaDB. Uses INSERT...ON DUPLICATE KEY UPDATE
+    /// on (external_order_id, pickup_store_id). Returns the MariaDB order id.
+    /// </summary>
+    public async Task<int> UpsertOrderAsync(
+        string externalOrderId, int pickupStoreId, int orderSourceId, int orderStatusId,
+        string? customerFirstName, string? customerLastName, string? customerEmail, string? customerPhone,
+        decimal? totalAmount, bool isHeld, bool isTransfer, int? transferStoreId,
+        string? specialInstructions, string? folderPath, int deliveryMethodId,
+        string? orderedAt, string? pixfizzJobId, string? downloadStatus)
+    {
+        const string sql = """
+            INSERT INTO orders
+                (external_order_id, pickup_store_id, current_location_store_id,
+                 order_source_id, order_status_id,
+                 customer_first_name, customer_last_name, customer_email, customer_phone,
+                 total_amount, is_held, is_transfer, transfer_store_id,
+                 special_instructions, folder_path, delivery_method_id,
+                 ordered_at, pixfizz_job_id, download_status, sync_status)
+            VALUES
+                (@Eid, @Store, @Store,
+                 @SourceId, @StatusId,
+                 @FirstName, @LastName, @Email, @Phone,
+                 @Total, @Held, @Transfer, @TransferStore,
+                 @Instructions, @Folder, @Delivery,
+                 @OrderedAt, @PixfizzJobId, @DownloadStatus, 'synced')
+            ON DUPLICATE KEY UPDATE
+                order_status_id = VALUES(order_status_id),
+                customer_first_name = COALESCE(VALUES(customer_first_name), customer_first_name),
+                customer_last_name = COALESCE(VALUES(customer_last_name), customer_last_name),
+                customer_email = COALESCE(VALUES(customer_email), customer_email),
+                customer_phone = COALESCE(VALUES(customer_phone), customer_phone),
+                total_amount = COALESCE(VALUES(total_amount), total_amount),
+                is_held = VALUES(is_held),
+                is_transfer = VALUES(is_transfer),
+                transfer_store_id = VALUES(transfer_store_id),
+                special_instructions = COALESCE(VALUES(special_instructions), special_instructions),
+                folder_path = COALESCE(VALUES(folder_path), folder_path),
+                delivery_method_id = VALUES(delivery_method_id),
+                ordered_at = COALESCE(VALUES(ordered_at), ordered_at),
+                pixfizz_job_id = COALESCE(VALUES(pixfizz_job_id), pixfizz_job_id),
+                download_status = COALESCE(VALUES(download_status), download_status),
+                sync_status = 'synced';
+            SELECT LAST_INSERT_ID();
+            """;
+
+        try
+        {
+            await using var conn = CreateConnection();
+            var id = await conn.ExecuteScalarAsync<int>(sql, new
+            {
+                Eid = externalOrderId,
+                Store = pickupStoreId,
+                SourceId = orderSourceId,
+                StatusId = orderStatusId,
+                FirstName = customerFirstName,
+                LastName = customerLastName,
+                Email = customerEmail,
+                Phone = customerPhone,
+                Total = totalAmount,
+                Held = isHeld ? 1 : 0,
+                Transfer = isTransfer ? 1 : 0,
+                TransferStore = transferStoreId,
+                Instructions = specialInstructions,
+                Folder = folderPath,
+                Delivery = deliveryMethodId,
+                OrderedAt = DateTime.TryParse(orderedAt, out var parsedDate) ? parsedDate.ToString("yyyy-MM-dd HH:mm:ss") : (object?)null,
+                PixfizzJobId = pixfizzJobId,
+                DownloadStatus = downloadStatus ?? "ready",
+            });
+
+            // LAST_INSERT_ID returns 0 on update — need to query by natural key
+            if (id == 0)
+            {
+                id = await conn.ExecuteScalarAsync<int>(
+                    "SELECT id FROM orders WHERE external_order_id = @Eid AND pickup_store_id = @Store",
+                    new { Eid = externalOrderId, Store = pickupStoreId });
+            }
+            return id;
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to upsert order to MariaDB",
+                detail: $"Attempted: upsert order '{externalOrderId}' store {pickupStoreId}. " +
+                        $"Expected: order inserted/updated. " +
+                        $"Found: {ex.GetType().Name}. " +
+                        $"Context: sync push. " +
+                        $"State: queued in outbox for retry.",
+                ex: ex);
+            return 0;
+        }
+    }
+
+    /// <summary>Upsert order items to MariaDB. Deletes existing items and re-inserts.</summary>
+    public async Task<bool> UpsertOrderItemsAsync(int mariaDbOrderId, List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, int ChannelNumber, string OptionsJson, bool IsPrinted)> items)
+    {
+        try
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var tx = await conn.BeginTransactionAsync();
+
+            await conn.ExecuteAsync(
+                "DELETE FROM order_items WHERE order_id = @OrderId",
+                new { OrderId = mariaDbOrderId }, tx);
+
+            foreach (var item in items)
+            {
+                await conn.ExecuteAsync("""
+                    INSERT INTO order_items
+                        (order_id, size_label, media_type, quantity,
+                         image_filename, image_filepath, original_image_filepath,
+                         channel_number, options_json, is_printed)
+                    VALUES
+                        (@OrderId, @Size, @Media, @Qty,
+                         @Filename, @Filepath, @OrigFilepath,
+                         @Channel, @Options, @Printed)
+                    """,
+                    new
+                    {
+                        OrderId = mariaDbOrderId,
+                        Size = item.SizeLabel,
+                        Media = item.MediaType,
+                        Qty = item.Quantity,
+                        Filename = item.ImageFilename,
+                        Filepath = item.ImageFilepath,
+                        OrigFilepath = item.OriginalImageFilepath,
+                        Channel = item.ChannelNumber,
+                        Options = item.OptionsJson,
+                        Printed = item.IsPrinted ? 1 : 0,
+                    }, tx);
+            }
+
+            await tx.CommitAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to upsert order items to MariaDB",
+                detail: $"Attempted: upsert {items.Count} items for MariaDB order {mariaDbOrderId}. " +
+                        $"Expected: items replaced. " +
+                        $"Found: {ex.GetType().Name}. " +
+                        $"Context: sync push. " +
+                        $"State: queued in outbox for retry.",
+                ex: ex);
+            return false;
+        }
+    }
+
+    /// <summary>Find MariaDB order ID by natural key.</summary>
+    public async Task<int?> FindOrderIdByNaturalKeyAsync(string externalOrderId, int pickupStoreId)
+    {
+        const string sql = "SELECT id FROM orders WHERE external_order_id = @Eid AND pickup_store_id = @Store";
+
+        try
+        {
+            await using var conn = CreateConnection();
+            return await conn.ExecuteScalarAsync<int?>(sql, new { Eid = externalOrderId, Store = pickupStoreId });
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to lookup MariaDB order ID",
+                detail: $"Attempted: find order '{externalOrderId}' store {pickupStoreId}. " +
+                        $"Expected: MariaDB order id. " +
+                        $"Found: {ex.GetType().Name}. " +
+                        $"Context: id_map population. " +
+                        $"State: push will be queued in outbox.",
+                ex: ex);
+            return null;
+        }
+    }
 }

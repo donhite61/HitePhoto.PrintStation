@@ -17,6 +17,7 @@ using HitePhoto.PrintStation.Core.Models;
 using HitePhoto.PrintStation.Core.Processing;
 using HitePhoto.PrintStation.Data;
 using HitePhoto.PrintStation.Data.Repositories;
+using HitePhoto.PrintStation.Data.Sync;
 using HitePhoto.PrintStation.UI.ViewModels;
 
 namespace HitePhoto.PrintStation.UI;
@@ -41,6 +42,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _alertDrainTimer;
     private readonly DispatcherTimer _pixfizzPollTimer;
     private readonly DispatcherTimer _dakisScanTimer;
+    private readonly DispatcherTimer _syncTimer;
 
     // Cancellation for async ingest
     private CancellationTokenSource _ingestCts = new();
@@ -157,6 +159,36 @@ public partial class MainWindow : Window
             });
         };
 
+        // MariaDB sync timer — pull changes + retry outbox
+        _syncTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(_settings.SyncIntervalSeconds) };
+        _syncTimer.Tick += async (_, _) =>
+        {
+            try
+            {
+                var sync = App.Services.GetRequiredService<ISyncService>();
+                await Task.Run(async () =>
+                {
+                    await sync.PullAsync();
+                    await sync.ProcessOutboxAsync();
+                });
+                if (_vm.NeedsRefresh)
+                    Dispatcher.Invoke(() => { _vm.LoadOrders(); UpdateStatusBar(); _vm.NeedsRefresh = false; });
+                else
+                    _vm.NeedsRefresh = true; // pulled data may have changed
+            }
+            catch (Exception ex)
+            {
+                AlertCollector.Error(AlertCategory.Database,
+                    "MariaDB sync timer failed",
+                    detail: $"Attempted: sync pull + outbox. " +
+                            $"Expected: sync completed. " +
+                            $"Found: {ex.GetType().Name}: {ex.Message}. " +
+                            $"Context: sync timer tick. " +
+                            $"State: will retry next cycle.",
+                    ex: ex);
+            }
+        };
+
         Loaded += MainWindow_Loaded;
     }
 
@@ -203,6 +235,9 @@ public partial class MainWindow : Window
                     _vm.StartDakisWatcher();
                     _dakisScanTimer.Start(); // fallback scan
                 }
+
+                if (_settings.SyncEnabled)
+                    _syncTimer.Start();
 
                 _ = Core.AutoUpdater.CheckAndPromptAsync(_settings);
             });
@@ -1293,6 +1328,7 @@ public partial class MainWindow : Window
         _refreshTimer.Stop();
         _pixfizzPollTimer.Stop();
         _dakisScanTimer.Stop();
+        _syncTimer.Stop();
     }
 
     private void StartTimers()
@@ -1301,6 +1337,8 @@ public partial class MainWindow : Window
             _refreshTimer.Start();
         _pixfizzPollTimer.Start();
         _dakisScanTimer.Start();
+        if (_settings.SyncEnabled)
+            _syncTimer.Start();
     }
 }
 

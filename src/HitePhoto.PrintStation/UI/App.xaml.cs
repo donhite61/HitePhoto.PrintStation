@@ -8,6 +8,7 @@ using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Core.Services;
 using HitePhoto.PrintStation.Data;
 using HitePhoto.PrintStation.Data.Repositories;
+using HitePhoto.PrintStation.Data.Sync;
 
 namespace HitePhoto.PrintStation.UI;
 
@@ -69,8 +70,30 @@ public partial class App : Application
             services.AddSingleton(new OrderDb(settings.SqlitePath));
         else
             services.AddSingleton<OrderDb>();
-        services.AddSingleton<IOrderRepository, OrderRepository>();
-        services.AddSingleton<IHistoryRepository, HistoryRepository>();
+
+        // MariaDB sync layer
+        services.AddSingleton(sp => new PrintStationDb(settings.ConnectionString));
+        services.AddSingleton<OutboxRepository>();
+        services.AddSingleton<ISyncService, SyncService>();
+
+        // Repositories — wrap with sync decorators when sync is enabled
+        services.AddSingleton<OrderRepository>();
+        services.AddSingleton<HistoryRepository>();
+        if (settings.SyncEnabled)
+        {
+            services.AddSingleton<IOrderRepository>(sp => new SyncingOrderRepository(
+                sp.GetRequiredService<OrderRepository>(),
+                sp.GetRequiredService<ISyncService>()));
+            services.AddSingleton<IHistoryRepository>(sp => new SyncingHistoryRepository(
+                sp.GetRequiredService<HistoryRepository>(),
+                sp.GetRequiredService<ISyncService>()));
+        }
+        else
+        {
+            services.AddSingleton<IOrderRepository>(sp => sp.GetRequiredService<OrderRepository>());
+            services.AddSingleton<IHistoryRepository>(sp => sp.GetRequiredService<HistoryRepository>());
+        }
+
         services.AddSingleton<IAlertRepository, AlertRepository>();
         services.AddSingleton<IOptionDefaultsRepository, OptionDefaultsRepository>();
 

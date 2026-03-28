@@ -109,6 +109,10 @@ public class AppSettings
     public string UpdateSftpPassword  { get; set; } = "";
     public string UpdateSftpFolder    { get; set; } = "";
 
+    // ── MariaDB sync ──
+    public bool SyncEnabled          { get; set; } = true;
+    public int  SyncIntervalSeconds  { get; set; } = 30;
+
     // ── Developer mode ──
     public bool DeveloperMode { get; set; } = false;
 

@@ -515,6 +515,17 @@ public class OrderDb
                 PRIMARY KEY (option_key, option_value)
             );
             """);
+
+        // Migration 007: Sync infrastructure — remote_id on order_history + id_map table
+        AddColumnIfMissing(conn, "order_history", "remote_id", "INTEGER DEFAULT NULL");
+        Execute(conn, """
+            CREATE TABLE IF NOT EXISTS id_map (
+                table_name TEXT    NOT NULL,
+                local_id   INTEGER NOT NULL,
+                remote_id  INTEGER NOT NULL,
+                PRIMARY KEY (table_name, local_id)
+            );
+            """);
     }
 
     private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)
