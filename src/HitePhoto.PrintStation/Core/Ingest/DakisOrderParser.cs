@@ -361,7 +361,7 @@ public class DakisOrderParser
         {
             foreach (var photo in photosList)
             {
-                var filename = YStr(photo, ":filename:");
+                var filename = YRaw(photo, ":filename:");
                 if (string.IsNullOrWhiteSpace(filename))
                 {
                     AlertCollector.Error(AlertCategory.DataQuality,
@@ -409,32 +409,31 @@ public class DakisOrderParser
                         fulfillmentStoreId != info.CurrentStoreId)
                         continue;
 
-                    // Calculate expected path — Dakis converts originals to JPG in prints/
+                    // Calculate expected path
+                    // Dakis strips dots from folder names (e.g. "2.5x3.5" → "25x35")
+                    // Dakis keeps trailing spaces from :text: in folder names
+                    var diskSizeLabel = YRaw(print, ":text:").Replace(".", "");
                     var printFilename = filename;
                     var expectedPath = "";
 
                     if (!string.IsNullOrEmpty(folderPath))
                     {
-                        var printDir = Path.Combine(folderPath, "prints", $"{sizeLabel} format", $"{qty} prints");
-                        expectedPath = Path.Combine(printDir, filename);
+                        var printDir = Path.Combine(folderPath, "prints", $"{diskSizeLabel} format", $"{qty} prints");
+                        expectedPath = Path.Combine(printDir, printFilename);
 
                         // Dakis converts non-JPG originals to JPG in the prints folder
-                        if (OrderHelpers.VerifyFile(expectedPath) != null)
+                        if (OrderHelpers.VerifyFile(expectedPath) != null &&
+                            !Path.GetExtension(printFilename).Equals(".jpg", StringComparison.OrdinalIgnoreCase))
                         {
-                            var jpgName = Path.ChangeExtension(filename, ".jpg");
-                            var jpgPath = Path.Combine(printDir, jpgName);
-                            if (OrderHelpers.VerifyFile(jpgPath) == null)
-                            {
-                                printFilename = jpgName;
-                                expectedPath = jpgPath;
-                            }
+                            printFilename = Path.ChangeExtension(printFilename, ".jpg");
+                            expectedPath = Path.Combine(printDir, printFilename);
                         }
 
                         var verifyError = OrderHelpers.VerifyFile(expectedPath);
                         if (verifyError != null)
                         {
                             AlertCollector.Error(AlertCategory.DataQuality,
-                                $"Dakis file not at expected path: {filename}",
+                                $"Dakis file not at expected path: {printFilename}",
                                 orderId: info.OrderId,
                                 detail: $"Attempted: verify file at '{expectedPath}'. " +
                                         $"Expected: valid image for size '{sizeLabel}'. " +
@@ -477,7 +476,7 @@ public class DakisOrderParser
             var category = YStr(gift, ":category:");
             var subCategory = YStr(gift, ":sub_category:");
             var fulfillmentStoreId = YStr(gift, ":fulfillment_store_id:");
-            var giftingOrderId = YStr(gift, ":gifting_order_id:");
+            var giftingOrderId = YRaw(gift, ":gifting_order_id:");
             int qty = YInt(gift, ":quantity:");
             if (qty <= 0) qty = 1;
 
@@ -677,6 +676,11 @@ public class DakisOrderParser
 
     private static string YStr(object? node, string key)
         => YGet(node, key)?.ToString()?.Trim().Trim('"') ?? string.Empty;
+
+    /// <summary>Read a YAML string without trimming whitespace. Strip quotes only.
+    /// Use for values that Dakis uses in folder/file names where spaces matter.</summary>
+    private static string YRaw(object? node, string key)
+        => YGet(node, key)?.ToString()?.Trim('"') ?? string.Empty;
 
     private static int YInt(object? node, string key)
         => int.TryParse(YGet(node, key)?.ToString()?.Trim(), out var n) ? n : 0;

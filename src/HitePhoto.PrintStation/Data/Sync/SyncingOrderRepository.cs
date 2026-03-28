@@ -85,6 +85,12 @@ public class SyncingOrderRepository : IOrderRepository
         // Repair insert — will be captured by next full order push
     }
 
+    public void ReplaceItems(int orderId, List<UnifiedOrderItem> items)
+    {
+        _inner.ReplaceItems(orderId, items);
+        // Full item replace — will be captured by next full order push
+    }
+
     public void InsertItemOptions(int orderItemId, List<HitePhoto.Shared.Parsers.OrderItemOption> options)
     {
         _inner.InsertItemOptions(orderItemId, options);

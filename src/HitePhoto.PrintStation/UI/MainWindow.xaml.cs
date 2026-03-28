@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _verifyDebounce;
     private OrderTreeItem? _pendingVerifyOrder;
     private CancellationTokenSource _verifyCts = new();
+    private CancellationTokenSource _thumbnailCts = new();
 
     // Currently selected (for detail panel)
     private OrderTreeItem? _selectedOrderItem;
@@ -254,7 +255,8 @@ public partial class MainWindow : Window
         Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = themeUri });
 
         DevModeText.Visibility = _settings.DeveloperMode ? Visibility.Visible : Visibility.Collapsed;
-        Title = _settings.DeveloperMode ? "HitePhoto Print Station [DEV MODE]" : "HitePhoto Print Station";
+        var devTag = _settings.DeveloperMode ? " [DEV MODE]" : "";
+        Title = $"HitePhoto Print Station — build {BuildInfo.BuildTimestamp}{devTag}";
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -781,60 +783,93 @@ public partial class MainWindow : Window
 
     private void LoadThumbnailsFromItems(IEnumerable<HitePhoto.Shared.Models.OrderItem> items)
     {
+        _thumbnailCts.Cancel();
+        _thumbnailCts = new CancellationTokenSource();
+        var ct = _thumbnailCts.Token;
+
         ThumbnailPanel.Children.Clear();
 
-        foreach (var item in items.Take(30))
-        {
-            if (string.IsNullOrEmpty(item.ImageFilepath)) continue;
+        // Snapshot styles on UI thread
+        var borderBrush = (Brush)FindResource("BorderBrush");
+        var surfaceBg = (Brush)FindResource("SurfaceBg");
+        var mutedBrush = (Brush)FindResource("TextMuted");
+        var redBrush = (Brush)FindResource("AccentRed");
 
+        // Create placeholder borders immediately, then load images in background
+        var itemList = items.Take(30).Where(i => !string.IsNullOrEmpty(i.ImageFilepath)).ToList();
+
+        foreach (var item in itemList)
+        {
             var border = new Border
             {
                 Width = 110, Height = 110,
                 Margin = new Thickness(3),
                 BorderThickness = new Thickness(1),
-                BorderBrush = (Brush)FindResource("BorderBrush"),
-                Background = (Brush)FindResource("SurfaceBg"),
+                BorderBrush = borderBrush,
+                Background = surfaceBg,
                 CornerRadius = new CornerRadius(3),
                 ToolTip = item.ImageFilename ?? Path.GetFileName(item.ImageFilepath)
             };
-
-            if (File.Exists(item.ImageFilepath))
-            {
-                try
-                {
-                    var bmp = new BitmapImage();
-                    bmp.BeginInit();
-                    bmp.CacheOption = BitmapCacheOption.OnLoad;
-                    bmp.DecodePixelWidth = 110;
-                    bmp.UriSource = new Uri(item.ImageFilepath);
-                    bmp.EndInit();
-                    bmp.Freeze();
-                    border.Child = new Image { Source = bmp, Stretch = Stretch.Uniform };
-                }
-                catch
-                {
-                    border.Child = new TextBlock
-                    {
-                        Text = "?",
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Foreground = (Brush)FindResource("TextMuted")
-                    };
-                }
-            }
-            else
-            {
-                border.Child = new TextBlock
-                {
-                    Text = "Missing", FontSize = 9,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Foreground = (Brush)FindResource("AccentRed")
-                };
-            }
-
             ThumbnailPanel.Children.Add(border);
         }
+
+        // Load images on background thread, push each to UI as it loads
+        var paths = itemList.Select(i => i.ImageFilepath!).ToList();
+        Task.Run(() =>
+        {
+            for (int i = 0; i < paths.Count; i++)
+            {
+                if (ct.IsCancellationRequested) return;
+
+                var path = paths[i];
+                var index = i;
+                BitmapImage? bmp = null;
+                bool exists = File.Exists(path);
+
+                if (exists)
+                {
+                    try
+                    {
+                        bmp = new BitmapImage();
+                        bmp.BeginInit();
+                        bmp.CacheOption = BitmapCacheOption.OnLoad;
+                        bmp.DecodePixelWidth = 110;
+                        bmp.UriSource = new Uri(path);
+                        bmp.EndInit();
+                        bmp.Freeze();
+                    }
+                    catch { bmp = null; }
+                }
+
+                if (ct.IsCancellationRequested) return;
+
+                Dispatcher.BeginInvoke(() =>
+                {
+                    if (ct.IsCancellationRequested) return;
+                    if (index >= ThumbnailPanel.Children.Count) return;
+                    var border = (Border)ThumbnailPanel.Children[index];
+
+                    if (bmp != null)
+                        border.Child = new Image { Source = bmp, Stretch = Stretch.Uniform };
+                    else if (!exists)
+                        border.Child = new TextBlock
+                        {
+                            Text = "Missing", FontSize = 9,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = redBrush
+                        };
+                    else
+                        border.Child = new TextBlock
+                        {
+                            Text = "?",
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = mutedBrush
+                        };
+                });
+            }
+        }, ct);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -1139,22 +1174,14 @@ public partial class MainWindow : Window
 
     private void ContextMenu_MarkDone_Click(object sender, RoutedEventArgs e)
     {
-        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (order == null) return;
-
         if (IsPrintedTabActive)
         {
-            _vm.MarkUnprinted(order.DbId);
-            order.StatusCode = OrderStatusCode.New;
+            MarkSelectedUnprinted();
         }
         else
         {
-            _vm.MarkDone(order.DbId);
-            order.StatusCode = OrderStatusCode.PickedUp;
+            OpenDoneConfirmForSelected(cursorOverEmail: false);
         }
-
-        _vm.LoadOrders();
-        UpdateStatusBar();
     }
 
     private void TransferButton_Click(object sender, RoutedEventArgs e)

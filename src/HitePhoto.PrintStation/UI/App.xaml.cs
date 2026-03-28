@@ -33,6 +33,7 @@ public partial class App : Application
 
         // Init logging (must happen before anything else logs)
         AppLog.Init(settings.LogDirectory);
+        AppLog.InitNas(settings.NasLogFolder);
         AppLog.Enabled = settings.EnableLogging;
         AppLog.Info($"PrintStation starting{(profile != null ? $" [profile: {profile}]" : "")}");
 
@@ -157,11 +158,15 @@ public partial class App : Application
 
         Services = services.BuildServiceProvider();
 
-        // Wire alert persistence and purge old alerts
+        // Wire alert sinks and purge old alerts
         var alertRepo = Services.GetRequiredService<IAlertRepository>();
-        AlertCollector.SetRepository(alertRepo);
+        AlertCollector.AddSink(new SqliteAlertSink(alertRepo));
         try { alertRepo.PurgeOlderThan(30); }
         catch (Exception ex) { AppLog.Error($"Failed to purge old alerts: {ex.Message}"); }
+
+        var mariaDb = Services.GetRequiredService<PrintStationDb>();
+        AlertCollector.AddSink(new MariaDbAlertSink(mariaDb, settings.StoreId));
+        _ = mariaDb.EnsureAlertsTableAsync();
 
         // Show main window
         try

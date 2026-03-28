@@ -146,10 +146,18 @@
                 <TextBlock Text="{Binding ChannelLabel}"
                            Foreground="{DynamicResource TextMuted}"
                            FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock x:Name="MissingText"
+                           Text="{Binding MissingLabel}"
+                           Foreground="{DynamicResource AccentRed}"
+                           FontSize="11" FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center"
+                           Visibility="Collapsed"/>
             </StackPanel>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding IsPrinted}" Value="True">
                     <Setter TargetName="SzText" Property="Foreground" Value="{DynamicResource AccentGreen}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HasMissing}" Value="True">
+                    <Setter TargetName="MissingText" Property="Visibility" Value="Visible"/>
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>

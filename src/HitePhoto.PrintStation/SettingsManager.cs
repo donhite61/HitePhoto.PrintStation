@@ -39,7 +39,21 @@ public class SettingsManager
         try
         {
             string json = File.ReadAllText(_settingsPath);
-            return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+
+            // Migrate: old settings had UpdateLocalFolder — now called NasRootFolder (same path)
+            if (string.IsNullOrWhiteSpace(settings.NasRootFolder))
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("UpdateLocalFolder", out var oldProp))
+                {
+                    var oldPath = oldProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(oldPath))
+                        settings.NasRootFolder = oldPath;
+                }
+            }
+
+            return settings;
         }
         catch (Exception ex)
         {

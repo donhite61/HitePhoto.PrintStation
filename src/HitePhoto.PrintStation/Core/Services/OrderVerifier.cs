@@ -227,57 +227,55 @@ public class OrderVerifier : IOrderVerifier
         }
     }
 
-    // ── Shared compare-and-repair: source items vs DB items ──
+    // ── Shared compare-and-repair: source file is truth, replace DB items ──
 
     private int CompareAndRepair(int dbOrderId, List<UnifiedOrderItem> sourceItems, string sourceFileName)
     {
         var dbItems = _orders.GetItems(dbOrderId);
 
-        int repairs = 0;
-        var unmatched = new List<UnifiedOrderItem>(sourceItems);
-
-        foreach (var dbItem in dbItems)
+        // Quick check: if items already match, skip the replace
+        bool needsReplace = dbItems.Count != sourceItems.Count;
+        if (!needsReplace)
         {
-            var match = unmatched.FirstOrDefault(t =>
-                string.Equals(t.ImageFilename, dbItem.ImageFilename, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(t.SizeLabel, dbItem.SizeLabel, StringComparison.OrdinalIgnoreCase));
-
-            if (match != null)
+            for (int i = 0; i < sourceItems.Count; i++)
             {
-                unmatched.Remove(match);
+                var src = sourceItems[i];
+                var db = dbItems.FirstOrDefault(d =>
+                    string.Equals(d.SizeLabel, src.SizeLabel, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(Path.GetFileNameWithoutExtension(d.ImageFilename),
+                                  Path.GetFileNameWithoutExtension(src.ImageFilename),
+                                  StringComparison.OrdinalIgnoreCase));
 
-                bool needsRepair = false;
-                if (!string.Equals(match.MediaType ?? "", dbItem.MediaType ?? "", StringComparison.OrdinalIgnoreCase)) needsRepair = true;
-                if (match.Quantity != dbItem.Quantity) needsRepair = true;
-                if (!string.Equals(match.ImageFilepath ?? "", dbItem.ImageFilepath ?? "", StringComparison.OrdinalIgnoreCase)) needsRepair = true;
-                if (match.IsNoritsu != dbItem.IsNoritsu) needsRepair = true;
-
-                if (needsRepair)
+                if (db == null ||
+                    !string.Equals(db.ImageFilename, src.ImageFilename, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(db.ImageFilepath, src.ImageFilepath, StringComparison.OrdinalIgnoreCase) ||
+                    db.Quantity != src.Quantity ||
+                    db.IsNoritsu != src.IsNoritsu)
                 {
-                    var matchCategory = match.Options.FirstOrDefault(o => o.Key == "Category")?.Value ?? "";
-                    var matchSubCategory = match.Options.FirstOrDefault(o => o.Key == "SubCategory")?.Value ?? "";
-                    _orders.UpdateItem(dbItem.Id,
-                        match.SizeLabel ?? "", match.MediaType ?? "",
-                        match.ImageFilename ?? "", match.ImageFilepath ?? "",
-                        match.Quantity, match.IsNoritsu, matchCategory, matchSubCategory);
-                    repairs++;
+                    needsReplace = true;
+                    break;
                 }
             }
         }
 
-        // Source items not in DB — insert them
-        foreach (var missing in unmatched)
-        {
-            _orders.InsertItem(dbOrderId, missing);
-            repairs++;
-        }
+        if (!needsReplace) return 0;
 
-        if (repairs > 0)
-            _history.AddNote(dbOrderId,
-                $"Repaired at {DateTime.Now:yyyy-MM-dd HH:mm} — {repairs} item(s) updated from {sourceFileName}",
-                "system");
+        // Build diff summary before replacing
+        var dbSet = dbItems.Select(d => $"{d.SizeLabel}|{d.ImageFilename}|qty={d.Quantity}").OrderBy(s => s).ToList();
+        var srcSet = sourceItems.Select(s => $"{s.SizeLabel}|{s.ImageFilename}|qty={s.Quantity}").OrderBy(s => s).ToList();
+        var removed = dbSet.Except(srcSet).ToList();
+        var added = srcSet.Except(dbSet).ToList();
 
-        return repairs;
+        var diffParts = new List<string>();
+        if (removed.Count > 0) diffParts.Add($"Removed: {string.Join(", ", removed)}");
+        if (added.Count > 0) diffParts.Add($"Added: {string.Join(", ", added)}");
+        var diffSummary = diffParts.Count > 0 ? string.Join("; ", diffParts) : "paths updated";
+
+        _orders.ReplaceItems(dbOrderId, sourceItems);
+        _history.AddNote(dbOrderId,
+            $"Items replaced from {sourceFileName} ({dbItems.Count}→{sourceItems.Count}): {diffSummary}",
+            "system");
+        return sourceItems.Count;
     }
 
     // ── Insert from disk (order on disk but not in DB) ──

@@ -76,6 +76,38 @@
                         <Label Content="Store ID (BH=1, WB=2)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
                         <TextBox x:Name="StoreIdBox" Width="80" HorizontalAlignment="Left" Margin="0,0,0,8"/>
 
+                        <TextBlock Text="MariaDB Connection" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,8,0,4"/>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <Label Content="Host" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="DbHostBox" FontFamily="Consolas" FontSize="11"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                <Label Content="Port" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="DbPortBox" FontFamily="Consolas" FontSize="11" Width="60" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                <Label Content="Username" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="DbUserBox" FontFamily="Consolas" FontSize="11"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                <Label Content="Password" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <PasswordBox x:Name="DbPassBox" FontFamily="Consolas" FontSize="11"/>
+                            </StackPanel>
+                        </Grid>
+                        <Label Content="Database name" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBox x:Name="DbNameBox" FontFamily="Consolas" FontSize="11" Width="200" HorizontalAlignment="Left" Margin="0,0,0,6"/>
+                        <CheckBox x:Name="SyncEnabledCheck" Content="Enable MariaDB sync (bidirectional)" Margin="0,4,0,4"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button Content="Test DB Connection" Width="150" Click="TestDb_Click"/>
+                            <TextBlock x:Name="DbTestStatus" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"/>
+                        </StackPanel>
+
                         <Label Content="Poll interval (seconds) — how often to check Pixfizz API" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
                         <Grid Margin="0,0,0,14">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -402,12 +434,24 @@
                         <TextBlock Text="Tries the local (UNC) path first — fast for machines on the same network. Falls back to SFTP for remote locations."
                                    Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,12" TextWrapping="Wrap"/>
 
-                        <Label Content="Local/UNC path" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <Label Content="Local Update Folder" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBlock Text="Folder containing version.txt and PrintStation.zip. Same folder SFTP points to."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"/>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBox x:Name="UpdateLocalBox" Grid.Column="0" FontFamily="Consolas" FontSize="11"/>
+                            <TextBox x:Name="NasRootBox" Grid.Column="0" FontFamily="Consolas" FontSize="11"/>
                             <Button Grid.Column="1" Content="Browse..." Width="70" Margin="6,0,0,0"
-                                    Tag="UpdateLocal" Click="BrowseFolder_Click"/>
+                                    Tag="NasRoot" Click="BrowseFolder_Click"/>
+                        </Grid>
+
+                        <Label Content="NAS Log Folder" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                        <TextBlock Text="Folder on NAS for log files. Leave empty to skip NAS logging."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="NasLogBox" Grid.Column="0" FontFamily="Consolas" FontSize="11"/>
+                            <Button Grid.Column="1" Content="Browse..." Width="70" Margin="6,0,0,0"
+                                    Tag="NasLog" Click="BrowseFolder_Click"/>
                         </Grid>
 
                         <TextBlock Text="SFTP Connection (fallback)" Foreground="{DynamicResource TextHeading}"
@@ -436,6 +480,11 @@
                         </Grid>
                         <Label Content="Remote folder path" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
                         <TextBox x:Name="UpdateSftpFolderBox" Margin="0,0,0,8" FontFamily="Consolas" FontSize="11"/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button Content="Test SFTP Connection" Width="160" Click="TestSftp_Click"/>
+                            <TextBlock x:Name="SftpTestStatus" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"/>
+                        </StackPanel>
 
                         <Button Content="Check for Updates Now" Width="180" HorizontalAlignment="Left"
                                 Margin="0,8,0,0" Click="CheckUpdate_Click"/>
@@ -557,6 +606,15 @@
                             <Button Content="Open Log File" Width="120" Click="OpenLog_Click"/>
                             <Button Content="Clear Log" Width="90" Margin="8,0,0,0" Click="ClearLog_Click"/>
                             <Button Content="Alert History" Width="110" Margin="8,0,0,0" Click="AlertHistory_Click"/>
+                        </StackPanel>
+
+                        <TextBlock Text="Database" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Wipe deletes all orders, items, alerts, and history. Keeps channel mappings and layouts. Orders will re-ingest from disk on next scan."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button x:Name="WipeDbBtn" Content="Wipe Database" Width="140" Click="WipeDb_Click"/>
+                            <TextBlock x:Name="WipeDbStatus" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"/>
                         </StackPanel>
 
                         <TextBlock Text="Test Data" Foreground="{DynamicResource TextHeading}"

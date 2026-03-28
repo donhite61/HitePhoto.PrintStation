@@ -57,6 +57,12 @@ public partial class SettingsWindow : Window
         ChannelsCsvBox.Text = _settings.ChannelsCsvPath;
         RefreshIntervalBox.Text = _settings.RefreshIntervalSeconds.ToString();
         StoreIdBox.Text = _settings.StoreId.ToString();
+        DbHostBox.Text = _settings.DbHost;
+        DbPortBox.Text = _settings.DbPort.ToString();
+        DbUserBox.Text = _settings.DbUser;
+        DbPassBox.Password = _settings.DbPassword;
+        DbNameBox.Text = _settings.DbName;
+        SyncEnabledCheck.IsChecked = _settings.SyncEnabled;
         PollIntervalBox.Text = _settings.PollIntervalSeconds.ToString();
         DaysToLoadBox.Text = _settings.DaysToVerify.ToString();
 
@@ -75,7 +81,8 @@ public partial class SettingsWindow : Window
         PixfizzFtpPassBox.Password = _settings.PixfizzFtpPassword;
 
         // Auto Update
-        UpdateLocalBox.Text = _settings.UpdateLocalFolder;
+        NasRootBox.Text = _settings.NasRootFolder;
+        NasLogBox.Text = _settings.NasLogFolder;
         UpdateSftpHostBox.Text = _settings.UpdateSftpHost;
         UpdateSftpPortBox.Text = _settings.UpdateSftpPort.ToString();
         UpdateSftpUserBox.Text = _settings.UpdateSftpUsername;
@@ -159,6 +166,12 @@ public partial class SettingsWindow : Window
         _settings.ChannelsCsvPath = ChannelsCsvBox.Text.Trim();
         _settings.RefreshIntervalSeconds = int.TryParse(RefreshIntervalBox.Text.Trim(), out int ri) && ri >= 0 ? ri : 30;
         _settings.StoreId = int.TryParse(StoreIdBox.Text.Trim(), out int sid) && sid > 0 ? sid : _settings.StoreId;
+        _settings.DbHost = DbHostBox.Text.Trim();
+        _settings.DbPort = int.TryParse(DbPortBox.Text.Trim(), out int dbp) ? dbp : 3306;
+        _settings.DbUser = DbUserBox.Text.Trim();
+        _settings.DbPassword = DbPassBox.Password;
+        _settings.DbName = DbNameBox.Text.Trim();
+        _settings.SyncEnabled = SyncEnabledCheck.IsChecked == true;
         _settings.PollIntervalSeconds = int.TryParse(PollIntervalBox.Text.Trim(), out int pi) && pi >= 5 ? pi : 30;
         _settings.DaysToVerify = int.TryParse(DaysToLoadBox.Text.Trim(), out int dtl) && dtl >= 0 ? dtl : 14;
 
@@ -177,7 +190,8 @@ public partial class SettingsWindow : Window
         _settings.PixfizzFtpPassword = PixfizzFtpPassBox.Password;
 
         // Auto Update
-        _settings.UpdateLocalFolder = UpdateLocalBox.Text.Trim();
+        _settings.NasRootFolder = NasRootBox.Text.Trim();
+        _settings.NasLogFolder = NasLogBox.Text.Trim();
         _settings.UpdateSftpHost = UpdateSftpHostBox.Text.Trim();
         _settings.UpdateSftpPort = int.TryParse(UpdateSftpPortBox.Text.Trim(), out int up) ? up : 22;
         _settings.UpdateSftpUsername = UpdateSftpUserBox.Text.Trim();
@@ -868,9 +882,93 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void TestSftp_Click(object sender, RoutedEventArgs e)
+    {
+        SftpTestStatus.Text = "Connecting...";
+        SftpTestStatus.Foreground = (Brush)FindResource("TextSecondary");
+
+        var host = UpdateSftpHostBox.Text.Trim();
+        var port = int.TryParse(UpdateSftpPortBox.Text.Trim(), out int p) ? p : 22;
+        var user = UpdateSftpUserBox.Text.Trim();
+        var pass = UpdateSftpPassBox.Password;
+        var folder = UpdateSftpFolderBox.Text.Trim();
+
+        if (string.IsNullOrEmpty(host) || string.IsNullOrEmpty(user))
+        {
+            SftpTestStatus.Text = "Host and username required";
+            SftpTestStatus.Foreground = (Brush)FindResource("AccentRed");
+            return;
+        }
+
+        var error = await Task.Run(() =>
+        {
+            try
+            {
+                using var client = new Renci.SshNet.SftpClient(host, port, user, pass);
+                client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(10);
+                client.Connect();
+                var exists = !string.IsNullOrEmpty(folder) && client.Exists(folder);
+                client.Disconnect();
+                return exists ? null : $"Connected, but folder '{folder}' not found";
+            }
+            catch (Exception ex) { return ex.Message; }
+        });
+
+        if (error == null)
+        {
+            SftpTestStatus.Text = "Connected!";
+            SftpTestStatus.Foreground = (Brush)FindResource("AccentGreen");
+        }
+        else
+        {
+            SftpTestStatus.Text = error;
+            SftpTestStatus.Foreground = (Brush)FindResource("AccentRed");
+        }
+    }
+
+    private async void TestDb_Click(object sender, RoutedEventArgs e)
+    {
+        DbTestStatus.Text = "Connecting...";
+        DbTestStatus.Foreground = (Brush)FindResource("TextSecondary");
+
+        var host = DbHostBox.Text.Trim();
+        var port = int.TryParse(DbPortBox.Text.Trim(), out int p) ? p : 3306;
+        var user = DbUserBox.Text.Trim();
+        var pass = DbPassBox.Password;
+        var dbName = DbNameBox.Text.Trim();
+
+        var connStr = $"Server={host};Port={port};Database={dbName};User={user};Password={pass};" +
+                      "SslMode=None;AllowPublicKeyRetrieval=true;ConnectionTimeout=5";
+
+        var error = await Task.Run(() =>
+        {
+            try
+            {
+                using var conn = new MySqlConnector.MySqlConnection(connStr);
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT 1";
+                cmd.ExecuteScalar();
+                return (string?)null;
+            }
+            catch (Exception ex) { return ex.Message; }
+        });
+
+        if (error == null)
+        {
+            DbTestStatus.Text = "Connected!";
+            DbTestStatus.Foreground = (Brush)FindResource("AccentGreen");
+        }
+        else
+        {
+            DbTestStatus.Text = error;
+            DbTestStatus.Foreground = (Brush)FindResource("AccentRed");
+        }
+    }
+
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
     {
-        await Core.AutoUpdater.CheckAndPromptAsync(_settings);
+        await Core.AutoUpdater.CheckAndPromptAsync(_settings, showStatus: true);
     }
 
     private void AlertHistory_Click(object sender, RoutedEventArgs e)
@@ -878,6 +976,53 @@ public partial class SettingsWindow : Window
         var alertRepo = App.Services.GetRequiredService<Data.Repositories.IAlertRepository>();
         var win = new AlertHistoryWindow(alertRepo) { Owner = this };
         win.Show();
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Wipe database
+    // ══════════════════════════════════════════════════════════════════════
+
+    private void WipeDb_Click(object sender, RoutedEventArgs e)
+    {
+        var result = MessageBox.Show(
+            "This will delete ALL orders, items, alerts, and history.\n\n" +
+            "Channel mappings and layouts will be kept.\n" +
+            "Orders will re-ingest from disk on next scan.\n\n" +
+            "Continue?",
+            "Wipe Database", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+
+        if (result != MessageBoxResult.Yes) return;
+
+        try
+        {
+            var db = App.Services.GetRequiredService<Data.OrderDb>();
+            using var conn = db.OpenConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                DELETE FROM order_item_options;
+                DELETE FROM order_items;
+                DELETE FROM order_history;
+                DELETE FROM color_corrections;
+                DELETE FROM alerts;
+                DELETE FROM sync_outbox;
+                DELETE FROM sync_metadata;
+                DELETE FROM option_defaults;
+                DELETE FROM id_map;
+                DELETE FROM orders;
+                """;
+            cmd.ExecuteNonQuery();
+
+            Core.AlertCollector.Clear();
+            WipeDbStatus.Text = "Database wiped";
+            WipeDbStatus.Foreground = (Brush)FindResource("AccentGreen");
+        }
+        catch (Exception ex)
+        {
+            WipeDbStatus.Text = "Wipe failed";
+            WipeDbStatus.Foreground = (Brush)FindResource("AccentRed");
+            MessageBox.Show($"Wipe failed:\n\n{ex.Message}", "Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -1060,13 +1205,15 @@ public partial class SettingsWindow : Window
         var initial = tag == "DakisWatch" ? DakisWatchBox.Text
                     : tag == "NoritsuOutput" ? NoritsuOutputBox.Text
                     : tag == "OrderOutput" ? OrderOutputBox.Text
-                    : tag == "UpdateLocal" ? UpdateLocalBox.Text : "";
+                    : tag == "NasRoot" ? NasRootBox.Text
+                    : tag == "NasLog" ? NasLogBox.Text : "";
         var path = BrowseForFolder(initial);
         if (path == null) return;
         if (tag == "DakisWatch") DakisWatchBox.Text = path;
         else if (tag == "NoritsuOutput") NoritsuOutputBox.Text = path;
         else if (tag == "OrderOutput") OrderOutputBox.Text = path;
-        else if (tag == "UpdateLocal") UpdateLocalBox.Text = path;
+        else if (tag == "NasRoot") NasRootBox.Text = path;
+        else if (tag == "NasLog") NasLogBox.Text = path;
     }
 
     private void BrowseFile_Click(object sender, RoutedEventArgs e)

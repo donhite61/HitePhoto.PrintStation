@@ -157,9 +157,16 @@ public class MainViewModel : ViewModelBase
 
             if (_channelNamesDirty)
             {
-                _channelNames = _orders.GetAllChannels()
-                    .GroupBy(c => c.ChannelNumber)
-                    .ToDictionary(g => g.Key, g => $"{g.First().SizeLabel} {g.First().MediaType}".Trim());
+                _channelNames = new Dictionary<int, string>();
+                if (!string.IsNullOrWhiteSpace(_settings.ChannelsCsvPath))
+                {
+                    var csvReader = new Core.Processing.ChannelsCsvReader(_settings.ChannelsCsvPath);
+                    foreach (var c in csvReader.Load())
+                    {
+                        if (!_channelNames.ContainsKey(c.ChannelNumber))
+                            _channelNames[c.ChannelNumber] = $"{c.SizeLabel} {c.MediaType}".Trim();
+                    }
+                }
                 _channelNamesDirty = false;
             }
 

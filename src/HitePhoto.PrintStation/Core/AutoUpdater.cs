@@ -18,7 +18,11 @@ public static class AutoUpdater
 
     private static bool _updating;
 
-    public static async Task CheckAndPromptAsync(AppSettings settings)
+    /// <summary>
+    /// Check for updates and prompt user. Called manually from Settings or on startup.
+    /// If showStatus is true, shows a message even when no update is found.
+    /// </summary>
+    public static async Task CheckAndPromptAsync(AppSettings settings, bool showStatus = false)
     {
         if (_updating) return;
 
@@ -31,19 +35,42 @@ public static class AutoUpdater
             if (!hasLocal && !hasSftp)
             {
                 AppLog.Info("AutoUpdate: not configured");
+                if (showStatus)
+                    MessageBox.Show("No update path configured.\n\nSet the NAS Root Folder or SFTP connection in Settings.",
+                        "Update Check", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             var remoteVersion = await Task.Run(() => ReadVersionText(settings));
-            if (remoteVersion == null) return;
+            if (remoteVersion == null)
+            {
+                if (showStatus)
+                    MessageBox.Show($"Could not read version.txt.\n\nLocal path: {(hasLocal ? settings.UpdateLocalFolder : "(not set)")}\nSFTP: {(hasSftp ? $"{settings.UpdateSftpHost}:{settings.UpdateSftpFolder}" : "(not set)")}",
+                        "Update Check", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
 
             if (!DateTime.TryParse(remoteVersion.Trim(), CultureInfo.InvariantCulture,
                     DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var remoteUtc))
+            {
+                if (showStatus)
+                    MessageBox.Show($"Could not parse version.txt: {remoteVersion.Trim()}",
+                        "Update Check", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
+            }
 
             var localUtc = File.GetLastWriteTimeUtc(Assembly.GetExecutingAssembly().Location);
 
-            if (remoteUtc <= localUtc.AddMinutes(2)) return;
+            if (remoteUtc <= localUtc.AddMinutes(2))
+            {
+                if (showStatus)
+                {
+                    var currentDisplay = localUtc.ToLocalTime().ToString("yyyy-MM-dd  h:mm tt");
+                    MessageBox.Show($"You are running the latest build.\n\nCurrent: {currentDisplay}",
+                        "Update Check", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                return;
+            }
 
             var remoteDisplay = remoteUtc.ToLocalTime().ToString("yyyy-MM-dd  h:mm tt");
             var localDisplay = localUtc.ToLocalTime().ToString("yyyy-MM-dd  h:mm tt");

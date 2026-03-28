@@ -99,6 +99,11 @@ public class DakisIngestService : IDisposable
 
         foreach (var orderDir in Directory.GetDirectories(watchFolder))
         {
+            // Dakis order folders always start with "order " — skip anything else
+            var folderName = Path.GetFileName(orderDir);
+            if (!folderName.StartsWith("order ", StringComparison.OrdinalIgnoreCase))
+                continue;
+
             try
             {
                 ProcessOrderFolder(orderDir);

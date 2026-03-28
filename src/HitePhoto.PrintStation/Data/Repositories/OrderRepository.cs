@@ -1,3 +1,4 @@
+using System.IO;
 using Microsoft.Data.Sqlite;
 using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Core.Models;
@@ -296,6 +297,90 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
+    public void ReplaceItems(int orderId, List<UnifiedOrderItem> items)
+    {
+        using var conn = _db.OpenConnection();
+        using var transaction = conn.BeginTransaction();
+
+        // Snapshot printed/channel state from existing items, keyed by size+stem
+        var existingState = new Dictionary<string, (bool IsPrinted, int ChannelNumber)>(StringComparer.OrdinalIgnoreCase);
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT size_label, image_filename, is_printed, channel_number FROM order_items WHERE order_id = @oid";
+            cmd.Parameters.AddWithValue("@oid", orderId);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var key = $"{reader.GetString(0)}|{Path.GetFileNameWithoutExtension(reader.GetString(1))}";
+                if (!existingState.ContainsKey(key))
+                    existingState[key] = (reader.GetInt32(2) != 0, reader.GetInt32(3));
+            }
+        }
+
+        // Delete all existing items
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "DELETE FROM order_items WHERE order_id = @oid";
+            cmd.Parameters.AddWithValue("@oid", orderId);
+            cmd.ExecuteNonQuery();
+        }
+
+        // Insert fresh from source, restoring printed/channel where matched
+        foreach (var item in items)
+        {
+            var key = $"{item.SizeLabel}|{Path.GetFileNameWithoutExtension(item.ImageFilename)}";
+            existingState.TryGetValue(key, out var state);
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO order_items (
+                    order_id, size_label, media_type, category, sub_category,
+                    quantity, image_filename, image_filepath, is_noritsu, is_printed, channel_number, options_json
+                ) VALUES (
+                    @oid, @size, @media, @cat, @subcat,
+                    @qty, @fname, @fpath, @noritsu, @printed, @channel, @options
+                )
+                """;
+            cmd.Parameters.AddWithValue("@oid", orderId);
+            cmd.Parameters.AddWithValue("@size", item.SizeLabel ?? "");
+            cmd.Parameters.AddWithValue("@media", item.MediaType ?? "");
+            cmd.Parameters.AddWithValue("@cat", item.Options.FirstOrDefault(o => o.Key == "Category")?.Value ?? "");
+            cmd.Parameters.AddWithValue("@subcat", item.Options.FirstOrDefault(o => o.Key == "SubCategory")?.Value ?? "");
+            cmd.Parameters.AddWithValue("@qty", item.Quantity);
+            cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
+            cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
+            cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
+            cmd.Parameters.AddWithValue("@printed", state.IsPrinted ? 1 : 0);
+            cmd.Parameters.AddWithValue("@channel", state.ChannelNumber);
+            cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
+                ? System.Text.Json.JsonSerializer.Serialize(item.Options)
+                : "[]");
+            cmd.ExecuteNonQuery();
+        }
+
+        // Apply existing channel mappings to any items that didn't inherit a channel
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                UPDATE order_items
+                SET channel_number = (
+                    SELECT cm.channel_number FROM channel_mappings cm
+                    WHERE cm.routing_key = LOWER(TRIM(order_items.size_label)) || '|' || LOWER(TRIM(COALESCE(order_items.media_type, '')))
+                )
+                WHERE order_id = @oid
+                  AND channel_number = 0
+                  AND EXISTS (
+                    SELECT 1 FROM channel_mappings cm
+                    WHERE cm.routing_key = LOWER(TRIM(order_items.size_label)) || '|' || LOWER(TRIM(COALESCE(order_items.media_type, '')))
+                  )
+                """;
+            cmd.Parameters.AddWithValue("@oid", orderId);
+            cmd.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
     public Dictionary<string, (int Id, string FolderPath, string SourceCode)> GetRecentOrders(int storeId, int days)
     {
         var cutoff = days > 0 ? DateTime.Now.AddDays(-days) : DateTime.MinValue;
@@ -419,6 +504,25 @@ public class OrderRepository : IOrderRepository
             cmd.ExecuteNonQuery();
         }
 
+        // Apply existing channel mappings to the new items
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                UPDATE order_items
+                SET channel_number = (
+                    SELECT cm.channel_number FROM channel_mappings cm
+                    WHERE cm.routing_key = LOWER(TRIM(order_items.size_label)) || '|' || LOWER(TRIM(COALESCE(order_items.media_type, '')))
+                )
+                WHERE order_id = @oid
+                  AND EXISTS (
+                    SELECT 1 FROM channel_mappings cm
+                    WHERE cm.routing_key = LOWER(TRIM(order_items.size_label)) || '|' || LOWER(TRIM(COALESCE(order_items.media_type, '')))
+                  )
+                """;
+            cmd.Parameters.AddWithValue("@oid", orderId);
+            cmd.ExecuteNonQuery();
+        }
+
         transaction.Commit();
         return orderId;
     }
@@ -507,8 +611,8 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = """
             UPDATE order_items
             SET channel_number = @channel
-            WHERE LOWER(size_label) = LOWER(@size)
-              AND LOWER(COALESCE(media_type,'')) = LOWER(@media)
+            WHERE LOWER(TRIM(size_label)) = LOWER(TRIM(@size))
+              AND LOWER(TRIM(COALESCE(media_type,''))) = LOWER(TRIM(@media))
             """;
         cmd.Parameters.AddWithValue("@channel", channelNumber);
         cmd.Parameters.AddWithValue("@size", sizeLabel);

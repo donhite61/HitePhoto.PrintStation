@@ -7,6 +7,7 @@ using Dapper;
 using MySqlConnector;
 using HitePhoto.Shared.Models;
 using HitePhoto.PrintStation.Core;
+using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Data;
 
@@ -455,6 +456,117 @@ public class PrintStationDb
                 detail: $"Attempted: transfer order {orderId} to store {targetStoreId}. Found: exception.",
                 ex: ex);
             return false;
+        }
+    }
+
+    // ── Alerts ───────────────────────────────────────────────────────────
+
+    /// <summary>Ensure the alerts table exists in MariaDB. Called once at startup.</summary>
+    public async Task EnsureAlertsTableAsync()
+    {
+        const string sql = """
+            CREATE TABLE IF NOT EXISTS alerts (
+                id            INT AUTO_INCREMENT PRIMARY KEY,
+                store_id      INT NOT NULL,
+                severity      VARCHAR(10) NOT NULL,
+                category      VARCHAR(50) NOT NULL,
+                summary       VARCHAR(500) NOT NULL,
+                order_id      VARCHAR(100),
+                detail        TEXT,
+                exception     TEXT,
+                source_method VARCHAR(200),
+                source_file   VARCHAR(200),
+                source_line   INT,
+                created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                acknowledged  TINYINT(1) NOT NULL DEFAULT 0,
+                INDEX idx_alerts_store (store_id),
+                INDEX idx_alerts_created (created_at),
+                INDEX idx_alerts_unacked (acknowledged, store_id)
+            )
+            """;
+
+        try
+        {
+            await using var conn = CreateConnection();
+            await conn.ExecuteAsync(sql);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"Failed to create MariaDB alerts table: {ex.Message}");
+        }
+    }
+
+    /// <summary>Insert an alert into MariaDB. Fire-and-forget — failures are logged only.</summary>
+    public async Task InsertAlertAsync(int storeId, AlertRecord alert)
+    {
+        const string sql = """
+            INSERT INTO alerts (store_id, severity, category, summary, order_id, detail, exception,
+                                source_method, source_file, source_line, created_at)
+            VALUES (@StoreId, @Severity, @Category, @Summary, @OrderId, @Detail, @Exception,
+                    @Method, @File, @Line, @CreatedAt)
+            """;
+
+        try
+        {
+            await using var conn = CreateConnection();
+            await conn.ExecuteAsync(sql, new
+            {
+                StoreId = storeId,
+                alert.Severity,
+                alert.Category,
+                alert.Summary,
+                alert.OrderId,
+                alert.Detail,
+                alert.Exception,
+                Method = alert.SourceMethod,
+                File = alert.SourceFile,
+                Line = alert.SourceLine,
+                CreatedAt = DateTime.TryParse(alert.CreatedAt, out var dt) ? dt.ToString("yyyy-MM-dd HH:mm:ss") : DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"Failed to push alert to MariaDB: {ex.Message}");
+        }
+    }
+
+    /// <summary>Get recent alerts from MariaDB, optionally filtered by store.</summary>
+    public async Task<List<(int StoreId, AlertRecord Alert)>> GetRecentAlertsAsync(int days, int? storeId = null)
+    {
+        var sql = """
+            SELECT id, store_id, severity, category, summary, order_id, detail, exception,
+                   source_method, source_file, source_line, created_at, acknowledged
+            FROM alerts
+            WHERE created_at >= @Since
+            """ +
+            (storeId.HasValue ? " AND store_id = @StoreId" : "") +
+            " ORDER BY created_at DESC";
+
+        try
+        {
+            await using var conn = CreateConnection();
+            var rows = await conn.QueryAsync(sql, new { Since = DateTime.Now.AddDays(-days), StoreId = storeId });
+            return rows.Select(r => (
+                StoreId: (int)r.store_id,
+                Alert: new AlertRecord(
+                    Id: (int)r.id,
+                    Severity: (string)r.severity,
+                    Category: (string)r.category,
+                    Summary: (string)r.summary,
+                    OrderId: (string?)r.order_id,
+                    Detail: (string?)r.detail,
+                    Exception: (string?)r.exception,
+                    SourceMethod: (string?)r.source_method,
+                    SourceFile: (string?)r.source_file,
+                    SourceLine: r.source_line == null ? null : (int?)Convert.ToInt32(r.source_line),
+                    CreatedAt: ((DateTime)r.created_at).ToString("yyyy-MM-dd HH:mm:ss"),
+                    Acknowledged: Convert.ToBoolean(r.acknowledged))
+            )).ToList();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"Failed to read alerts from MariaDB: {ex.Message}");
+            return new List<(int, AlertRecord)>();
         }
     }
 

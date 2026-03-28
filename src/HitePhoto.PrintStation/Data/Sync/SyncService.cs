@@ -292,6 +292,11 @@ public class SyncService : ISyncService
                     {
                         UpsertLocalItem(item);
                     }
+                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19)
+                    {
+                        // Foreign key constraint — parent order doesn't exist locally. Expected after wipe.
+                        AppLog.Warn($"Sync pull: skipped item (parent order missing locally)");
+                    }
                     catch (Exception ex)
                     {
                         AlertCollector.Error(AlertCategory.Database,
@@ -314,6 +319,10 @@ public class SyncService : ISyncService
                 try
                 {
                     InsertRemoteNote(note);
+                }
+                catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19)
+                {
+                    AppLog.Warn($"Sync pull: skipped note (parent order missing locally)");
                 }
                 catch (Exception ex)
                 {

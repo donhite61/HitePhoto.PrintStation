@@ -526,6 +526,18 @@ public class OrderDb
                 PRIMARY KEY (table_name, local_id)
             );
             """);
+
+        // Migration 008: delivery_method_id + shipping fields on orders
+        AddColumnIfMissing(conn, "orders", "delivery_method_id", "INTEGER NOT NULL DEFAULT 1");
+        AddColumnIfMissing(conn, "orders", "shipping_first_name", "TEXT DEFAULT ''");
+        AddColumnIfMissing(conn, "orders", "shipping_last_name", "TEXT DEFAULT ''");
+        AddColumnIfMissing(conn, "orders", "shipping_address1", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "shipping_address2", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "shipping_city", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "shipping_state", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "shipping_zip", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "shipping_country", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "shipping_method", "TEXT DEFAULT NULL");
     }
 
     private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)

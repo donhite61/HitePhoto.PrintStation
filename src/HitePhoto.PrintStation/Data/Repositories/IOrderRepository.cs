@@ -50,6 +50,12 @@ public interface IOrderRepository
     void InsertItem(int orderId, UnifiedOrderItem item);
 
     /// <summary>
+    /// Delete all items for an order and re-insert from source.
+    /// Preserves printed/channel state where possible by matching on size+filename stem.
+    /// </summary>
+    void ReplaceItems(int orderId, List<UnifiedOrderItem> items);
+
+    /// <summary>
     /// Get recent orders for a store within a date range.
     /// Used by verify to build the DB side of the two-list reconciliation.
     /// </summary>

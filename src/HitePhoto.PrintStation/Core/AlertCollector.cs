@@ -78,13 +78,13 @@ public static class AlertCollector
     private static readonly object _lock = new();
     private static readonly List<AppAlert> _alerts = new();
     private static readonly HashSet<string> _seen = new();
-    private static IAlertRepository? _repository;
+    private static readonly List<IAlertSink> _sinks = new();
 
-    /// <summary>
-    /// Set the persistence repository. Called once at startup after DI is built.
-    /// If null, alerts still work in-memory — persistence is gracefully skipped.
-    /// </summary>
-    public static void SetRepository(IAlertRepository repository) => _repository = repository;
+    /// <summary>Register a persistence sink. Called at startup after DI is built.</summary>
+    public static void AddSink(IAlertSink sink)
+    {
+        lock (_lock) { _sinks.Add(sink); }
+    }
 
     // ── Core Add ─────────────────────────────────────────────────────────
 
@@ -120,30 +120,27 @@ public static class AlertCollector
             default:                    AppLog.Info(logMsg);   break;
         }
 
-        // Persist errors and warnings to SQLite
-        if (_repository != null && alert.Severity != AlertSeverity.Info)
+        // Persist errors and warnings to all registered sinks
+        if (alert.Severity != AlertSeverity.Info)
         {
-            try
-            {
-                _repository.Insert(new AlertRecord(
-                    Id: 0,
-                    Severity: alert.SeverityLabel,
-                    Category: alert.CategoryLabel,
-                    Summary: alert.Summary,
-                    OrderId: alert.OrderId,
-                    Detail: alert.Detail,
-                    Exception: alert.Exception,
-                    SourceMethod: alert.Method,
-                    SourceFile: alert.SourceFile,
-                    SourceLine: alert.SourceLine,
-                    CreatedAt: alert.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
-                    Acknowledged: false));
-            }
-            catch (Exception ex)
-            {
-                // Don't let persistence failure break the alert system
-                AppLog.Error($"Failed to persist alert to SQLite: {ex.Message}");
-            }
+            var record = new AlertRecord(
+                Id: 0,
+                Severity: alert.SeverityLabel,
+                Category: alert.CategoryLabel,
+                Summary: alert.Summary,
+                OrderId: alert.OrderId,
+                Detail: alert.Detail,
+                Exception: alert.Exception,
+                SourceMethod: alert.Method,
+                SourceFile: alert.SourceFile,
+                SourceLine: alert.SourceLine,
+                CreatedAt: alert.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
+                Acknowledged: false);
+
+            List<IAlertSink> sinks;
+            lock (_lock) { sinks = new List<IAlertSink>(_sinks); }
+            foreach (var sink in sinks)
+                sink.Persist(record);
         }
     }
 

@@ -101,8 +101,12 @@ public class AppSettings
     public int    PollIntervalSeconds    { get; set; } = 30;
     public int    DaysToVerify           { get; set; } = 14;
 
-    // ── Auto-update ──
-    public string UpdateLocalFolder   { get; set; } = "";
+    // ── NAS / Auto-update ──
+    public string NasRootFolder       { get; set; } = "";
+    public string NasLogFolder        { get; set; } = "";
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string UpdateLocalFolder => NasRootFolder;
     public string UpdateSftpHost      { get; set; } = "";
     public int    UpdateSftpPort      { get; set; } = 22;
     public string UpdateSftpUsername  { get; set; } = "";

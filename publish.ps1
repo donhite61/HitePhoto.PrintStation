@@ -7,7 +7,8 @@
 #   .\publish.ps1
 
 param(
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [string]$UploadPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,6 +67,19 @@ try {
 
 $zipSize = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
 Write-Host "PrintStation.zip: ${zipSize} MB" -ForegroundColor Green
+
+# Upload to NAS if path provided
+if ($UploadPath -ne "") {
+    Write-Host ""
+    Write-Host "=== Uploading to $UploadPath ===" -ForegroundColor Cyan
+    if (-not (Test-Path $UploadPath)) {
+        New-Item -ItemType Directory -Path $UploadPath -Force | Out-Null
+    }
+    Copy-Item $versionFile (Join-Path $UploadPath "version.txt") -Force
+    Copy-Item $zipPath (Join-Path $UploadPath "PrintStation.zip") -Force
+    Write-Host "Uploaded!" -ForegroundColor Green
+}
+
 Write-Host ""
 Write-Host "=== Done! ===" -ForegroundColor Cyan
 Write-Host "  $versionFile"
