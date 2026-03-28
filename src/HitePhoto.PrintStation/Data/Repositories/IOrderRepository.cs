@@ -51,7 +51,8 @@ public interface IOrderRepository
 
     /// <summary>
     /// Delete all items for an order and re-insert from source.
-    /// Preserves printed/channel state where possible by matching on size+filename stem.
+    /// Preserves printed state where possible by matching on size+filename stem.
+    /// Channel assignment comes from channel_mappings table, not stored per-item.
     /// </summary>
     void ReplaceItems(int orderId, List<UnifiedOrderItem> items);
 
@@ -74,12 +75,6 @@ public interface IOrderRepository
     void SaveChannelMapping(string routingKey, int channelNumber, string? layoutName = null);
     void DeleteChannelMapping(string routingKey);
     string? GetLayoutName(string routingKey);
-
-    /// <summary>
-    /// Update channel_number on all order_items matching this size+media.
-    /// Called after assigning a channel mapping so existing orders reflect the change.
-    /// </summary>
-    void UpdateItemChannels(string sizeLabel, string mediaType, int channelNumber);
 
     /// <summary>
     /// Get Pixfizz orders older than cutoff that have a job_id but haven't been marked received.

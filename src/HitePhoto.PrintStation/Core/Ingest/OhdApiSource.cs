@@ -128,13 +128,11 @@ public class OhdApiSource : IOrderSource
                 if ((int)response.StatusCode < 500)
                     throw new Exception($"OHD API error {response.StatusCode}: {json}");
 
-                AlertCollector.Warn(AlertCategory.Network,
-                    $"OHD API returned {response.StatusCode} — retrying ({attempt}/{maxRetries})");
+                AppLog.Info($"OHD API returned {response.StatusCode} — retrying ({attempt}/{maxRetries})");
             }
             catch (HttpRequestException) when (attempt < maxRetries)
             {
-                AlertCollector.Warn(AlertCategory.Network,
-                    $"OHD API request failed — retrying ({attempt}/{maxRetries})");
+                AppLog.Info($"OHD API request failed — retrying ({attempt}/{maxRetries})");
             }
             catch (TaskCanceledException) when (ct.IsCancellationRequested)
             {
@@ -142,8 +140,7 @@ public class OhdApiSource : IOrderSource
             }
             catch (TaskCanceledException) when (attempt < maxRetries)
             {
-                AlertCollector.Warn(AlertCategory.Network,
-                    $"OHD API timed out — retrying ({attempt}/{maxRetries})");
+                AppLog.Info($"OHD API timed out — retrying ({attempt}/{maxRetries})");
             }
 
             await Task.Delay(delay, ct);

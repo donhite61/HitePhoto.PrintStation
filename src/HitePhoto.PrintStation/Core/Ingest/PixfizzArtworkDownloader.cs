@@ -150,7 +150,7 @@ public class PixfizzArtworkDownloader
         }
         catch (Exception ex)
         {
-            AlertCollector.Warn(AlertCategory.Network,
+            AlertCollector.Error(AlertCategory.Network,
                 $"Retry download failed for {orderNumber}", ex: ex);
             return null;
         }

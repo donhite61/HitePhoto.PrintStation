@@ -207,7 +207,12 @@ namespace HitePhoto.PrintStation.UI.ViewModels
                 }
                 catch (Exception ex)
                 {
-                    AppLog.Warn($"Preview render failed — {ex.Message}");
+                    AppLog.Info($"Preview render failed — {ex.Message}");
+                    AlertCollector.Error(AlertCategory.DataQuality,
+                        "Color correction preview render failed",
+                        detail: $"Attempted: render preview. Expected: preview image. Found: {ex.Message}. " +
+                                $"Context: color correction window. State: preview not shown.",
+                        ex: ex);
                     _dispatcher.Invoke(() => IsRendering = false);
                 }
             });

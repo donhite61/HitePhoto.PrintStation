@@ -34,4 +34,23 @@ public class ChannelDecision : IChannelDecision
         return new ChannelResult(0, null, routingKey);
     }
 
+    public Dictionary<string, ChannelResult> ResolveAll()
+    {
+        var result = new Dictionary<string, ChannelResult>(StringComparer.OrdinalIgnoreCase);
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT routing_key, channel_number, layout_name FROM channel_mappings WHERE channel_number > 0";
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var routingKey = reader.GetString(0);
+            var channel = reader.GetInt32(1);
+            var layout = reader.IsDBNull(2) ? null : reader.GetString(2);
+            result[routingKey] = new ChannelResult(channel, layout, routingKey);
+        }
+
+        return result;
+    }
 }

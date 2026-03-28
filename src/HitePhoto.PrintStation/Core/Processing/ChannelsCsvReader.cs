@@ -23,7 +23,7 @@ public class ChannelsCsvReader
 
         if (!File.Exists(_csvPath))
         {
-            AlertCollector.Warn(AlertCategory.Settings,
+            AlertCollector.Error(AlertCategory.Settings,
                 "Channels CSV file not found",
                 detail: $"Attempted: read channel definitions from '{_csvPath}'. " +
                         $"Expected: tab-delimited CSV with header. Found: file missing. " +

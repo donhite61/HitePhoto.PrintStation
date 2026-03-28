@@ -112,7 +112,6 @@ public class SyncingOrderRepository : IOrderRepository
     public void SaveChannelMapping(string routingKey, int channelNumber, string? layoutName = null) => _inner.SaveChannelMapping(routingKey, channelNumber, layoutName);
     public void DeleteChannelMapping(string routingKey) => _inner.DeleteChannelMapping(routingKey);
     public string? GetLayoutName(string routingKey) => _inner.GetLayoutName(routingKey);
-    public void UpdateItemChannels(string sizeLabel, string mediaType, int channelNumber) => _inner.UpdateItemChannels(sizeLabel, mediaType, channelNumber);
     public List<(int Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff) => _inner.GetUnreceivedPixfizzOrders(cutoff);
     public void MarkReceivedPushed(int orderId) => _inner.MarkReceivedPushed(orderId);
 }

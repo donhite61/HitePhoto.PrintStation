@@ -386,7 +386,7 @@ internal class ImageCard
             }
             catch
             {
-                AlertCollector.Warn(AlertCategory.DataQuality,
+                AlertCollector.Error(AlertCategory.DataQuality,
                     "Could not load thumbnail",
                     detail: $"Attempted: load thumbnail for '{item.ImageFilepath}'. Found: decode failed.");
                 imgCtrl.Source = null;

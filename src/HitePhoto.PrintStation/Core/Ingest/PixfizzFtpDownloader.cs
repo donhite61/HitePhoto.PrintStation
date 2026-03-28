@@ -57,7 +57,7 @@ public class PixfizzFtpDownloader
 
             if (match == null)
             {
-                AlertCollector.Warn(AlertCategory.Network,
+                AlertCollector.Error(AlertCategory.Network,
                     $"Darkroom TXT not found for job {jobId}",
                     orderId: orderNumber,
                     detail: $"Expected: '{expectedName}' in FTP {remotePath}. " +
@@ -70,7 +70,7 @@ public class PixfizzFtpDownloader
                 match = txtFiles[0];
             else if (txtFiles.Count > 1)
             {
-                AlertCollector.Warn(AlertCategory.DataQuality,
+                AlertCollector.Error(AlertCategory.DataQuality,
                     $"Multiple TXT files for order, no job ID to disambiguate",
                     orderId: orderNumber,
                     detail: $"Found {txtFiles.Count} files: [{string.Join(", ", txtFiles.Select(f => f.Name))}]");
@@ -137,7 +137,7 @@ public class PixfizzFtpDownloader
                     }
                     else
                     {
-                        AlertCollector.Warn(AlertCategory.Network,
+                        AlertCollector.Error(AlertCategory.Network,
                             $"FTP download failed for {file.Name}",
                             detail: $"Status: {status}. Remote: {ftpPath}. Local: {localPath}");
                     }

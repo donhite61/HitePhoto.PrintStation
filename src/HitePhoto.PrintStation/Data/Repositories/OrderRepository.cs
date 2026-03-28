@@ -302,18 +302,18 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
 
-        // Snapshot printed/channel state from existing items, keyed by size+stem
-        var existingState = new Dictionary<string, (bool IsPrinted, int ChannelNumber)>(StringComparer.OrdinalIgnoreCase);
+        // Snapshot printed state from existing items, keyed by size+stem
+        var printedState = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT size_label, image_filename, is_printed, channel_number FROM order_items WHERE order_id = @oid";
+            cmd.CommandText = "SELECT size_label, image_filename, is_printed FROM order_items WHERE order_id = @oid";
             cmd.Parameters.AddWithValue("@oid", orderId);
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
                 var key = $"{reader.GetString(0)}|{Path.GetFileNameWithoutExtension(reader.GetString(1))}";
-                if (!existingState.ContainsKey(key))
-                    existingState[key] = (reader.GetInt32(2) != 0, reader.GetInt32(3));
+                if (!printedState.ContainsKey(key))
+                    printedState[key] = reader.GetInt32(2) != 0;
             }
         }
 
@@ -325,20 +325,20 @@ public class OrderRepository : IOrderRepository
             cmd.ExecuteNonQuery();
         }
 
-        // Insert fresh from source, restoring printed/channel where matched
+        // Insert fresh from source, restoring printed state where matched
         foreach (var item in items)
         {
             var key = $"{item.SizeLabel}|{Path.GetFileNameWithoutExtension(item.ImageFilename)}";
-            existingState.TryGetValue(key, out var state);
+            printedState.TryGetValue(key, out var wasPrinted);
 
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO order_items (
                     order_id, size_label, media_type, category, sub_category,
-                    quantity, image_filename, image_filepath, is_noritsu, is_printed, channel_number, options_json
+                    quantity, image_filename, image_filepath, is_noritsu, is_printed, options_json
                 ) VALUES (
                     @oid, @size, @media, @cat, @subcat,
-                    @qty, @fname, @fpath, @noritsu, @printed, @channel, @options
+                    @qty, @fname, @fpath, @noritsu, @printed, @options
                 )
                 """;
             cmd.Parameters.AddWithValue("@oid", orderId);
@@ -350,31 +350,10 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
             cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
             cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
-            cmd.Parameters.AddWithValue("@printed", state.IsPrinted ? 1 : 0);
-            cmd.Parameters.AddWithValue("@channel", state.ChannelNumber);
+            cmd.Parameters.AddWithValue("@printed", wasPrinted ? 1 : 0);
             cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
                 ? System.Text.Json.JsonSerializer.Serialize(item.Options)
                 : "[]");
-            cmd.ExecuteNonQuery();
-        }
-
-        // Apply existing channel mappings to any items that didn't inherit a channel
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = """
-                UPDATE order_items
-                SET channel_number = (
-                    SELECT cm.channel_number FROM channel_mappings cm
-                    WHERE cm.routing_key = LOWER(TRIM(order_items.size_label)) || '|' || LOWER(TRIM(COALESCE(order_items.media_type, '')))
-                )
-                WHERE order_id = @oid
-                  AND channel_number = 0
-                  AND EXISTS (
-                    SELECT 1 FROM channel_mappings cm
-                    WHERE cm.routing_key = LOWER(TRIM(order_items.size_label)) || '|' || LOWER(TRIM(COALESCE(order_items.media_type, '')))
-                  )
-                """;
-            cmd.Parameters.AddWithValue("@oid", orderId);
             cmd.ExecuteNonQuery();
         }
 
@@ -427,7 +406,8 @@ public class OrderRepository : IOrderRepository
                     pixfizz_job_id,
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
-                    shipping_state, shipping_zip, shipping_country, shipping_method
+                    shipping_state, shipping_zip, shipping_country, shipping_method,
+                    is_test
                 ) VALUES (
                     @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
@@ -437,7 +417,8 @@ public class OrderRepository : IOrderRepository
                     @jobId,
                     @deliveryMethod, @shipFname, @shipLname,
                     @shipAddr1, @shipAddr2, @shipCity,
-                    @shipState, @shipZip, @shipCountry, @shipMethod
+                    @shipState, @shipZip, @shipCountry, @shipMethod,
+                    @isTest
                 );
                 SELECT last_insert_rowid();
                 """;
@@ -471,6 +452,7 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@shipZip", (object?)order.ShippingZip ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@shipCountry", (object?)order.ShippingCountry ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@shipMethod", (object?)order.ShippingMethod ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@isTest", order.ExternalOrderId.StartsWith("TEST-", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
             orderId = Convert.ToInt32(cmd.ExecuteScalar()!);
         }
 
@@ -501,25 +483,6 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
                 ? System.Text.Json.JsonSerializer.Serialize(item.Options)
                 : "[]");
-            cmd.ExecuteNonQuery();
-        }
-
-        // Apply existing channel mappings to the new items
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = """
-                UPDATE order_items
-                SET channel_number = (
-                    SELECT cm.channel_number FROM channel_mappings cm
-                    WHERE cm.routing_key = LOWER(TRIM(order_items.size_label)) || '|' || LOWER(TRIM(COALESCE(order_items.media_type, '')))
-                )
-                WHERE order_id = @oid
-                  AND EXISTS (
-                    SELECT 1 FROM channel_mappings cm
-                    WHERE cm.routing_key = LOWER(TRIM(order_items.size_label)) || '|' || LOWER(TRIM(COALESCE(order_items.media_type, '')))
-                  )
-                """;
-            cmd.Parameters.AddWithValue("@oid", orderId);
             cmd.ExecuteNonQuery();
         }
 
@@ -602,22 +565,6 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@key", routingKey);
         var result = cmd.ExecuteScalar();
         return result is string s ? s : null;
-    }
-
-    public void UpdateItemChannels(string sizeLabel, string mediaType, int channelNumber)
-    {
-        using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            UPDATE order_items
-            SET channel_number = @channel
-            WHERE LOWER(TRIM(size_label)) = LOWER(TRIM(@size))
-              AND LOWER(TRIM(COALESCE(media_type,''))) = LOWER(TRIM(@media))
-            """;
-        cmd.Parameters.AddWithValue("@channel", channelNumber);
-        cmd.Parameters.AddWithValue("@size", sizeLabel);
-        cmd.Parameters.AddWithValue("@media", mediaType);
-        cmd.ExecuteNonQuery();
     }
 
     public List<(int Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff)

@@ -178,7 +178,7 @@ public static class AutoUpdater
         }
         catch (Exception ex)
         {
-            AlertCollector.Warn(AlertCategory.Update, "Could not check for updates via SFTP",
+            AlertCollector.Error(AlertCategory.Update, "Could not check for updates via SFTP",
                 detail: $"Host: {settings.UpdateSftpHost}:{settings.UpdateSftpPort}",
                 ex: ex);
             return null;

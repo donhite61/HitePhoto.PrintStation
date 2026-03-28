@@ -45,7 +45,7 @@ public class NotificationService : INotificationService
         {
             if (string.IsNullOrEmpty(order.CustomerEmail))
             {
-                AlertCollector.Warn(AlertCategory.Network,
+                AlertCollector.Error(AlertCategory.Network,
                     $"Cannot notify — no email address for order {order.ExternalOrderId}",
                     orderId: order.ExternalOrderId);
                 return;
@@ -70,7 +70,7 @@ public class NotificationService : INotificationService
             var result = _emailSender.SendOrderReadyEmailAsync(fullOrder, template).GetAwaiter().GetResult();
             if (!result.Success)
             {
-                AlertCollector.Warn(AlertCategory.Network,
+                AlertCollector.Error(AlertCategory.Network,
                     $"Email failed for {order.ExternalOrderId}: {result.ErrorMessage}",
                     orderId: order.ExternalOrderId);
                 return;

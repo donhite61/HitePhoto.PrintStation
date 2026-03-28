@@ -75,8 +75,8 @@ public class DakisOrderParser
                 orderId: info.OrderId,
                 detail: $"Attempted: detect order type. Expected: at least one populated. " +
                         $"Found: both empty. Context: order {info.OrderId}. " +
-                        $"State: no items to parse.");
-            throw new InvalidOperationException($"Dakis order '{info.OrderId}' has no print_formats or photo_gift_orders");
+                        $"State: order inserted with 0 items — likely abandoned kiosk order.");
+            return BuildUnifiedOrder(info, folderPath, items: [], isInvoiceOnly: false);
         }
 
         info.DakisOrderType = hasPrints ? "print" : "gift";
@@ -106,7 +106,7 @@ public class DakisOrderParser
             int formatVersion = YInt(root, ":format_version:");
             if (formatVersion != 4 && formatVersion != 0)
             {
-                AlertCollector.Warn(AlertCategory.DataQuality,
+                AlertCollector.Error(AlertCategory.DataQuality,
                     $"Dakis order format_version is {formatVersion}, expected 4",
                     orderId: fallbackOrderId,
                     detail: $"Attempted: check format_version. Expected: 4. " +

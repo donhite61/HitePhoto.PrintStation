@@ -251,7 +251,6 @@ public class OrderDb
             image_filename          TEXT DEFAULT '',
             image_filepath          TEXT DEFAULT '',
             original_image_filepath TEXT DEFAULT '',
-            channel_number          INTEGER NOT NULL DEFAULT 0,
             options_json            TEXT DEFAULT '[]',
             is_noritsu              INTEGER NOT NULL DEFAULT 1,
             is_printed              INTEGER NOT NULL DEFAULT 0,
@@ -538,6 +537,25 @@ public class OrderDb
         AddColumnIfMissing(conn, "orders", "shipping_zip", "TEXT DEFAULT NULL");
         AddColumnIfMissing(conn, "orders", "shipping_country", "TEXT DEFAULT NULL");
         AddColumnIfMissing(conn, "orders", "shipping_method", "TEXT DEFAULT NULL");
+
+        // Migration 009: Drop channel_number from order_items — channel_mappings is sole authority.
+        // SQLite 3.35.0+ supports ALTER TABLE DROP COLUMN (our min version is 3.46+).
+        DropColumnIfExists(conn, "order_items", "channel_number");
+    }
+
+    private static void DropColumnIfExists(SqliteConnection conn, string table, string column)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({table})";
+        using var reader = cmd.ExecuteReader();
+        bool found = false;
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            { found = true; break; }
+        }
+        if (found)
+            Execute(conn, $"ALTER TABLE {table} DROP COLUMN {column}");
     }
 
     private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)

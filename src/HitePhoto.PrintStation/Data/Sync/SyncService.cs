@@ -128,7 +128,10 @@ public class SyncService : ISyncService
             }
 
             default:
-                AppLog.Warn($"SyncService: unknown push operation '{operation}'");
+                AlertCollector.Error(AlertCategory.Database,
+                    $"Unknown sync push operation '{operation}'",
+                    detail: $"Attempted: process outbox entry. Expected: known operation (upsert_order, add_note). " +
+                            $"Found: '{operation}'. Context: sync push. State: entry skipped.");
                 return true; // don't re-queue unknown ops
         }
     }
@@ -195,13 +198,13 @@ public class SyncService : ISyncService
         return true;
     }
 
-    private List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, int ChannelNumber, string OptionsJson, bool IsPrinted)> ReadLocalItems(SqliteConnection conn, int orderId)
+    private List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> ReadLocalItems(SqliteConnection conn, int orderId)
     {
-        var items = new List<(string, string, int, string, string, string, int, string, bool)>();
+        var items = new List<(string, string, int, string, string, string, string, bool)>();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT size_label, media_type, quantity, image_filename, image_filepath,
-                   original_image_filepath, channel_number, options_json, is_printed
+                   original_image_filepath, options_json, is_printed
             FROM order_items WHERE order_id = @id
             """;
         cmd.Parameters.AddWithValue("@id", orderId);
@@ -215,9 +218,8 @@ public class SyncService : ISyncService
                 reader.IsDBNull(3) ? "" : reader.GetString(3),
                 reader.IsDBNull(4) ? "" : reader.GetString(4),
                 reader.IsDBNull(5) ? "" : reader.GetString(5),
-                reader.GetInt32(6),
-                reader.IsDBNull(7) ? "[]" : reader.GetString(7),
-                reader.GetInt32(8) == 1));
+                reader.IsDBNull(6) ? "[]" : reader.GetString(6),
+                reader.GetInt32(7) == 1));
         }
         return items;
     }
@@ -295,7 +297,7 @@ public class SyncService : ISyncService
                     catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19)
                     {
                         // Foreign key constraint — parent order doesn't exist locally. Expected after wipe.
-                        AppLog.Warn($"Sync pull: skipped item (parent order missing locally)");
+                        AppLog.Info($"Sync pull: skipped item (parent order missing locally)");
                     }
                     catch (Exception ex)
                     {
@@ -322,7 +324,7 @@ public class SyncService : ISyncService
                 }
                 catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19)
                 {
-                    AppLog.Warn($"Sync pull: skipped note (parent order missing locally)");
+                    AppLog.Info($"Sync pull: skipped note (parent order missing locally)");
                 }
                 catch (Exception ex)
                 {
@@ -401,7 +403,7 @@ public class SyncService : ISyncService
                     is_transfer = @transfer, transfer_store_id = @transferStore,
                     special_instructions = @instructions, folder_path = @folder,
                     delivery_method_id = @delivery, ordered_at = @orderedAt,
-                    updated_at = @updatedAt
+                    is_test = @isTest, updated_at = @updatedAt
                 WHERE id = @id
                 """;
             BindOrderParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
@@ -420,14 +422,14 @@ public class SyncService : ISyncService
                     customer_first_name, customer_last_name, customer_email, customer_phone,
                     total_amount, is_held, is_transfer, transfer_store_id,
                     special_instructions, folder_path, delivery_method_id, ordered_at,
-                    created_at, updated_at
+                    is_test, created_at, updated_at
                 ) VALUES (
                     @eid, @store, @srcId, @srcCode,
                     @statusId, @statusCode,
                     @fname, @lname, @email, @phone,
                     @total, @held, @transfer, @transferStore,
                     @instructions, @folder, @delivery, @orderedAt,
-                    @createdAt, @updatedAt
+                    @isTest, @createdAt, @updatedAt
                 )
                 """;
             cmd.Parameters.AddWithValue("@eid", externalOrderId);
@@ -457,6 +459,7 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
         cmd.Parameters.AddWithValue("@delivery", row.delivery_method_id != null ? (int)row.delivery_method_id : 1);
         cmd.Parameters.AddWithValue("@orderedAt", row.ordered_at != null ? ((DateTime)row.ordered_at).ToString("o") : DateTime.Now.ToString("o"));
+        cmd.Parameters.AddWithValue("@isTest", Convert.ToBoolean(row.is_test ?? false) ? 1 : 0);
     }
 
     private void UpsertLocalItem(dynamic item)
@@ -491,13 +494,12 @@ public class SyncService : ISyncService
             cmd.CommandText = """
                 UPDATE order_items SET
                     quantity = @qty, image_filepath = @fpath,
-                    channel_number = @channel, options_json = @options,
+                    options_json = @options,
                     is_printed = @printed, updated_at = datetime('now')
                 WHERE id = @id
                 """;
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);
             cmd.Parameters.AddWithValue("@fpath", (string?)item.image_filepath ?? "");
-            cmd.Parameters.AddWithValue("@channel", item.channel_number != null ? (int)item.channel_number : 0);
             cmd.Parameters.AddWithValue("@options", (string?)item.options_json ?? "[]");
             cmd.Parameters.AddWithValue("@printed", Convert.ToBoolean(item.is_printed ?? false) ? 1 : 0);
             cmd.Parameters.AddWithValue("@id", Convert.ToInt32(existingId));
@@ -510,11 +512,11 @@ public class SyncService : ISyncService
             cmd.CommandText = """
                 INSERT INTO order_items (
                     order_id, size_label, media_type, quantity,
-                    image_filename, image_filepath, channel_number,
+                    image_filename, image_filepath,
                     options_json, is_printed
                 ) VALUES (
                     @oid, @size, @media, @qty,
-                    @fname, @fpath, @channel,
+                    @fname, @fpath,
                     @options, @printed
                 )
                 """;
@@ -524,7 +526,6 @@ public class SyncService : ISyncService
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);
             cmd.Parameters.AddWithValue("@fname", imageFilename);
             cmd.Parameters.AddWithValue("@fpath", (string?)item.image_filepath ?? "");
-            cmd.Parameters.AddWithValue("@channel", item.channel_number != null ? (int)item.channel_number : 0);
             cmd.Parameters.AddWithValue("@options", (string?)item.options_json ?? "[]");
             cmd.Parameters.AddWithValue("@printed", Convert.ToBoolean(item.is_printed ?? false) ? 1 : 0);
             cmd.ExecuteNonQuery();

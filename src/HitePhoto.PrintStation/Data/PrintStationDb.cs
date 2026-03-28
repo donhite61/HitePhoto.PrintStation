@@ -394,27 +394,6 @@ public class PrintStationDb
         }
     }
 
-    /// <summary>Set the channel number on an order item.</summary>
-    public async Task<bool> UpdateItemChannelAsync(int itemId, int channelNumber)
-    {
-        const string sql = "UPDATE order_items SET channel_number = @Channel WHERE id = @ItemId";
-
-        try
-        {
-            await using var conn = CreateConnection();
-            await conn.ExecuteAsync(sql, new { ItemId = itemId, Channel = channelNumber });
-            return true;
-        }
-        catch (Exception ex)
-        {
-            AlertCollector.Error(AlertCategory.Database,
-                "Failed to update item channel",
-                detail: $"Attempted: UPDATE item {itemId} channel to {channelNumber}. Found: exception.",
-                ex: ex);
-            return false;
-        }
-    }
-
     /// <summary>Transfer an order to another store (DB metadata only — SFTP for files is separate).</summary>
     public async Task<bool> TransferOrderAsync(int orderId, int targetStoreId, string? note = null, int? employeeId = null)
     {
@@ -761,7 +740,7 @@ public class PrintStationDb
     }
 
     /// <summary>Upsert order items to MariaDB. Deletes existing items and re-inserts.</summary>
-    public async Task<bool> UpsertOrderItemsAsync(int mariaDbOrderId, List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, int ChannelNumber, string OptionsJson, bool IsPrinted)> items)
+    public async Task<bool> UpsertOrderItemsAsync(int mariaDbOrderId, List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> items)
     {
         try
         {
@@ -779,11 +758,11 @@ public class PrintStationDb
                     INSERT INTO order_items
                         (order_id, size_label, media_type, quantity,
                          image_filename, image_filepath, original_image_filepath,
-                         channel_number, options_json, is_printed)
+                         options_json, is_printed)
                     VALUES
                         (@OrderId, @Size, @Media, @Qty,
                          @Filename, @Filepath, @OrigFilepath,
-                         @Channel, @Options, @Printed)
+                         @Options, @Printed)
                     """,
                     new
                     {
@@ -794,7 +773,6 @@ public class PrintStationDb
                         Filename = item.ImageFilename,
                         Filepath = item.ImageFilepath,
                         OrigFilepath = item.OriginalImageFilepath,
-                        Channel = item.ChannelNumber,
                         Options = item.OptionsJson,
                         Printed = item.IsPrinted ? 1 : 0,
                     }, tx);

@@ -1123,7 +1123,7 @@ public partial class MainWindow : Window
 
         if (_settings.EmailTemplates.Count == 0)
         {
-            AlertCollector.Warn(AlertCategory.Settings,
+            AlertCollector.Error(AlertCategory.Settings,
                 "No email templates configured. Open Settings > Notifications to create templates.");
             return;
         }

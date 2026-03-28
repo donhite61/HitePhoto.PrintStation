@@ -70,7 +70,6 @@ public record UnifiedOrderItem
     public string? ImageFilename { get; init; }
     public string? ImageFilepath { get; init; }
     public string? OriginalImageFilepath { get; init; }
-    public int? ChannelNumber { get; init; }
 
     /// <summary>
     /// True = goes to Noritsu printer. False = non-print item (metals, canvas, gifts).

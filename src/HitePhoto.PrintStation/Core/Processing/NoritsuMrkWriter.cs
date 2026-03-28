@@ -56,7 +56,7 @@ public class NoritsuMrkWriter
         {
             if (string.IsNullOrEmpty(item.ImageFilepath) || !File.Exists(item.ImageFilepath))
             {
-                AlertCollector.Warn(AlertCategory.Printing,
+                AlertCollector.Error(AlertCategory.Printing,
                     "Image file missing during MRK write — skipped",
                     orderId: order.ExternalOrderId,
                     detail: $"Attempted: copy '{item.ImageFilepath ?? "(null)"}' for print. " +

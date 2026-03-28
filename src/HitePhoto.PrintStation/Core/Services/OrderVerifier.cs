@@ -158,14 +158,23 @@ public class OrderVerifier : IOrderVerifier
             }
         }
 
-        // ── Leftover in DB list: in DB but not on disk → error state ──
+        // ── Leftover in DB list: in DB but not on disk ──
+        // Only alert if the folder_path is under a local root AND actually missing.
+        // Orders outside the date cutoff may not appear in the folder scan but still exist on disk.
         foreach (var kvp in dbList)
         {
+            var folderPath = kvp.Value.FolderPath;
+            if (!IsLocalFolder(folderPath))
+                continue; // synced from other store, folder lives on their machine
+
+            if (Directory.Exists(folderPath))
+                continue; // folder exists, just outside the scan's date cutoff
+
             _history.AddNoteIfNew(kvp.Value.Id, "Verify: order folder not found on disk", "system");
             AlertCollector.Error(AlertCategory.DataQuality,
                 $"Order {kvp.Key} in DB but folder missing from disk",
                 orderId: kvp.Key,
-                detail: $"Attempted: find folder for order {kvp.Key}. Expected: folder at '{kvp.Value.FolderPath}'. " +
+                detail: $"Attempted: find folder for order {kvp.Key}. Expected: folder at '{folderPath}'. " +
                         $"Found: folder missing. Context: source {kvp.Value.SourceCode}, DB id {kvp.Value.Id}. " +
                         $"State: order is in database but files are gone.");
             errors++;
@@ -395,5 +404,33 @@ public class OrderVerifier : IOrderVerifier
 
             list.TryAdd(orderId, (dir, source));
         }
+    }
+
+    /// <summary>
+    /// Returns true if the folder path is under one of our configured local roots.
+    /// Orders synced from the other store have folder paths on that store's drive.
+    /// </summary>
+    private bool IsLocalFolder(string folderPath)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath))
+            return false;
+
+        var normalized = Path.GetFullPath(folderPath);
+
+        if (!string.IsNullOrWhiteSpace(_settings.OrderOutputPath))
+        {
+            var pixRoot = Path.GetFullPath(_settings.OrderOutputPath);
+            if (normalized.StartsWith(pixRoot, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settings.DakisWatchFolder))
+        {
+            var dakisRoot = Path.GetFullPath(_settings.DakisWatchFolder);
+            if (normalized.StartsWith(dakisRoot, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 }

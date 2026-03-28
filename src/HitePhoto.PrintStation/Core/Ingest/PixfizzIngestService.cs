@@ -103,7 +103,12 @@ public class PixfizzIngestService
 
         if (!result.Success)
         {
-            AppLog.Warn($"Pixfizz order {orderNumber}: {string.Join(", ", result.Errors)}");
+            AlertCollector.Error(AlertCategory.Network,
+                $"Pixfizz download failed for {orderNumber}",
+                orderId: orderNumber,
+                detail: $"Attempted: download order {orderNumber}. Expected: successful download. " +
+                        $"Found: {string.Join(", ", result.Errors)}. " +
+                        $"Context: Pixfizz poll. State: order will retry next poll.");
             return; // Will retry next poll — no /received called
         }
 
@@ -171,7 +176,7 @@ public class PixfizzIngestService
             }
             catch (Exception ex)
             {
-                AlertCollector.Warn(AlertCategory.Network,
+                AlertCollector.Error(AlertCategory.Network,
                     $"Failed to mark received for {externalOrderId}",
                     orderId: externalOrderId, ex: ex);
                 // Will retry next cycle

@@ -170,13 +170,16 @@ public class MainViewModel : ViewModelBase
                 _channelNamesDirty = false;
             }
 
+            var channelMap = _channelDecision.ResolveAll();
+
             var pending = LoadOrdersWithStatus(conn, OrderStatusCode.New, OrderStatusCode.InProgress);
             var printed = LoadOrdersWithStatus(conn, OrderStatusCode.Ready, OrderStatusCode.Notified, OrderStatusCode.PickedUp);
             var otherStore = LoadOtherStoreOrders(conn);
 
-            DiffAndPatch(PendingOrders, pending, verifyFiles: true);
-            DiffAndPatch(PrintedOrders, printed, verifyFiles: false);
-            DiffAndPatch(OtherStoreOrders, otherStore, verifyFiles: false);
+            var verifyCutoff = DateTime.Now.AddDays(-_settings.DaysToVerify);
+            DiffAndPatch(PendingOrders, pending, verifyCutoff, channelMap);
+            DiffAndPatch(PrintedOrders, printed, verifyCutoff, channelMap);
+            DiffAndPatch(OtherStoreOrders, otherStore, verifyCutoff: null, channelMap);
 
             var total = pending.Count + printed.Count + otherStore.Count;
             StatusText = $"{pending.Count} pending, {printed.Count} printed, {otherStore.Count} other store";
@@ -273,7 +276,7 @@ public class MainViewModel : ViewModelBase
     /// In-place diff-and-patch: updates existing tree items instead of clear-and-rebuild.
     /// Preserves WPF selection, expansion, and scroll position.
     /// </summary>
-    private void DiffAndPatch(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders, bool verifyFiles)
+    private void DiffAndPatch(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders, DateTime? verifyCutoff, Dictionary<string, ChannelResult> channelMap)
     {
         var filtered = ApplyFilters(orders);
         var sorted = ApplySort(filtered);
@@ -292,12 +295,13 @@ public class MainViewModel : ViewModelBase
         {
             var row = sorted[i];
             var items = allItems.TryGetValue(row.Id, out var list) ? list : new();
+            var verifyFiles = IsWithinCutoff(row.OrderedAt, verifyCutoff);
 
             if (i < target.Count && target[i].DbId == row.Id)
             {
                 // Same item at same position — update in place
                 UpdateOrderProperties(target[i], row);
-                DiffSizes(target[i], items, verifyFiles);
+                DiffSizes(target[i], items, verifyFiles, channelMap);
             }
             else if (existingByDbId.TryGetValue(row.Id, out var existing))
             {
@@ -306,13 +310,13 @@ public class MainViewModel : ViewModelBase
                 if (oldIndex != i)
                     target.Move(oldIndex, i);
                 UpdateOrderProperties(existing, row);
-                DiffSizes(existing, items, verifyFiles);
+                DiffSizes(existing, items, verifyFiles, channelMap);
             }
             else
             {
                 // New item — create and insert
                 var treeItem = CreateOrderTreeItem(row);
-                BuildSizeGroups(treeItem, items, verifyFiles);
+                BuildSizeGroups(treeItem, items, verifyFiles, channelMap);
                 target.Insert(i, treeItem);
             }
         }
@@ -320,6 +324,13 @@ public class MainViewModel : ViewModelBase
         // Remove items that are no longer in the filtered/sorted set
         while (target.Count > sorted.Count)
             target.RemoveAt(target.Count - 1);
+    }
+
+    private static bool IsWithinCutoff(string? orderedAt, DateTime? cutoff)
+    {
+        if (cutoff == null) return false;
+        if (orderedAt == null) return true; // no date = assume recent
+        return DateTime.TryParse(orderedAt, out var dt) && dt >= cutoff.Value;
     }
 
     private static OrderTreeItem CreateOrderTreeItem(OrderRow order) => new()
@@ -361,18 +372,19 @@ public class MainViewModel : ViewModelBase
         int ChannelNumber, string ChannelName,
         List<HitePhoto.Shared.Models.OrderItem> Items);
 
-    private SizeGroupResult ProcessSizeGroup(IEnumerable<ItemRow> group, string sizeLabel, string mediaType, bool verifyFiles)
+    private SizeGroupResult ProcessSizeGroup(IEnumerable<ItemRow> group, string sizeLabel, string mediaType, bool verifyFiles, Dictionary<string, ChannelResult> channelMap)
     {
         int missingCount = 0;
         int printedCount = 0;
         var orderItems = new List<HitePhoto.Shared.Models.OrderItem>();
         int totalQty = 0;
-        int channelNumber = 0;
-        bool first = true;
+
+        // Resolve channel from channel_mappings (single source of truth)
+        var routingKey = OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
+        int channelNumber = channelMap.TryGetValue(routingKey, out var mapping) ? mapping.ChannelNumber : 0;
 
         foreach (var item in group)
         {
-            if (first) { channelNumber = item.ChannelNumber; first = false; }
             if (verifyFiles && !string.IsNullOrEmpty(item.ImageFilepath))
             {
                 var error = OrderHelpers.VerifyFile(item.ImageFilepath);
@@ -389,7 +401,7 @@ public class MainViewModel : ViewModelBase
                 Quantity = item.Quantity,
                 ImageFilename = item.ImageFilename,
                 ImageFilepath = item.ImageFilepath,
-                ChannelNumber = item.ChannelNumber,
+                ChannelNumber = channelNumber,
                 IsPrinted = item.IsPrinted,
                 OptionsJson = item.OptionsJson
             });
@@ -399,7 +411,7 @@ public class MainViewModel : ViewModelBase
         return new SizeGroupResult(sizeLabel, mediaType, totalQty, printedCount, missingCount, channelNumber, chName, orderItems);
     }
 
-    private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
+    private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles, Dictionary<string, ChannelResult> channelMap)
     {
         var groups = items
             .GroupBy(i => new { Size = string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel, i.MediaType })
@@ -415,7 +427,7 @@ public class MainViewModel : ViewModelBase
         for (int i = 0; i < groups.Count; i++)
         {
             var group = groups[i];
-            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.MediaType, verifyFiles);
+            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.MediaType, verifyFiles, channelMap);
             var key = $"{r.SizeLabel}|{r.MediaType}";
 
             totalImages += r.ImageCount;
@@ -466,7 +478,7 @@ public class MainViewModel : ViewModelBase
         var placeholders = string.Join(",", orderIds.Select((_, i) => $"@id{i}"));
         cmd.CommandText = $"""
             SELECT oi.order_id, oi.id, oi.size_label, oi.media_type, oi.quantity,
-                   oi.image_filename, oi.image_filepath, oi.channel_number,
+                   oi.image_filename, oi.image_filepath,
                    oi.is_noritsu, oi.is_printed, oi.options_json
             FROM order_items oi
             WHERE oi.order_id IN ({placeholders})
@@ -486,10 +498,9 @@ public class MainViewModel : ViewModelBase
                 Quantity: reader.GetInt32(4),
                 ImageFilename: reader.IsDBNull(5) ? "" : reader.GetString(5),
                 ImageFilepath: reader.IsDBNull(6) ? "" : reader.GetString(6),
-                ChannelNumber: reader.IsDBNull(7) ? 0 : reader.GetInt32(7),
-                IsNoritsu: reader.GetInt32(8) == 1,
-                IsPrinted: reader.GetInt32(9) == 1,
-                OptionsJson: reader.IsDBNull(10) ? "[]" : reader.GetString(10));
+                IsNoritsu: reader.GetInt32(7) == 1,
+                IsPrinted: reader.GetInt32(8) == 1,
+                OptionsJson: reader.IsDBNull(9) ? "[]" : reader.GetString(9));
 
             if (!result.ContainsKey(orderId))
                 result[orderId] = new List<ItemRow>();
@@ -500,7 +511,7 @@ public class MainViewModel : ViewModelBase
 
 
 
-    private void BuildSizeGroups(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
+    private void BuildSizeGroups(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles, Dictionary<string, ChannelResult> channelMap)
     {
         int totalImages = 0;
         bool hasMissing = false;
@@ -510,7 +521,7 @@ public class MainViewModel : ViewModelBase
 
         foreach (var group in groups)
         {
-            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.MediaType, verifyFiles);
+            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.MediaType, verifyFiles, channelMap);
             var sizeItem = new SizeTreeItem
             {
                 SizeLabel = r.SizeLabel, MediaType = r.MediaType,
@@ -608,7 +619,6 @@ public class MainViewModel : ViewModelBase
     {
         var routingKey = OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
         _orders.SaveChannelMapping(routingKey, channelNumber, layoutName);
-        _orders.UpdateItemChannels(sizeLabel, mediaType, channelNumber);
         _channelNamesDirty = true;
     }
 
@@ -628,7 +638,6 @@ public class MainViewModel : ViewModelBase
     {
         var routingKey = OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
         _orders.DeleteChannelMapping(routingKey);
-        _orders.UpdateItemChannels(sizeLabel, mediaType, 0);
         _channelNamesDirty = true;
     }
 
@@ -664,4 +673,4 @@ internal record OrderRow(
 internal record ItemRow(
     int Id, string SizeLabel, string MediaType, int Quantity,
     string ImageFilename, string ImageFilepath,
-    int ChannelNumber, bool IsNoritsu, bool IsPrinted, string OptionsJson);
+    bool IsNoritsu, bool IsPrinted, string OptionsJson);
