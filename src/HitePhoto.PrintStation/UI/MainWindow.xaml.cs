@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private readonly Data.CorrectionStore _correctionStore;
     private readonly IAlertRepository _alertRepo;
     private readonly Core.Services.INotificationService _notificationService;
+    private readonly Data.Repositories.IOptionDefaultsRepository _optionDefaults;
 
     private readonly System.Collections.ObjectModel.ObservableCollection<AlertItemViewModel> _sessionAlerts = new();
     private int _nextAlertId;
@@ -57,7 +58,8 @@ public partial class MainWindow : Window
 
     public MainWindow(MainViewModel vm, AppSettings settings, SettingsManager settingsManager,
         Data.Repositories.IOrderRepository orders, Data.CorrectionStore correctionStore,
-        IAlertRepository alertRepo, Core.Services.INotificationService notificationService)
+        IAlertRepository alertRepo, Core.Services.INotificationService notificationService,
+        Data.Repositories.IOptionDefaultsRepository optionDefaults)
     {
         InitializeComponent();
 
@@ -70,6 +72,7 @@ public partial class MainWindow : Window
         _correctionStore = correctionStore;
         _alertRepo = alertRepo;
         _notificationService = notificationService;
+        _optionDefaults = optionDefaults;
 
         PendingTree.ItemsSource = _vm.PendingOrders;
         PrintedTree.ItemsSource = _vm.PrintedOrders;
@@ -691,13 +694,47 @@ public partial class MainWindow : Window
                 return;
             }
 
+            var defaults = _optionDefaults.GetAll();
             OptionsList.ItemsSource = options.Select(o =>
-                string.IsNullOrEmpty(o.Key) ? o.Value : $"{o.Key}: {o.Value}").ToList();
+                new ViewModels.OptionBadge(o.Key, o.Value, defaults.Contains((o.Key, o.Value)))).ToList();
             OptionsPanel.Visibility = Visibility.Visible;
         }
-        catch
+        catch (Exception ex)
         {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to load order options",
+                detail: $"Attempted: deserialize options JSON for order {treeItem.ShortId}. " +
+                        $"Expected: list of OrderItemOption. Found: {ex.GetType().Name}: {ex.Message}. " +
+                        $"Context: LoadOrderOptions. State: OptionsJson='{firstItem.OptionsJson}'.",
+                ex: ex);
             OptionsPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OptionBadge_ToggleDefault_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem mi) return;
+        if (mi.DataContext is not ViewModels.OptionBadge badge) return;
+
+        try
+        {
+            if (badge.IsDefault)
+                _optionDefaults.RemoveDefault(badge.OptionKey, badge.OptionValue);
+            else
+                _optionDefaults.SetDefault(badge.OptionKey, badge.OptionValue);
+
+            // Rebuild the options display to reflect the change
+            if (_selectedOrderItem != null)
+                LoadOrderOptions(_selectedOrderItem);
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to toggle option default",
+                detail: $"Attempted: toggle default for '{badge.OptionKey}: {badge.OptionValue}'. " +
+                        $"Expected: row inserted/deleted in option_defaults. Found: {ex.GetType().Name}: {ex.Message}. " +
+                        $"Context: OptionBadge_ToggleDefault_Click. State: IsDefault was {badge.IsDefault}.",
+                ex: ex);
         }
     }
 

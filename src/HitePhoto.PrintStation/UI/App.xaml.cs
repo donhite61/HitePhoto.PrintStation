@@ -72,6 +72,7 @@ public partial class App : Application
         services.AddSingleton<IOrderRepository, OrderRepository>();
         services.AddSingleton<IHistoryRepository, HistoryRepository>();
         services.AddSingleton<IAlertRepository, AlertRepository>();
+        services.AddSingleton<IOptionDefaultsRepository, OptionDefaultsRepository>();
 
         // Decision makers
         services.AddSingleton<IHoldDecision, HoldDecision>();

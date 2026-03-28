@@ -505,6 +505,16 @@ public class OrderDb
                 ON alerts (category, summary, COALESCE(order_id, ''))
                 WHERE acknowledged = 0;
             """);
+
+        // Migration 006: Option defaults table — operators mark boring option values as default
+        Execute(conn, """
+            CREATE TABLE IF NOT EXISTS option_defaults (
+                option_key   TEXT NOT NULL,
+                option_value TEXT NOT NULL,
+                created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                PRIMARY KEY (option_key, option_value)
+            );
+            """);
     }
 
     private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)

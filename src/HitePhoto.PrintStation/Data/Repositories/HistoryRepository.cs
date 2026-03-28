@@ -25,6 +25,35 @@ public class HistoryRepository : IHistoryRepository
         cmd.ExecuteNonQuery();
     }
 
+    public void AddNoteIfNew(int orderId, string note, string createdBy = "")
+    {
+        using var conn = _db.OpenConnection();
+
+        // Check if the most recent note by this author already matches
+        using var check = conn.CreateCommand();
+        check.CommandText = """
+            SELECT note FROM order_history
+            WHERE order_id = @id AND created_by = @by
+            ORDER BY created_at DESC LIMIT 1
+            """;
+        check.Parameters.AddWithValue("@id", orderId);
+        check.Parameters.AddWithValue("@by", createdBy);
+        var lastNote = check.ExecuteScalar() as string;
+
+        if (string.Equals(lastNote, note, StringComparison.Ordinal))
+            return;
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO order_history (order_id, note, created_by, created_at)
+            VALUES (@id, @note, @by, datetime('now'))
+            """;
+        cmd.Parameters.AddWithValue("@id", orderId);
+        cmd.Parameters.AddWithValue("@note", note);
+        cmd.Parameters.AddWithValue("@by", createdBy);
+        cmd.ExecuteNonQuery();
+    }
+
     public List<HistoryEntry> GetNotes(int orderId)
     {
         var results = new List<HistoryEntry>();

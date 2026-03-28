@@ -128,7 +128,7 @@ public class OrderVerifier : IOrderVerifier
                 if (itemIssues.Count > 0)
                 {
                     var note = $"Verify: {itemIssues.Count} file issue(s) — {string.Join("; ", itemIssues.Take(5))}";
-                    _history.AddNote(db.Id, note, "system");
+                    _history.AddNoteIfNew(db.Id, note, "system");
                     errors += itemIssues.Count;
                 }
             }
@@ -161,7 +161,7 @@ public class OrderVerifier : IOrderVerifier
         // ── Leftover in DB list: in DB but not on disk → error state ──
         foreach (var kvp in dbList)
         {
-            _history.AddNote(kvp.Value.Id, "Verify: order folder not found on disk", "system");
+            _history.AddNoteIfNew(kvp.Value.Id, "Verify: order folder not found on disk", "system");
             AlertCollector.Error(AlertCategory.DataQuality,
                 $"Order {kvp.Key} in DB but folder missing from disk",
                 orderId: kvp.Key,
