@@ -654,23 +654,42 @@ public class PrintStationDb
         string? customerFirstName, string? customerLastName, string? customerEmail, string? customerPhone,
         decimal? totalAmount, bool isHeld, bool isTransfer, int? transferStoreId,
         string? specialInstructions, string? folderPath, int deliveryMethodId,
-        string? orderedAt, string? pixfizzJobId, string? downloadStatus)
+        string? orderedAt, string? pixfizzJobId,
+        bool isRush = false, string? paymentStatus = null,
+        bool isNotified = false, string? notifiedAt = null,
+        string? shippingFirstName = null, string? shippingLastName = null,
+        string? shippingAddress1 = null, string? shippingAddress2 = null,
+        string? shippingCity = null, string? shippingState = null,
+        string? shippingZip = null, string? shippingCountry = null,
+        string? shippingMethod = null)
     {
         const string sql = """
             INSERT INTO orders
                 (external_order_id, pickup_store_id, current_location_store_id,
                  order_source_id, order_status_id,
                  customer_first_name, customer_last_name, customer_email, customer_phone,
-                 total_amount, is_held, is_transfer, transfer_store_id,
+                 total_amount, payment_status,
+                 is_held, is_notified, notified_at,
+                 is_transfer, transfer_store_id,
                  special_instructions, folder_path, delivery_method_id,
-                 ordered_at, pixfizz_job_id, download_status, sync_status)
+                 ordered_at, pixfizz_job_id, is_rush,
+                 shipping_first_name, shipping_last_name,
+                 shipping_address1, shipping_address2, shipping_city,
+                 shipping_state, shipping_zip, shipping_country, shipping_method,
+                 sync_status)
             VALUES
                 (@Eid, @Store, @Store,
                  @SourceId, @StatusId,
                  @FirstName, @LastName, @Email, @Phone,
-                 @Total, @Held, @Transfer, @TransferStore,
+                 @Total, @PaymentStatus,
+                 @Held, @Notified, @NotifiedAt,
+                 @Transfer, @TransferStore,
                  @Instructions, @Folder, @Delivery,
-                 @OrderedAt, @PixfizzJobId, @DownloadStatus, 'synced')
+                 @OrderedAt, @PixfizzJobId, @Rush,
+                 @ShipFname, @ShipLname,
+                 @ShipAddr1, @ShipAddr2, @ShipCity,
+                 @ShipState, @ShipZip, @ShipCountry, @ShipMethod,
+                 'synced')
             ON DUPLICATE KEY UPDATE
                 order_status_id = VALUES(order_status_id),
                 customer_first_name = COALESCE(VALUES(customer_first_name), customer_first_name),
@@ -678,7 +697,10 @@ public class PrintStationDb
                 customer_email = COALESCE(VALUES(customer_email), customer_email),
                 customer_phone = COALESCE(VALUES(customer_phone), customer_phone),
                 total_amount = COALESCE(VALUES(total_amount), total_amount),
+                payment_status = COALESCE(VALUES(payment_status), payment_status),
                 is_held = VALUES(is_held),
+                is_notified = VALUES(is_notified),
+                notified_at = COALESCE(VALUES(notified_at), notified_at),
                 is_transfer = VALUES(is_transfer),
                 transfer_store_id = VALUES(transfer_store_id),
                 special_instructions = COALESCE(VALUES(special_instructions), special_instructions),
@@ -686,7 +708,16 @@ public class PrintStationDb
                 delivery_method_id = VALUES(delivery_method_id),
                 ordered_at = COALESCE(VALUES(ordered_at), ordered_at),
                 pixfizz_job_id = COALESCE(VALUES(pixfizz_job_id), pixfizz_job_id),
-                download_status = COALESCE(VALUES(download_status), download_status),
+                is_rush = VALUES(is_rush),
+                shipping_first_name = COALESCE(VALUES(shipping_first_name), shipping_first_name),
+                shipping_last_name = COALESCE(VALUES(shipping_last_name), shipping_last_name),
+                shipping_address1 = COALESCE(VALUES(shipping_address1), shipping_address1),
+                shipping_address2 = COALESCE(VALUES(shipping_address2), shipping_address2),
+                shipping_city = COALESCE(VALUES(shipping_city), shipping_city),
+                shipping_state = COALESCE(VALUES(shipping_state), shipping_state),
+                shipping_zip = COALESCE(VALUES(shipping_zip), shipping_zip),
+                shipping_country = COALESCE(VALUES(shipping_country), shipping_country),
+                shipping_method = COALESCE(VALUES(shipping_method), shipping_method),
                 sync_status = 'synced';
             SELECT LAST_INSERT_ID();
             """;
@@ -705,7 +736,10 @@ public class PrintStationDb
                 Email = customerEmail,
                 Phone = customerPhone,
                 Total = totalAmount,
+                PaymentStatus = paymentStatus,
                 Held = isHeld ? 1 : 0,
+                Notified = isNotified ? 1 : 0,
+                NotifiedAt = DateTime.TryParse(notifiedAt, out var parsedNotified) ? parsedNotified.ToString("yyyy-MM-dd HH:mm:ss") : (object?)null,
                 Transfer = isTransfer ? 1 : 0,
                 TransferStore = transferStoreId,
                 Instructions = specialInstructions,
@@ -713,7 +747,16 @@ public class PrintStationDb
                 Delivery = deliveryMethodId,
                 OrderedAt = DateTime.TryParse(orderedAt, out var parsedDate) ? parsedDate.ToString("yyyy-MM-dd HH:mm:ss") : (object?)null,
                 PixfizzJobId = pixfizzJobId,
-                DownloadStatus = downloadStatus ?? "ready",
+                Rush = isRush ? 1 : 0,
+                ShipFname = shippingFirstName,
+                ShipLname = shippingLastName,
+                ShipAddr1 = shippingAddress1,
+                ShipAddr2 = shippingAddress2,
+                ShipCity = shippingCity,
+                ShipState = shippingState,
+                ShipZip = shippingZip,
+                ShipCountry = shippingCountry,
+                ShipMethod = shippingMethod,
             });
 
             // LAST_INSERT_ID returns 0 on update — need to query by natural key

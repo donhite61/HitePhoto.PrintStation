@@ -1,5 +1,6 @@
 using System.IO;
 using Microsoft.Data.Sqlite;
+using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Core.Models;
 
@@ -110,7 +111,14 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = "UPDATE orders SET is_held = @held, updated_at = datetime('now') WHERE id = @id";
         cmd.Parameters.AddWithValue("@held", isHeld ? 1 : 0);
         cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.ExecuteNonQuery();
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"SetHold: order {orderId} not found",
+                orderId: orderId.ToString(),
+                detail: $"Attempted: UPDATE orders SET is_held={isHeld} WHERE id={orderId}. " +
+                        $"Expected: 1 row updated. Found: 0 rows. " +
+                        $"Context: isHeld={isHeld}. State: no matching order in SQLite");
     }
 
     public void SetNotified(int orderId)
@@ -119,7 +127,14 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "UPDATE orders SET is_notified = 1, updated_at = datetime('now') WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.ExecuteNonQuery();
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"SetNotified: order {orderId} not found",
+                orderId: orderId.ToString(),
+                detail: $"Attempted: UPDATE orders SET is_notified=1 WHERE id={orderId}. " +
+                        $"Expected: 1 row updated. Found: 0 rows. " +
+                        $"Context: marking order notified. State: no matching order in SQLite");
     }
 
     public void SetCurrentLocation(int orderId, int storeId)
@@ -132,7 +147,14 @@ public class OrderRepository : IOrderRepository
             """;
         cmd.Parameters.AddWithValue("@store", storeId);
         cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.ExecuteNonQuery();
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"SetCurrentLocation: order {orderId} not found",
+                orderId: orderId.ToString(),
+                detail: $"Attempted: UPDATE orders SET current_location_store_id={storeId} WHERE id={orderId}. " +
+                        $"Expected: 1 row updated. Found: 0 rows. " +
+                        $"Context: storeId={storeId}. State: no matching order in SQLite");
     }
 
     public void SetItemsPrinted(List<int> itemIds)
@@ -144,7 +166,13 @@ public class OrderRepository : IOrderRepository
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "UPDATE order_items SET is_printed = 1, updated_at = datetime('now') WHERE id = @id";
             cmd.Parameters.AddWithValue("@id", id);
-            cmd.ExecuteNonQuery();
+            var rows = cmd.ExecuteNonQuery();
+            if (rows == 0)
+                AlertCollector.Error(AlertCategory.Database,
+                    $"SetItemsPrinted: item {id} not found",
+                    detail: $"Attempted: UPDATE order_items SET is_printed=1 WHERE id={id}. " +
+                            $"Expected: 1 row updated. Found: 0 rows. " +
+                            $"Context: marking item printed. State: no matching item in SQLite");
         }
     }
 
@@ -226,7 +254,13 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@cat", category);
         cmd.Parameters.AddWithValue("@subcat", subCategory);
         cmd.Parameters.AddWithValue("@id", itemId);
-        cmd.ExecuteNonQuery();
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"UpdateItem: item {itemId} not found",
+                detail: $"Attempted: UPDATE order_items WHERE id={itemId}. " +
+                        $"Expected: 1 row updated. Found: 0 rows. " +
+                        $"Context: size={sizeLabel}, file={imageFilename}. State: no matching item in SQLite");
     }
 
     public void InsertItemOptions(int orderItemId, List<HitePhoto.Shared.Parsers.OrderItemOption> options)
@@ -272,14 +306,23 @@ public class OrderRepository : IOrderRepository
     public void InsertItem(int orderId, UnifiedOrderItem item)
     {
         using var conn = _db.OpenConnection();
+        InsertItemCore(conn, null, orderId, item, isPrinted: false);
+    }
+
+    private static void InsertItemCore(SqliteConnection conn, SqliteTransaction? transaction,
+        int orderId, UnifiedOrderItem item, bool isPrinted)
+    {
         using var cmd = conn.CreateCommand();
+        if (transaction != null) cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT INTO order_items (
                 order_id, size_label, media_type, category, sub_category,
-                quantity, image_filename, image_filepath, is_noritsu, options_json
+                quantity, image_filename, image_filepath, original_image_filepath,
+                is_noritsu, is_printed, options_json
             ) VALUES (
                 @oid, @size, @media, @cat, @subcat,
-                @qty, @fname, @fpath, @noritsu, @options
+                @qty, @fname, @fpath, @orig,
+                @noritsu, @printed, @options
             )
             """;
         cmd.Parameters.AddWithValue("@oid", orderId);
@@ -290,11 +333,21 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@qty", item.Quantity);
         cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
         cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
+        cmd.Parameters.AddWithValue("@orig", item.OriginalImageFilepath ?? item.ImageFilepath ?? "");
         cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
+        cmd.Parameters.AddWithValue("@printed", isPrinted ? 1 : 0);
         cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
             ? System.Text.Json.JsonSerializer.Serialize(item.Options)
             : "[]");
-        cmd.ExecuteNonQuery();
+        var rows = cmd.ExecuteNonQuery();
+        if (rows != 1)
+            AlertCollector.Error(AlertCategory.Database,
+                $"InsertItemCore: expected 1 row inserted, got {rows}",
+                orderId: orderId.ToString(),
+                detail: $"Attempted: INSERT order_items for order {orderId}, file {item.ImageFilename}. " +
+                        $"Expected: 1 row inserted. Found: {rows} rows. " +
+                        $"Context: size={item.SizeLabel}, qty={item.Quantity}. " +
+                        $"State: isPrinted={isPrinted}");
     }
 
     public void ReplaceItems(int orderId, List<UnifiedOrderItem> items)
@@ -330,31 +383,7 @@ public class OrderRepository : IOrderRepository
         {
             var key = $"{item.SizeLabel}|{Path.GetFileNameWithoutExtension(item.ImageFilename)}";
             printedState.TryGetValue(key, out var wasPrinted);
-
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO order_items (
-                    order_id, size_label, media_type, category, sub_category,
-                    quantity, image_filename, image_filepath, is_noritsu, is_printed, options_json
-                ) VALUES (
-                    @oid, @size, @media, @cat, @subcat,
-                    @qty, @fname, @fpath, @noritsu, @printed, @options
-                )
-                """;
-            cmd.Parameters.AddWithValue("@oid", orderId);
-            cmd.Parameters.AddWithValue("@size", item.SizeLabel ?? "");
-            cmd.Parameters.AddWithValue("@media", item.MediaType ?? "");
-            cmd.Parameters.AddWithValue("@cat", item.Options.FirstOrDefault(o => o.Key == "Category")?.Value ?? "");
-            cmd.Parameters.AddWithValue("@subcat", item.Options.FirstOrDefault(o => o.Key == "SubCategory")?.Value ?? "");
-            cmd.Parameters.AddWithValue("@qty", item.Quantity);
-            cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
-            cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
-            cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
-            cmd.Parameters.AddWithValue("@printed", wasPrinted ? 1 : 0);
-            cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
-                ? System.Text.Json.JsonSerializer.Serialize(item.Options)
-                : "[]");
-            cmd.ExecuteNonQuery();
+            InsertItemCore(conn, transaction, orderId, item, isPrinted: wasPrinted);
         }
 
         transaction.Commit();
@@ -458,32 +487,7 @@ public class OrderRepository : IOrderRepository
 
         foreach (var item in order.Items)
         {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO order_items (
-                    order_id, size_label, media_type, category, sub_category,
-                    quantity, image_filename, image_filepath, original_image_filepath,
-                    is_noritsu, options_json
-                ) VALUES (
-                    @oid, @size, @media, @cat, @subcat,
-                    @qty, @fname, @fpath, @orig,
-                    @noritsu, @options
-                )
-                """;
-            cmd.Parameters.AddWithValue("@oid", orderId);
-            cmd.Parameters.AddWithValue("@size", item.SizeLabel ?? "");
-            cmd.Parameters.AddWithValue("@media", item.MediaType ?? "");
-            cmd.Parameters.AddWithValue("@cat", item.Options.FirstOrDefault(o => o.Key == "Category")?.Value ?? "");
-            cmd.Parameters.AddWithValue("@subcat", item.Options.FirstOrDefault(o => o.Key == "SubCategory")?.Value ?? "");
-            cmd.Parameters.AddWithValue("@qty", item.Quantity);
-            cmd.Parameters.AddWithValue("@fname", item.ImageFilename ?? "");
-            cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
-            cmd.Parameters.AddWithValue("@orig", item.OriginalImageFilepath ?? item.ImageFilepath ?? "");
-            cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
-            cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
-                ? System.Text.Json.JsonSerializer.Serialize(item.Options)
-                : "[]");
-            cmd.ExecuteNonQuery();
+            InsertItemCore(conn, transaction, orderId, item, isPrinted: false);
         }
 
         transaction.Commit();
@@ -527,7 +531,14 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = "UPDATE orders SET status_code = @status, updated_at = datetime('now') WHERE id = @id";
         cmd.Parameters.AddWithValue("@status", statusCode);
         cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.ExecuteNonQuery();
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"UpdateOrderStatus: order {orderId} not found",
+                orderId: orderId.ToString(),
+                detail: $"Attempted: UPDATE orders SET status_code='{statusCode}' WHERE id={orderId}. " +
+                        $"Expected: 1 row updated. Found: 0 rows. " +
+                        $"Context: statusCode={statusCode}. State: no matching order in SQLite");
     }
 
     public void SaveChannelMapping(string routingKey, int channelNumber, string? layoutName = null)
@@ -594,6 +605,138 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "UPDATE orders SET is_received_pushed = 1 WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.ExecuteNonQuery();
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"MarkReceivedPushed: order {orderId} not found",
+                orderId: orderId.ToString(),
+                detail: $"Attempted: UPDATE orders SET is_received_pushed=1 WHERE id={orderId}. " +
+                        $"Expected: 1 row updated. Found: 0 rows. " +
+                        $"Context: marking Pixfizz /received pushed. State: no matching order in SQLite");
+    }
+
+    public List<OrderRow> LoadOrdersWithStatus(int storeId, params string[] statusCodes)
+    {
+        var results = new List<OrderRow>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+
+        var placeholders = string.Join(",", statusCodes.Select((_, i) => $"@s{i}"));
+        cmd.CommandText = $"""
+            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
+                   o.customer_first_name, o.customer_last_name,
+                   o.customer_email, o.customer_phone,
+                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
+                   o.folder_path, o.special_instructions, o.download_status,
+                   s.short_name AS store_name
+            FROM orders o
+            LEFT JOIN stores s ON s.id = o.pickup_store_id
+            WHERE o.pickup_store_id = @storeId
+              AND o.status_code IN ({placeholders})
+              AND o.is_test = 0
+            ORDER BY o.ordered_at DESC
+            """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
+        for (int i = 0; i < statusCodes.Length; i++)
+            cmd.Parameters.AddWithValue($"@s{i}", statusCodes[i]);
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add(ReadOrderRow(reader));
+
+        return results;
+    }
+
+    public List<OrderRow> LoadOtherStoreOrders(int storeId)
+    {
+        var results = new List<OrderRow>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
+                   o.customer_first_name, o.customer_last_name,
+                   o.customer_email, o.customer_phone,
+                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
+                   o.folder_path, o.special_instructions, o.download_status,
+                   s.short_name AS store_name
+            FROM orders o
+            LEFT JOIN stores s ON s.id = o.pickup_store_id
+            WHERE o.pickup_store_id != @storeId
+              AND o.status_code NOT IN (@excl0, @excl1)
+              AND o.is_test = 0
+            ORDER BY o.ordered_at DESC
+            """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
+        cmd.Parameters.AddWithValue("@excl0", OrderStatusCode.PickedUp);
+        cmd.Parameters.AddWithValue("@excl1", OrderStatusCode.Cancelled);
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add(ReadOrderRow(reader));
+
+        return results;
+    }
+
+    public Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds)
+    {
+        var result = new Dictionary<int, List<ItemRow>>();
+        if (orderIds.Count == 0) return result;
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+
+        var placeholders = string.Join(",", orderIds.Select((_, i) => $"@id{i}"));
+        cmd.CommandText = $"""
+            SELECT oi.order_id, oi.id, oi.size_label, oi.media_type, oi.quantity,
+                   oi.image_filename, oi.image_filepath,
+                   oi.is_noritsu, oi.is_printed, oi.options_json
+            FROM order_items oi
+            WHERE oi.order_id IN ({placeholders})
+            ORDER BY oi.order_id, oi.size_label, oi.media_type
+            """;
+        for (int i = 0; i < orderIds.Count; i++)
+            cmd.Parameters.AddWithValue($"@id{i}", orderIds[i]);
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var orderId = reader.GetInt32(reader.GetOrdinal("order_id"));
+            var item = new ItemRow(
+                Id: reader.GetInt32(reader.GetOrdinal("id")),
+                SizeLabel: reader.IsDBNull(reader.GetOrdinal("size_label")) ? "" : reader.GetString(reader.GetOrdinal("size_label")),
+                MediaType: reader.IsDBNull(reader.GetOrdinal("media_type")) ? "" : reader.GetString(reader.GetOrdinal("media_type")),
+                Quantity: reader.GetInt32(reader.GetOrdinal("quantity")),
+                ImageFilename: reader.IsDBNull(reader.GetOrdinal("image_filename")) ? "" : reader.GetString(reader.GetOrdinal("image_filename")),
+                ImageFilepath: reader.IsDBNull(reader.GetOrdinal("image_filepath")) ? "" : reader.GetString(reader.GetOrdinal("image_filepath")),
+                IsNoritsu: reader.GetInt32(reader.GetOrdinal("is_noritsu")) == 1,
+                IsPrinted: reader.GetInt32(reader.GetOrdinal("is_printed")) == 1,
+                OptionsJson: reader.IsDBNull(reader.GetOrdinal("options_json")) ? "[]" : reader.GetString(reader.GetOrdinal("options_json")));
+
+            if (!result.ContainsKey(orderId))
+                result[orderId] = new List<ItemRow>();
+            result[orderId].Add(item);
+        }
+        return result;
+    }
+
+    private static OrderRow ReadOrderRow(SqliteDataReader reader)
+    {
+        return new OrderRow(
+            Id: reader.GetInt32(reader.GetOrdinal("id")),
+            ExternalOrderId: reader.GetString(reader.GetOrdinal("external_order_id")),
+            SourceCode: reader.IsDBNull(reader.GetOrdinal("source_code")) ? "" : reader.GetString(reader.GetOrdinal("source_code")),
+            StatusCode: reader.IsDBNull(reader.GetOrdinal("status_code")) ? "" : reader.GetString(reader.GetOrdinal("status_code")),
+            CustomerFirstName: reader.IsDBNull(reader.GetOrdinal("customer_first_name")) ? "" : reader.GetString(reader.GetOrdinal("customer_first_name")),
+            CustomerLastName: reader.IsDBNull(reader.GetOrdinal("customer_last_name")) ? "" : reader.GetString(reader.GetOrdinal("customer_last_name")),
+            CustomerEmail: reader.IsDBNull(reader.GetOrdinal("customer_email")) ? "" : reader.GetString(reader.GetOrdinal("customer_email")),
+            CustomerPhone: reader.IsDBNull(reader.GetOrdinal("customer_phone")) ? "" : reader.GetString(reader.GetOrdinal("customer_phone")),
+            OrderedAt: reader.IsDBNull(reader.GetOrdinal("ordered_at")) ? null : reader.GetString(reader.GetOrdinal("ordered_at")),
+            TotalAmount: reader.IsDBNull(reader.GetOrdinal("total_amount")) ? 0 : reader.GetDecimal(reader.GetOrdinal("total_amount")),
+            IsHeld: reader.GetInt32(reader.GetOrdinal("is_held")) == 1,
+            IsTransfer: reader.GetInt32(reader.GetOrdinal("is_transfer")) == 1,
+            FolderPath: reader.IsDBNull(reader.GetOrdinal("folder_path")) ? "" : reader.GetString(reader.GetOrdinal("folder_path")),
+            SpecialInstructions: reader.IsDBNull(reader.GetOrdinal("special_instructions")) ? "" : reader.GetString(reader.GetOrdinal("special_instructions")),
+            DownloadStatus: reader.IsDBNull(reader.GetOrdinal("download_status")) ? "" : reader.GetString(reader.GetOrdinal("download_status")),
+            StoreName: reader.IsDBNull(reader.GetOrdinal("store_name")) ? "" : reader.GetString(reader.GetOrdinal("store_name")));
     }
 }

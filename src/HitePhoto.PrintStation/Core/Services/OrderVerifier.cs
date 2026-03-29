@@ -83,7 +83,18 @@ public class OrderVerifier : IOrderVerifier
 
             OrderSource source;
             try { source = OrderSourceExtensions.FromCode(db.SourceCode); }
-            catch { folderList.Remove(orderId); dbList.Remove(orderId); matchCount++; continue; }
+            catch (Exception ex)
+            {
+                AlertCollector.Error(AlertCategory.DataQuality,
+                    $"Verify: unrecognized source code '{db.SourceCode}' for order {orderId}",
+                    orderId: orderId,
+                    detail: $"Attempted: parse source code '{db.SourceCode}'. " +
+                            $"Expected: pixfizz, dakis, or dashboard. Found: '{db.SourceCode}'. " +
+                            $"Context: order {orderId} (db id={db.Id}). " +
+                            $"State: skipping order verification",
+                    ex: ex);
+                folderList.Remove(orderId); dbList.Remove(orderId); matchCount++; continue;
+            }
 
             bool filesRequired = _filesNeededDecision.AreFilesRequired(source, _settings.StoreId, _settings.StoreId);
 
@@ -362,7 +373,10 @@ public class OrderVerifier : IOrderVerifier
                         }
                     }
                 }
-                catch { /* use folder name as fallback */ }
+                catch (Exception ex)
+                {
+                    AppLog.Info($"Verify: TXT parse failed for {txtPath}, using folder name as fallback: {ex.Message}");
+                }
             }
             else if (source == "dakis")
             {

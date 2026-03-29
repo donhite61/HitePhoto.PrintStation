@@ -83,7 +83,30 @@ public interface IOrderRepository
 
     /// <summary>Mark a Pixfizz order as received-pushed.</summary>
     void MarkReceivedPushed(int orderId);
+
+    /// <summary>Load orders for a store matching any of the given status codes.</summary>
+    List<OrderRow> LoadOrdersWithStatus(int storeId, params string[] statusCodes);
+
+    /// <summary>Load orders belonging to other stores (excludes picked_up, cancelled).</summary>
+    List<OrderRow> LoadOtherStoreOrders(int storeId);
+
+    /// <summary>Batch-load items for multiple orders. Keyed by order ID.</summary>
+    Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds);
 }
+
+public record OrderRow(
+    int Id, string ExternalOrderId, string SourceCode, string StatusCode,
+    string CustomerFirstName, string CustomerLastName,
+    string CustomerEmail, string CustomerPhone,
+    string? OrderedAt, decimal TotalAmount,
+    bool IsHeld, bool IsTransfer,
+    string FolderPath, string SpecialInstructions, string DownloadStatus,
+    string StoreName);
+
+public record ItemRow(
+    int Id, string SizeLabel, string MediaType, int Quantity,
+    string ImageFilename, string ImageFilepath,
+    bool IsNoritsu, bool IsPrinted, string OptionsJson);
 
 public record OrderRecord(
     int Id,
