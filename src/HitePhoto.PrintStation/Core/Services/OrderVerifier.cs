@@ -101,11 +101,18 @@ public class OrderVerifier : IOrderVerifier
             if (filesRequired)
             {
                 // Verify files on disk using OrderHelpers.VerifyFile (the ONE verification function)
+                // Write results to file_status column so the tree can read without disk I/O
                 var dbItems = _orders.GetItems(db.Id);
                 var itemIssues = new List<string>();
+                var statusUpdates = new List<(int ItemId, int Status)>();
+
                 foreach (var item in dbItems)
                 {
-                    if (string.IsNullOrWhiteSpace(item.ImageFilepath)) continue;
+                    if (string.IsNullOrWhiteSpace(item.ImageFilepath))
+                    {
+                        statusUpdates.Add((item.Id, 1)); // no file expected = OK
+                        continue;
+                    }
                     var error = OrderHelpers.VerifyFile(item.ImageFilepath);
                     if (error != null)
                     {
@@ -113,8 +120,15 @@ public class OrderVerifier : IOrderVerifier
                             ? Path.GetFileName(item.ImageFilepath)
                             : item.ImageFilename;
                         itemIssues.Add($"{filename}: {error}");
+                        statusUpdates.Add((item.Id, -1)); // error
+                    }
+                    else
+                    {
+                        statusUpdates.Add((item.Id, 1)); // OK
                     }
                 }
+
+                _orders.BatchUpdateFileStatus(statusUpdates);
 
                 // Source-specific repair: reread source file and compare with DB
                 if (source == OrderSource.Pixfizz)

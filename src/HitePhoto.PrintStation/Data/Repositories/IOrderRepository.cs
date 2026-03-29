@@ -84,8 +84,17 @@ public interface IOrderRepository
     /// <summary>Mark a Pixfizz order as received-pushed.</summary>
     void MarkReceivedPushed(int orderId);
 
-    /// <summary>Load orders for a store matching any of the given status codes.</summary>
-    List<OrderRow> LoadOrdersWithStatus(int storeId, params string[] statusCodes);
+    /// <summary>Set all items on an order to unprinted.</summary>
+    void SetItemsUnprinted(int orderId);
+
+    /// <summary>Batch update file_status on order_items. 0=unchecked, 1=OK, -1=error.</summary>
+    void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates);
+
+    /// <summary>Load orders that have at least one unprinted item.</summary>
+    List<OrderRow> LoadPendingOrders(int storeId);
+
+    /// <summary>Load orders where all items are printed.</summary>
+    List<OrderRow> LoadPrintedOrders(int storeId);
 
     /// <summary>Load orders belonging to other stores (excludes picked_up, cancelled).</summary>
     List<OrderRow> LoadOtherStoreOrders(int storeId);
@@ -106,7 +115,8 @@ public record OrderRow(
 public record ItemRow(
     int Id, string SizeLabel, string MediaType, int Quantity,
     string ImageFilename, string ImageFilepath,
-    bool IsNoritsu, bool IsPrinted, string OptionsJson);
+    bool IsNoritsu, bool IsPrinted, string OptionsJson,
+    int FileStatus = 0);
 
 public record OrderRecord(
     int Id,

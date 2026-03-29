@@ -171,8 +171,8 @@ public class MainViewModel : ViewModelBase
 
             var channelMap = _channelDecision.ResolveAll();
 
-            var pending = _orders.LoadOrdersWithStatus(_settings.StoreId, OrderStatusCode.New, OrderStatusCode.InProgress);
-            var printed = _orders.LoadOrdersWithStatus(_settings.StoreId, OrderStatusCode.Ready, OrderStatusCode.Notified, OrderStatusCode.PickedUp);
+            var pending = _orders.LoadPendingOrders(_settings.StoreId);
+            var printed = _orders.LoadPrintedOrders(_settings.StoreId);
             var otherStore = _orders.LoadOtherStoreOrders(_settings.StoreId);
 
             DiffAndPatch(PendingOrders, pending, channelMap);
@@ -223,29 +223,25 @@ public class MainViewModel : ViewModelBase
 
             if (i < target.Count && target[i].DbId == row.Id)
             {
-                // Same item at same position — update in place
                 UpdateOrderProperties(target[i], row);
-                DiffSizes(target[i], items, true, channelMap);
+                DiffSizes(target[i], items, channelMap);
             }
             else if (existingByDbId.TryGetValue(row.Id, out var existing))
             {
-                // Item exists but at wrong position — move it
                 int oldIndex = target.IndexOf(existing);
                 if (oldIndex != i)
                     target.Move(oldIndex, i);
                 UpdateOrderProperties(existing, row);
-                DiffSizes(existing, items, true, channelMap);
+                DiffSizes(existing, items, channelMap);
             }
             else
             {
-                // New item — create and insert
                 var treeItem = CreateOrderTreeItem(row);
-                BuildSizeGroups(treeItem, items, true, channelMap);
+                BuildSizeGroups(treeItem, items, channelMap);
                 target.Insert(i, treeItem);
             }
         }
 
-        // Remove items that are no longer in the filtered/sorted set
         while (target.Count > sorted.Count)
             target.RemoveAt(target.Count - 1);
     }
@@ -289,7 +285,7 @@ public class MainViewModel : ViewModelBase
         int ChannelNumber, string ChannelName,
         List<HitePhoto.Shared.Models.OrderItem> Items);
 
-    private SizeGroupResult ProcessSizeGroup(IEnumerable<ItemRow> group, string sizeLabel, string mediaType, bool verifyFiles, Dictionary<string, ChannelResult> channelMap)
+    private SizeGroupResult ProcessSizeGroup(IEnumerable<ItemRow> group, string sizeLabel, string mediaType, Dictionary<string, ChannelResult> channelMap)
     {
         int missingCount = 0;
         int printedCount = 0;
@@ -302,11 +298,8 @@ public class MainViewModel : ViewModelBase
 
         foreach (var item in group)
         {
-            if (verifyFiles && !string.IsNullOrEmpty(item.ImageFilepath))
-            {
-                var error = OrderHelpers.VerifyFile(item.ImageFilepath);
-                if (error != null) missingCount++;
-            }
+            // Read file_status from DB — written by OrderVerifier, no disk I/O here
+            if (item.FileStatus == -1) missingCount++;
             if (item.IsPrinted) printedCount += item.Quantity;
             totalQty += item.Quantity;
 
@@ -331,7 +324,7 @@ public class MainViewModel : ViewModelBase
     private static IList<IGrouping<string, ItemRow>> GroupBySize(List<ItemRow> items) =>
         items.GroupBy(i => string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel).ToList();
 
-    private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles, Dictionary<string, ChannelResult> channelMap)
+    private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items, Dictionary<string, ChannelResult> channelMap)
     {
         var groups = GroupBySize(items);
 
@@ -345,7 +338,7 @@ public class MainViewModel : ViewModelBase
         for (int i = 0; i < groups.Count; i++)
         {
             var group = groups[i];
-            var r = ProcessSizeGroup(group, group.Key, "", verifyFiles, channelMap);
+            var r = ProcessSizeGroup(group, group.Key, "", channelMap);
             var key = r.SizeLabel;
 
             totalImages += r.ImageCount;
@@ -385,7 +378,7 @@ public class MainViewModel : ViewModelBase
         treeItem.HasUnmapped = treeItem.Sizes.Any(s => s.IsUnmapped);
     }
 
-    private void BuildSizeGroups(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles, Dictionary<string, ChannelResult> channelMap)
+    private void BuildSizeGroups(OrderTreeItem treeItem, List<ItemRow> items, Dictionary<string, ChannelResult> channelMap)
     {
         int totalImages = 0;
         bool hasMissing = false;
@@ -394,7 +387,7 @@ public class MainViewModel : ViewModelBase
 
         foreach (var group in groups)
         {
-            var r = ProcessSizeGroup(group, group.Key, "", verifyFiles, channelMap);
+            var r = ProcessSizeGroup(group, group.Key, "", channelMap);
             var sizeItem = new SizeTreeItem
             {
                 SizeLabel = r.SizeLabel, MediaType = r.MediaType,
@@ -497,13 +490,16 @@ public class MainViewModel : ViewModelBase
 
     public void MarkDone(int orderId)
     {
-        _orders.UpdateOrderStatus(orderId, OrderStatusCode.PickedUp);
+        var items = _orders.GetItems(orderId);
+        var unprintedIds = items.Where(i => !i.IsPrinted).Select(i => i.Id).ToList();
+        if (unprintedIds.Count > 0)
+            _orders.SetItemsPrinted(unprintedIds);
         _history.AddNote(orderId, "Marked done by operator", "operator");
     }
 
     public void MarkUnprinted(int orderId)
     {
-        _orders.UpdateOrderStatus(orderId, OrderStatusCode.New);
+        _orders.SetItemsUnprinted(orderId);
         _history.AddNote(orderId, "Marked unprinted by operator", "operator");
     }
 

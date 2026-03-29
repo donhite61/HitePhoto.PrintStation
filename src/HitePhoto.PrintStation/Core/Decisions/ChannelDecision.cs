@@ -40,7 +40,7 @@ public class ChannelDecision : IChannelDecision
 
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT routing_key, channel_number, layout_name FROM channel_mappings WHERE channel_number > 0";
+        cmd.CommandText = "SELECT routing_key, channel_number, layout_name FROM channel_mappings WHERE channel_number != 0";
 
         using var reader = cmd.ExecuteReader();
         while (reader.Read())

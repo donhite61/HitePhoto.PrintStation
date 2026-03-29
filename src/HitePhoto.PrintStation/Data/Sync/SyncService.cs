@@ -585,14 +585,15 @@ public class SyncService : ISyncService
 
         if (existingId != null)
         {
-            // Update existing item
+            // Update existing item — never downgrade is_printed (local printed state wins)
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 UPDATE order_items SET
                     quantity = @qty, image_filepath = @fpath,
                     original_image_filepath = @orig,
                     options_json = @options,
-                    is_printed = @printed, updated_at = datetime('now')
+                    is_printed = MAX(is_printed, @printed),
+                    updated_at = datetime('now')
                 WHERE id = @id
                 """;
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);

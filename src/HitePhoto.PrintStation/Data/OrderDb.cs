@@ -541,6 +541,10 @@ public class OrderDb
         // Migration 009: Drop channel_number from order_items — channel_mappings is sole authority.
         // SQLite 3.35.0+ supports ALTER TABLE DROP COLUMN (our min version is 3.46+).
         DropColumnIfExists(conn, "order_items", "channel_number");
+
+        // Migration 010: file_status on order_items — verify writes, tree reads.
+        // 0 = unchecked, 1 = OK, -1 = error (missing/invalid file)
+        AddColumnIfMissing(conn, "order_items", "file_status", "INTEGER NOT NULL DEFAULT 0");
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)

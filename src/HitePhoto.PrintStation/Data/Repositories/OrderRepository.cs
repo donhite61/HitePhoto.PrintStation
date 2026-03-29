@@ -176,6 +176,15 @@ public class OrderRepository : IOrderRepository
         }
     }
 
+    public void SetItemsUnprinted(int orderId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE order_items SET is_printed = 0, updated_at = datetime('now') WHERE order_id = @oid";
+        cmd.Parameters.AddWithValue("@oid", orderId);
+        cmd.ExecuteNonQuery();
+    }
+
     public string GetStoreName(int storeId)
     {
         using var conn = _db.OpenConnection();
@@ -615,14 +624,12 @@ public class OrderRepository : IOrderRepository
                         $"Context: marking Pixfizz /received pushed. State: no matching order in SQLite");
     }
 
-    public List<OrderRow> LoadOrdersWithStatus(int storeId, params string[] statusCodes)
+    public List<OrderRow> LoadPendingOrders(int storeId)
     {
         var results = new List<OrderRow>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-
-        var placeholders = string.Join(",", statusCodes.Select((_, i) => $"@s{i}"));
-        cmd.CommandText = $"""
+        cmd.CommandText = """
             SELECT o.id, o.external_order_id, o.source_code, o.status_code,
                    o.customer_first_name, o.customer_last_name,
                    o.customer_email, o.customer_phone,
@@ -632,13 +639,49 @@ public class OrderRepository : IOrderRepository
             FROM orders o
             LEFT JOIN stores s ON s.id = o.pickup_store_id
             WHERE o.pickup_store_id = @storeId
-              AND o.status_code IN ({placeholders})
               AND o.is_test = 0
+              AND EXISTS (
+                  SELECT 1 FROM order_items i
+                  WHERE i.order_id = o.id AND i.is_printed = 0
+              )
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
-        for (int i = 0; i < statusCodes.Length; i++)
-            cmd.Parameters.AddWithValue($"@s{i}", statusCodes[i]);
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add(ReadOrderRow(reader));
+
+        return results;
+    }
+
+    public List<OrderRow> LoadPrintedOrders(int storeId)
+    {
+        var results = new List<OrderRow>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
+                   o.customer_first_name, o.customer_last_name,
+                   o.customer_email, o.customer_phone,
+                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
+                   o.folder_path, o.special_instructions, o.download_status,
+                   s.short_name AS store_name
+            FROM orders o
+            LEFT JOIN stores s ON s.id = o.pickup_store_id
+            WHERE o.pickup_store_id = @storeId
+              AND o.is_test = 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM order_items i
+                  WHERE i.order_id = o.id AND i.is_printed = 0
+              )
+              AND EXISTS (
+                  SELECT 1 FROM order_items i
+                  WHERE i.order_id = o.id
+              )
+            ORDER BY o.ordered_at DESC
+            """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
 
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
@@ -662,13 +705,10 @@ public class OrderRepository : IOrderRepository
             FROM orders o
             LEFT JOIN stores s ON s.id = o.pickup_store_id
             WHERE o.pickup_store_id != @storeId
-              AND o.status_code NOT IN (@excl0, @excl1)
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
-        cmd.Parameters.AddWithValue("@excl0", OrderStatusCode.PickedUp);
-        cmd.Parameters.AddWithValue("@excl1", OrderStatusCode.Cancelled);
 
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
@@ -689,7 +729,7 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = $"""
             SELECT oi.order_id, oi.id, oi.size_label, oi.media_type, oi.quantity,
                    oi.image_filename, oi.image_filepath,
-                   oi.is_noritsu, oi.is_printed, oi.options_json
+                   oi.is_noritsu, oi.is_printed, oi.options_json, oi.file_status
             FROM order_items oi
             WHERE oi.order_id IN ({placeholders})
             ORDER BY oi.order_id, oi.size_label, oi.media_type
@@ -710,7 +750,8 @@ public class OrderRepository : IOrderRepository
                 ImageFilepath: reader.IsDBNull(reader.GetOrdinal("image_filepath")) ? "" : reader.GetString(reader.GetOrdinal("image_filepath")),
                 IsNoritsu: reader.GetInt32(reader.GetOrdinal("is_noritsu")) == 1,
                 IsPrinted: reader.GetInt32(reader.GetOrdinal("is_printed")) == 1,
-                OptionsJson: reader.IsDBNull(reader.GetOrdinal("options_json")) ? "[]" : reader.GetString(reader.GetOrdinal("options_json")));
+                OptionsJson: reader.IsDBNull(reader.GetOrdinal("options_json")) ? "[]" : reader.GetString(reader.GetOrdinal("options_json")),
+                FileStatus: reader.GetInt32(reader.GetOrdinal("file_status")));
 
             if (!result.ContainsKey(orderId))
                 result[orderId] = new List<ItemRow>();
@@ -738,5 +779,19 @@ public class OrderRepository : IOrderRepository
             SpecialInstructions: reader.IsDBNull(reader.GetOrdinal("special_instructions")) ? "" : reader.GetString(reader.GetOrdinal("special_instructions")),
             DownloadStatus: reader.IsDBNull(reader.GetOrdinal("download_status")) ? "" : reader.GetString(reader.GetOrdinal("download_status")),
             StoreName: reader.IsDBNull(reader.GetOrdinal("store_name")) ? "" : reader.GetString(reader.GetOrdinal("store_name")));
+    }
+
+    public void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates)
+    {
+        if (updates.Count == 0) return;
+        using var conn = _db.OpenConnection();
+        foreach (var (itemId, status) in updates)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE order_items SET file_status = @status WHERE id = @id";
+            cmd.Parameters.AddWithValue("@status", status);
+            cmd.Parameters.AddWithValue("@id", itemId);
+            cmd.ExecuteNonQuery();
+        }
     }
 }

@@ -114,7 +114,10 @@ public class SyncingOrderRepository : IOrderRepository
     public string? GetLayoutName(string routingKey) => _inner.GetLayoutName(routingKey);
     public List<(int Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff) => _inner.GetUnreceivedPixfizzOrders(cutoff);
     public void MarkReceivedPushed(int orderId) => _inner.MarkReceivedPushed(orderId);
-    public List<OrderRow> LoadOrdersWithStatus(int storeId, params string[] statusCodes) => _inner.LoadOrdersWithStatus(storeId, statusCodes);
+    public List<OrderRow> LoadPendingOrders(int storeId) => _inner.LoadPendingOrders(storeId);
+    public List<OrderRow> LoadPrintedOrders(int storeId) => _inner.LoadPrintedOrders(storeId);
     public List<OrderRow> LoadOtherStoreOrders(int storeId) => _inner.LoadOtherStoreOrders(storeId);
     public Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds) => _inner.BatchLoadItems(orderIds);
+    public void SetItemsUnprinted(int orderId) => _inner.SetItemsUnprinted(orderId);
+    public void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates) => _inner.BatchUpdateFileStatus(updates);
 }
