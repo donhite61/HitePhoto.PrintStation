@@ -96,7 +96,7 @@ public class SyncService : ISyncService
                 var orderId = payload["orderId"].GetInt32();
                 var remoteId = await ResolveRemoteOrderIdAsync(orderId);
                 if (remoteId == null) return false;
-                return await _remoteDb.UpdateOrderStatusAsync(remoteId.Value, SyncMapper.StatusCodeToStatusId("notified"));
+                return await _remoteDb.UpdateOrderStatusAsync(remoteId.Value, 5); // notified
             }
 
             case "set_items_printed":
@@ -105,19 +105,10 @@ public class SyncService : ISyncService
                 var itemIds = payload["itemIds"].Deserialize<List<int>>()!;
                 var remoteId = await ResolveRemoteOrderIdAsync(orderId);
                 if (remoteId == null) return false;
-                var failures = 0;
+                // Mark each item as printed — need to push full item state
                 foreach (var localItemId in itemIds)
-                {
-                    var ok = await _remoteDb.UpdateItemPrintedAsync(localItemId, DateTime.Now);
-                    if (!ok) failures++;
-                }
-                if (failures > 0)
-                    AlertCollector.Error(AlertCategory.Database,
-                        $"set_items_printed: {failures}/{itemIds.Count} items failed",
-                        detail: $"Attempted: mark {itemIds.Count} items printed on MariaDB order {remoteId}. " +
-                                $"Expected: all items updated. Found: {failures} failures. " +
-                                $"Context: sync push. State: partial update");
-                return failures == 0;
+                    await _remoteDb.UpdateItemPrintedAsync(localItemId, DateTime.Now);
+                return true;
             }
 
             case "set_current_location":
@@ -137,10 +128,7 @@ public class SyncService : ISyncService
             }
 
             default:
-                AlertCollector.Error(AlertCategory.Database,
-                    $"Unknown sync push operation '{operation}'",
-                    detail: $"Attempted: process outbox entry. Expected: known operation (upsert_order, add_note). " +
-                            $"Found: '{operation}'. Context: sync push. State: entry skipped.");
+                AppLog.Warn($"SyncService: unknown push operation '{operation}'");
                 return true; // don't re-queue unknown ops
         }
     }
@@ -157,11 +145,7 @@ public class SyncService : ISyncService
                    customer_first_name, customer_last_name, customer_email, customer_phone,
                    total_amount, is_held, is_transfer, transfer_store_id,
                    special_instructions, folder_path, delivery_method_id,
-                   ordered_at, pixfizz_job_id, source_code,
-                   is_rush, payment_status, is_notified, notified_at,
-                   shipping_first_name, shipping_last_name,
-                   shipping_address1, shipping_address2, shipping_city,
-                   shipping_state, shipping_zip, shipping_country, shipping_method
+                   ordered_at, pixfizz_job_id, download_status, source_code
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", localOrderId);
@@ -170,43 +154,27 @@ public class SyncService : ISyncService
 
         var externalOrderId = reader.GetString(0);
         var pickupStoreId = reader.GetInt32(1);
-        var sourceCode = reader.IsDBNull(17) ? "pixfizz" : reader.GetString(17);
+        var sourceCode = reader.IsDBNull(18) ? "pixfizz" : reader.GetString(18);
         var orderSourceId = SyncMapper.SourceCodeToSourceId(sourceCode);
-
-        string? ReadNullableString(int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
-        int? ReadNullableInt(int i) => reader.IsDBNull(i) ? null : reader.GetInt32(i);
 
         var remoteId = await _remoteDb.UpsertOrderAsync(
             externalOrderId: externalOrderId,
             pickupStoreId: pickupStoreId,
             orderSourceId: orderSourceId,
             orderStatusId: reader.GetInt32(3),
-            customerFirstName: ReadNullableString(4),
-            customerLastName: ReadNullableString(5),
-            customerEmail: ReadNullableString(6),
-            customerPhone: ReadNullableString(7),
+            customerFirstName: reader.IsDBNull(4) ? null : reader.GetString(4),
+            customerLastName: reader.IsDBNull(5) ? null : reader.GetString(5),
+            customerEmail: reader.IsDBNull(6) ? null : reader.GetString(6),
+            customerPhone: reader.IsDBNull(7) ? null : reader.GetString(7),
             totalAmount: reader.IsDBNull(8) ? null : (decimal?)reader.GetDouble(8),
             isHeld: reader.GetInt32(9) == 1,
             isTransfer: reader.GetInt32(10) == 1,
-            transferStoreId: ReadNullableInt(11),
-            specialInstructions: ReadNullableString(12),
-            folderPath: ReadNullableString(13),
+            transferStoreId: reader.IsDBNull(11) ? null : reader.GetInt32(11),
+            specialInstructions: reader.IsDBNull(12) ? null : reader.GetString(12),
+            folderPath: reader.IsDBNull(13) ? null : reader.GetString(13),
             deliveryMethodId: reader.GetInt32(14),
-            orderedAt: ReadNullableString(15),
-            pixfizzJobId: ReadNullableString(16),
-            isRush: reader.GetInt32(18) == 1,
-            paymentStatus: ReadNullableString(19),
-            isNotified: reader.GetInt32(20) == 1,
-            notifiedAt: ReadNullableString(21),
-            shippingFirstName: ReadNullableString(22),
-            shippingLastName: ReadNullableString(23),
-            shippingAddress1: ReadNullableString(24),
-            shippingAddress2: ReadNullableString(25),
-            shippingCity: ReadNullableString(26),
-            shippingState: ReadNullableString(27),
-            shippingZip: ReadNullableString(28),
-            shippingCountry: ReadNullableString(29),
-            shippingMethod: ReadNullableString(30));
+            orderedAt: reader.IsDBNull(15) ? null : reader.GetString(15),
+            pixfizzJobId: reader.IsDBNull(16) ? null : reader.GetString(16));
         reader.Close();
 
         if (remoteId <= 0) return false;
@@ -271,14 +239,12 @@ public class SyncService : ISyncService
 
             var pulledMariaDbOrderIds = new List<int>();
 
+            int orderErrors = 0;
             foreach (var row in remoteOrders)
             {
                 try
                 {
-                    object eidVal = row.external_order_id;
-                    var externalOrderId = eidVal is null or DBNull
-                        ? throw new InvalidOperationException($"Pulled order id={row.id} has NULL external_order_id")
-                        : eidVal.ToString()!;
+                    var externalOrderId = (string)row.external_order_id;
                     var pickupStoreId = (int)row.pickup_store_id;
                     var mariaDbOrderId = (int)row.id;
 
@@ -299,16 +265,28 @@ public class SyncService : ISyncService
                 }
                 catch (Exception ex)
                 {
-                    object eidFallback = row.external_order_id;
-                    var eid = eidFallback is null or DBNull ? "unknown" : eidFallback.ToString()!;
-                    AlertCollector.Error(AlertCategory.Database,
-                        "Failed to pull order into SQLite",
-                        detail: $"Attempted: upsert pulled order '{eid}'. " +
-                                $"Expected: local SQLite updated. " +
-                                $"Found: {ex.GetType().Name}: {ex.Message}. " +
-                                $"Context: sync pull. " +
-                                $"State: order skipped, will retry next cycle.",
-                        ex: ex);
+                    orderErrors++;
+                    if (orderErrors <= 10)
+                    {
+                        var eid = "unknown";
+                        try { eid = (string)row.external_order_id; } catch { }
+                        AlertCollector.Error(AlertCategory.Database,
+                            "Failed to pull order into SQLite",
+                            detail: $"Attempted: upsert pulled order '{eid}'. " +
+                                    $"Expected: local SQLite updated. " +
+                                    $"Found: {ex.GetType().Name}: {ex.Message}. " +
+                                    $"Context: sync pull. " +
+                                    $"State: order skipped, will retry next cycle.",
+                            ex: ex);
+                    }
+                    if (orderErrors == 10)
+                    {
+                        AlertCollector.Error(AlertCategory.Database,
+                            "Sync pull: too many order errors, skipping remaining",
+                            detail: $"Attempted: pull orders. Expected: < 10 errors. Found: 10+. " +
+                                    $"Context: sync pull aborted for this cycle. State: will retry next cycle.");
+                        break;
+                    }
                 }
             }
 
@@ -319,27 +297,35 @@ public class SyncService : ISyncService
             if (pulledMariaDbOrderIds.Count > 0)
             {
                 var remoteItems = await _remoteDb.GetOrderItemsForOrdersAsync(pulledMariaDbOrderIds);
+                int itemErrors = 0;
                 foreach (var item in remoteItems)
                 {
                     try
                     {
                         UpsertLocalItem(item);
                     }
-                    catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19)
-                    {
-                        // Foreign key constraint — parent order doesn't exist locally. Expected after wipe.
-                        AppLog.Info($"Sync pull: skipped item (parent order missing locally)");
-                    }
                     catch (Exception ex)
                     {
-                        AlertCollector.Error(AlertCategory.Database,
-                            "Failed to pull order item into SQLite",
-                            detail: $"Attempted: upsert pulled item. " +
-                                    $"Expected: local item updated. " +
-                                    $"Found: {ex.GetType().Name}. " +
-                                    $"Context: sync pull. " +
-                                    $"State: item skipped.",
-                            ex: ex);
+                        itemErrors++;
+                        if (itemErrors <= 10)
+                        {
+                            AlertCollector.Error(AlertCategory.Database,
+                                "Failed to pull order item into SQLite",
+                                detail: $"Attempted: upsert pulled item. " +
+                                        $"Expected: local item updated. " +
+                                        $"Found: {ex.GetType().Name}. " +
+                                        $"Context: sync pull. " +
+                                        $"State: item skipped.",
+                                ex: ex);
+                        }
+                        if (itemErrors == 10)
+                        {
+                            AlertCollector.Error(AlertCategory.Database,
+                                "Sync pull: too many item errors, skipping remaining",
+                                detail: $"Attempted: pull items. Expected: < 10 errors. Found: 10+. " +
+                                        $"Context: sync pull aborted for this cycle. State: will retry next cycle.");
+                            break;
+                        }
                     }
                 }
             }
@@ -347,26 +333,35 @@ public class SyncService : ISyncService
             // Pull notes
             var lastNotesSync = _outbox.GetLastSyncAt("order_notes", "pull") ?? DateTime.MinValue;
             var remoteNotes = await _remoteDb.GetOrderNotesSinceAsync(lastNotesSync);
+            int noteErrors = 0;
             foreach (var note in remoteNotes)
             {
                 try
                 {
                     InsertRemoteNote(note);
                 }
-                catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19)
-                {
-                    AppLog.Info($"Sync pull: skipped note (parent order missing locally)");
-                }
                 catch (Exception ex)
                 {
-                    AlertCollector.Error(AlertCategory.Database,
-                        "Failed to pull note into SQLite",
-                        detail: $"Attempted: insert pulled note. " +
-                                $"Expected: local history updated. " +
-                                $"Found: {ex.GetType().Name}. " +
-                                $"Context: sync pull. " +
-                                $"State: note skipped.",
-                        ex: ex);
+                    noteErrors++;
+                    if (noteErrors <= 10)
+                    {
+                        AlertCollector.Error(AlertCategory.Database,
+                            "Failed to pull note into SQLite",
+                            detail: $"Attempted: insert pulled note. " +
+                                    $"Expected: local history updated. " +
+                                    $"Found: {ex.GetType().Name}. " +
+                                    $"Context: sync pull. " +
+                                    $"State: note skipped.",
+                            ex: ex);
+                    }
+                    if (noteErrors == 10)
+                    {
+                        AlertCollector.Error(AlertCategory.Database,
+                            "Sync pull: too many note errors, skipping remaining",
+                            detail: $"Attempted: pull notes. Expected: < 10 errors. Found: 10+. " +
+                                    $"Context: sync pull aborted for this cycle. State: will retry next cycle.");
+                        break;
+                    }
                 }
             }
 
@@ -401,15 +396,10 @@ public class SyncService : ISyncService
     {
         using var conn = _localDb.OpenConnection();
 
-        object eidObj = row.external_order_id;
-        string externalOrderId = eidObj is null or DBNull
-            ? throw new InvalidOperationException("Pulled order has NULL external_order_id")
-            : eidObj.ToString()!;
+        string externalOrderId = (string)row.external_order_id;
         int pickupStoreId = (int)row.pickup_store_id;
-        object scObj = row.StatusCode;
-        string statusCode = scObj is null or DBNull ? "new" : scObj.ToString()!;
-        object srcObj = row.SourceCode;
-        string sourceCode = srcObj is null or DBNull ? "pixfizz" : srcObj.ToString()!;
+        string statusCode = (string)(row.StatusCode ?? "new");
+        string sourceCode = (string)(row.SourceCode ?? "pixfizz");
         int orderStatusId = SyncMapper.StatusCodeToStatusId(statusCode);
         int orderSourceId = SyncMapper.SourceCodeToSourceId(sourceCode);
 
@@ -435,19 +425,11 @@ public class SyncService : ISyncService
                     order_status_id = @statusId, status_code = @statusCode,
                     customer_first_name = @fname, customer_last_name = @lname,
                     customer_email = @email, customer_phone = @phone,
-                    total_amount = @total, payment_status = @paymentStatus,
-                    is_held = @held, is_notified = @notified, notified_at = @notifiedAt,
+                    total_amount = @total, is_held = @held,
                     is_transfer = @transfer, transfer_store_id = @transferStore,
-                    special_instructions = @instructions, folder_path = @folder,
+                    special_instructions = @instructions,
                     delivery_method_id = @delivery, ordered_at = @orderedAt,
-                    pixfizz_job_id = @jobId, is_rush = @rush,
-                    current_location_store_id = @currentStore,
-                    shipping_first_name = @shipFname, shipping_last_name = @shipLname,
-                    shipping_address1 = @shipAddr1, shipping_address2 = @shipAddr2,
-                    shipping_city = @shipCity, shipping_state = @shipState,
-                    shipping_zip = @shipZip, shipping_country = @shipCountry,
-                    shipping_method = @shipMethod,
-                    is_test = @isTest, updated_at = @updatedAt
+                    updated_at = @updatedAt
                 WHERE id = @id
                 """;
             BindOrderParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
@@ -464,28 +446,16 @@ public class SyncService : ISyncService
                     external_order_id, pickup_store_id, order_source_id, source_code,
                     order_status_id, status_code,
                     customer_first_name, customer_last_name, customer_email, customer_phone,
-                    total_amount, payment_status,
-                    is_held, is_notified, notified_at,
-                    is_transfer, transfer_store_id,
+                    total_amount, is_held, is_transfer, transfer_store_id,
                     special_instructions, folder_path, delivery_method_id, ordered_at,
-                    pixfizz_job_id, is_rush, current_location_store_id,
-                    shipping_first_name, shipping_last_name,
-                    shipping_address1, shipping_address2, shipping_city,
-                    shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, created_at, updated_at
+                    created_at, updated_at
                 ) VALUES (
                     @eid, @store, @srcId, @srcCode,
                     @statusId, @statusCode,
                     @fname, @lname, @email, @phone,
-                    @total, @paymentStatus,
-                    @held, @notified, @notifiedAt,
-                    @transfer, @transferStore,
+                    @total, @held, @transfer, @transferStore,
                     @instructions, @folder, @delivery, @orderedAt,
-                    @jobId, @rush, @currentStore,
-                    @shipFname, @shipLname,
-                    @shipAddr1, @shipAddr2, @shipCity,
-                    @shipState, @shipZip, @shipCountry, @shipMethod,
-                    @isTest, @createdAt, @updatedAt
+                    @createdAt, @updatedAt
                 )
                 """;
             cmd.Parameters.AddWithValue("@eid", externalOrderId);
@@ -499,56 +469,22 @@ public class SyncService : ISyncService
 
     private static void BindOrderParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
     {
-        // Helper to safely read nullable values from dynamic Dapper row.
-        // Cannot use ?., ??, or != null on dynamic — they call HasValue which fails on value types.
-        static object NStr(dynamic val)
-        {
-            object o = val;
-            return o is null or DBNull ? DBNull.Value : o.ToString()!;
-        }
-        static object NInt(dynamic val)
-        {
-            object o = val;
-            return o is null or DBNull ? DBNull.Value : (object)Convert.ToInt32(o);
-        }
-        static object NDateTime(dynamic val)
-        {
-            object o = val;
-            return o is null or DBNull ? DBNull.Value : (object)((DateTime)o).ToString("o");
-        }
-
         cmd.Parameters.AddWithValue("@srcId", orderSourceId);
         cmd.Parameters.AddWithValue("@srcCode", sourceCode);
         cmd.Parameters.AddWithValue("@statusId", orderStatusId);
         cmd.Parameters.AddWithValue("@statusCode", statusCode);
-        cmd.Parameters.AddWithValue("@fname", NStr(row.customer_first_name));
-        cmd.Parameters.AddWithValue("@lname", NStr(row.customer_last_name));
-        cmd.Parameters.AddWithValue("@email", NStr(row.customer_email));
-        cmd.Parameters.AddWithValue("@phone", NStr(row.customer_phone));
+        cmd.Parameters.AddWithValue("@fname", (string?)row.customer_first_name ?? "");
+        cmd.Parameters.AddWithValue("@lname", (string?)row.customer_last_name ?? "");
+        cmd.Parameters.AddWithValue("@email", (string?)row.customer_email ?? "");
+        cmd.Parameters.AddWithValue("@phone", (string?)row.customer_phone ?? "");
         cmd.Parameters.AddWithValue("@total", row.total_amount != null ? (double)(decimal)row.total_amount : 0.0);
-        cmd.Parameters.AddWithValue("@paymentStatus", NStr(row.payment_status));
         cmd.Parameters.AddWithValue("@held", Convert.ToBoolean(row.is_held) ? 1 : 0);
-        cmd.Parameters.AddWithValue("@notified", Convert.ToInt32(row.is_notified) != 0 ? 1 : 0);
-        cmd.Parameters.AddWithValue("@notifiedAt", NDateTime(row.notified_at));
         cmd.Parameters.AddWithValue("@transfer", Convert.ToBoolean(row.is_transfer) ? 1 : 0);
-        cmd.Parameters.AddWithValue("@transferStore", NInt(row.transfer_store_id));
-        cmd.Parameters.AddWithValue("@instructions", NStr(row.special_instructions));
-        cmd.Parameters.AddWithValue("@folder", NStr(row.folder_path));
+        cmd.Parameters.AddWithValue("@transferStore", row.transfer_store_id != null ? (object)(int)row.transfer_store_id : DBNull.Value);
+        cmd.Parameters.AddWithValue("@instructions", (string?)row.special_instructions ?? "");
+        cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
         cmd.Parameters.AddWithValue("@delivery", row.delivery_method_id != null ? (int)row.delivery_method_id : 1);
         cmd.Parameters.AddWithValue("@orderedAt", row.ordered_at != null ? ((DateTime)row.ordered_at).ToString("o") : DateTime.Now.ToString("o"));
-        cmd.Parameters.AddWithValue("@jobId", NStr(row.pixfizz_job_id));
-        cmd.Parameters.AddWithValue("@rush", Convert.ToInt32(row.is_rush) != 0 ? 1 : 0);
-        cmd.Parameters.AddWithValue("@currentStore", NInt(row.current_location_store_id));
-        cmd.Parameters.AddWithValue("@shipFname", NStr(row.shipping_first_name));
-        cmd.Parameters.AddWithValue("@shipLname", NStr(row.shipping_last_name));
-        cmd.Parameters.AddWithValue("@shipAddr1", NStr(row.shipping_address1));
-        cmd.Parameters.AddWithValue("@shipAddr2", NStr(row.shipping_address2));
-        cmd.Parameters.AddWithValue("@shipCity", NStr(row.shipping_city));
-        cmd.Parameters.AddWithValue("@shipState", NStr(row.shipping_state));
-        cmd.Parameters.AddWithValue("@shipZip", NStr(row.shipping_zip));
-        cmd.Parameters.AddWithValue("@shipCountry", NStr(row.shipping_country));
-        cmd.Parameters.AddWithValue("@shipMethod", NStr(row.shipping_method));
-        cmd.Parameters.AddWithValue("@isTest", Convert.ToInt32(row.is_test) != 0 ? 1 : 0);
     }
 
     private void UpsertLocalItem(dynamic item)
@@ -557,12 +493,9 @@ public class SyncService : ISyncService
         var localOrderId = _outbox.GetLocalId("orders", mariaDbOrderId);
         if (!localOrderId.HasValue) return; // can't map this item
 
-        object slObj = item.size_label;
-        string sizeLabel = slObj is null or DBNull ? "" : slObj.ToString()!;
-        object mtObj = item.media_type;
-        string mediaType = mtObj is null or DBNull ? "" : mtObj.ToString()!;
-        object fnObj = item.image_filename;
-        string imageFilename = fnObj is null or DBNull ? "" : fnObj.ToString()!;
+        string sizeLabel = (string?)item.size_label ?? "";
+        string mediaType = (string?)item.media_type ?? "";
+        string imageFilename = (string?)item.image_filename ?? "";
 
         using var conn = _localDb.OpenConnection();
 
@@ -579,28 +512,22 @@ public class SyncService : ISyncService
         findCmd.Parameters.AddWithValue("@media", mediaType);
         var existingId = findCmd.ExecuteScalar();
 
-        object origObj = item.original_image_filepath;
-        string origFilepath = origObj is null or DBNull ? "" : origObj.ToString()!;
-        bool isPrinted = Convert.ToInt32(item.is_printed) != 0;
-
         if (existingId != null)
         {
-            // Update existing item — never downgrade is_printed (local printed state wins)
+            // Update existing item
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 UPDATE order_items SET
                     quantity = @qty, image_filepath = @fpath,
-                    original_image_filepath = @orig,
-                    options_json = @options,
-                    is_printed = MAX(is_printed, @printed),
-                    updated_at = datetime('now')
+                    channel_number = @channel, options_json = @options,
+                    is_printed = @printed, updated_at = datetime('now')
                 WHERE id = @id
                 """;
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);
-            cmd.Parameters.AddWithValue("@fpath", ((object)item.image_filepath is null or DBNull ? "" : ((object)item.image_filepath).ToString()!));
-            cmd.Parameters.AddWithValue("@orig", origFilepath);
-            cmd.Parameters.AddWithValue("@options", ((object)item.options_json is null or DBNull ? "[]" : ((object)item.options_json).ToString()!));
-            cmd.Parameters.AddWithValue("@printed", isPrinted ? 1 : 0);
+            cmd.Parameters.AddWithValue("@fpath", (string?)item.image_filepath ?? "");
+            cmd.Parameters.AddWithValue("@channel", item.channel_number != null ? (int)item.channel_number : 0);
+            cmd.Parameters.AddWithValue("@options", (string?)item.options_json ?? "[]");
+            cmd.Parameters.AddWithValue("@printed", Convert.ToBoolean(item.is_printed ?? false) ? 1 : 0);
             cmd.Parameters.AddWithValue("@id", Convert.ToInt32(existingId));
             cmd.ExecuteNonQuery();
         }
@@ -611,11 +538,11 @@ public class SyncService : ISyncService
             cmd.CommandText = """
                 INSERT INTO order_items (
                     order_id, size_label, media_type, quantity,
-                    image_filename, image_filepath, original_image_filepath,
+                    image_filename, image_filepath, channel_number,
                     options_json, is_printed
                 ) VALUES (
                     @oid, @size, @media, @qty,
-                    @fname, @fpath, @orig,
+                    @fname, @fpath, @channel,
                     @options, @printed
                 )
                 """;
@@ -624,10 +551,10 @@ public class SyncService : ISyncService
             cmd.Parameters.AddWithValue("@media", mediaType);
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);
             cmd.Parameters.AddWithValue("@fname", imageFilename);
-            cmd.Parameters.AddWithValue("@fpath", ((object)item.image_filepath is null or DBNull ? "" : ((object)item.image_filepath).ToString()!));
-            cmd.Parameters.AddWithValue("@orig", origFilepath);
-            cmd.Parameters.AddWithValue("@options", ((object)item.options_json is null or DBNull ? "[]" : ((object)item.options_json).ToString()!));
-            cmd.Parameters.AddWithValue("@printed", isPrinted ? 1 : 0);
+            cmd.Parameters.AddWithValue("@fpath", (string?)item.image_filepath ?? "");
+            cmd.Parameters.AddWithValue("@channel", item.channel_number != null ? (int)item.channel_number : 0);
+            cmd.Parameters.AddWithValue("@options", (string?)item.options_json ?? "[]");
+            cmd.Parameters.AddWithValue("@printed", Convert.ToBoolean(item.is_printed ?? false) ? 1 : 0);
             cmd.ExecuteNonQuery();
         }
     }
@@ -641,41 +568,22 @@ public class SyncService : ISyncService
 
         using var conn = _localDb.OpenConnection();
 
-        object ntObj = note.note_text;
-        string noteText = ntObj is null or DBNull
-            ? throw new InvalidOperationException($"Pulled note {mariaDbNoteId} has NULL note_text")
-            : ntObj.ToString()!;
-        object enObj = note.EmployeeName;
-        string employeeName = (enObj is null or DBNull ? "" : enObj.ToString()!).Trim();
-        string createdAt = ((DateTime)note.created_at).ToString("o");
+        // Verify the local order still exists (id_map can outlive deleted orders)
+        using var existsCmd = conn.CreateCommand();
+        existsCmd.CommandText = "SELECT COUNT(*) FROM orders WHERE id = @id";
+        existsCmd.Parameters.AddWithValue("@id", localOrderId.Value);
+        if (Convert.ToInt32(existsCmd.ExecuteScalar()) == 0) return;
 
-        // Check if we already have this remote note by remote_id
+        // Check if we already have this remote note
         using var checkCmd = conn.CreateCommand();
         checkCmd.CommandText = "SELECT COUNT(*) FROM order_history WHERE remote_id = @rid";
         checkCmd.Parameters.AddWithValue("@rid", mariaDbNoteId);
         var count = Convert.ToInt32(checkCmd.ExecuteScalar());
         if (count > 0) return; // already pulled
 
-        // Also check if a locally-created note matches (same order, same text) — don't duplicate
-        using var dupeCmd = conn.CreateCommand();
-        dupeCmd.CommandText = """
-            SELECT id FROM order_history
-            WHERE order_id = @oid AND note = @note AND remote_id IS NULL
-            LIMIT 1
-            """;
-        dupeCmd.Parameters.AddWithValue("@oid", localOrderId.Value);
-        dupeCmd.Parameters.AddWithValue("@note", noteText);
-        var localMatch = dupeCmd.ExecuteScalar();
-        if (localMatch != null)
-        {
-            // Tag the existing local note with the remote_id so we don't check again
-            using var tagCmd = conn.CreateCommand();
-            tagCmd.CommandText = "UPDATE order_history SET remote_id = @rid WHERE id = @id";
-            tagCmd.Parameters.AddWithValue("@rid", mariaDbNoteId);
-            tagCmd.Parameters.AddWithValue("@id", Convert.ToInt32(localMatch));
-            tagCmd.ExecuteNonQuery();
-            return;
-        }
+        string noteText = (string)note.note_text;
+        string employeeName = ((string?)note.EmployeeName ?? "").Trim();
+        string createdAt = ((DateTime)note.created_at).ToString("o");
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """

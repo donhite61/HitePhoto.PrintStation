@@ -83,36 +83,18 @@ public class OrderVerifier : IOrderVerifier
 
             OrderSource source;
             try { source = OrderSourceExtensions.FromCode(db.SourceCode); }
-            catch (Exception ex)
-            {
-                AlertCollector.Error(AlertCategory.DataQuality,
-                    $"Verify: unrecognized source code '{db.SourceCode}' for order {orderId}",
-                    orderId: orderId,
-                    detail: $"Attempted: parse source code '{db.SourceCode}'. " +
-                            $"Expected: pixfizz, dakis, or dashboard. Found: '{db.SourceCode}'. " +
-                            $"Context: order {orderId} (db id={db.Id}). " +
-                            $"State: skipping order verification",
-                    ex: ex);
-                folderList.Remove(orderId); dbList.Remove(orderId); matchCount++; continue;
-            }
+            catch { folderList.Remove(orderId); dbList.Remove(orderId); matchCount++; continue; }
 
             bool filesRequired = _filesNeededDecision.AreFilesRequired(source, _settings.StoreId, _settings.StoreId);
 
             if (filesRequired)
             {
                 // Verify files on disk using OrderHelpers.VerifyFile (the ONE verification function)
-                // Write results to file_status column so the tree can read without disk I/O
                 var dbItems = _orders.GetItems(db.Id);
                 var itemIssues = new List<string>();
-                var statusUpdates = new List<(int ItemId, int Status)>();
-
                 foreach (var item in dbItems)
                 {
-                    if (string.IsNullOrWhiteSpace(item.ImageFilepath))
-                    {
-                        statusUpdates.Add((item.Id, 1)); // no file expected = OK
-                        continue;
-                    }
+                    if (string.IsNullOrWhiteSpace(item.ImageFilepath)) continue;
                     var error = OrderHelpers.VerifyFile(item.ImageFilepath);
                     if (error != null)
                     {
@@ -120,15 +102,8 @@ public class OrderVerifier : IOrderVerifier
                             ? Path.GetFileName(item.ImageFilepath)
                             : item.ImageFilename;
                         itemIssues.Add($"{filename}: {error}");
-                        statusUpdates.Add((item.Id, -1)); // error
-                    }
-                    else
-                    {
-                        statusUpdates.Add((item.Id, 1)); // OK
                     }
                 }
-
-                _orders.BatchUpdateFileStatus(statusUpdates);
 
                 // Source-specific repair: reread source file and compare with DB
                 if (source == OrderSource.Pixfizz)
@@ -183,26 +158,30 @@ public class OrderVerifier : IOrderVerifier
             }
         }
 
-        // ── Leftover in DB list: in DB but not on disk ──
-        // Only alert if the folder_path is under a local root AND actually missing.
-        // Orders outside the date cutoff may not appear in the folder scan but still exist on disk.
+        // ── Leftover in DB list: in DB but not on disk → error state ──
+        int missingFolderCount = 0;
         foreach (var kvp in dbList)
         {
-            var folderPath = kvp.Value.FolderPath;
-            if (!IsLocalFolder(folderPath))
-                continue; // synced from other store, folder lives on their machine
-
-            if (Directory.Exists(folderPath))
-                continue; // folder exists, just outside the scan's date cutoff
-
-            _history.AddNoteIfNew(kvp.Value.Id, "Verify: order folder not found on disk", "system");
-            AlertCollector.Error(AlertCategory.DataQuality,
-                $"Order {kvp.Key} in DB but folder missing from disk",
-                orderId: kvp.Key,
-                detail: $"Attempted: find folder for order {kvp.Key}. Expected: folder at '{folderPath}'. " +
-                        $"Found: folder missing. Context: source {kvp.Value.SourceCode}, DB id {kvp.Value.Id}. " +
-                        $"State: order is in database but files are gone.");
+            missingFolderCount++;
+            if (missingFolderCount <= 10)
+            {
+                _history.AddNoteIfNew(kvp.Value.Id, "Verify: order folder not found on disk", "system");
+                AlertCollector.Error(AlertCategory.DataQuality,
+                    $"Order {kvp.Key} in DB but folder missing from disk",
+                    orderId: kvp.Key,
+                    detail: $"Attempted: find folder for order {kvp.Key}. Expected: folder at '{kvp.Value.FolderPath}'. " +
+                            $"Found: folder missing. Context: source {kvp.Value.SourceCode}, DB id {kvp.Value.Id}. " +
+                            $"State: order is in database but files are gone.");
+            }
             errors++;
+        }
+        if (missingFolderCount > 10)
+        {
+            AlertCollector.Error(AlertCategory.DataQuality,
+                $"{missingFolderCount} orders in DB but folders missing from disk",
+                detail: $"Attempted: verify all orders. Expected: folders on disk. " +
+                        $"Found: {missingFolderCount} missing. Context: showing first 10 only. " +
+                        $"State: likely running on wrong machine or orders were purged.");
         }
 
         AppLog.Info($"Verify complete: {matchCount} matched, {inserted} inserted, {repaired} repaired, {errors} errors");
@@ -261,55 +240,57 @@ public class OrderVerifier : IOrderVerifier
         }
     }
 
-    // ── Shared compare-and-repair: source file is truth, replace DB items ──
+    // ── Shared compare-and-repair: source items vs DB items ──
 
     private int CompareAndRepair(int dbOrderId, List<UnifiedOrderItem> sourceItems, string sourceFileName)
     {
         var dbItems = _orders.GetItems(dbOrderId);
 
-        // Quick check: if items already match, skip the replace
-        bool needsReplace = dbItems.Count != sourceItems.Count;
-        if (!needsReplace)
-        {
-            for (int i = 0; i < sourceItems.Count; i++)
-            {
-                var src = sourceItems[i];
-                var db = dbItems.FirstOrDefault(d =>
-                    string.Equals(d.SizeLabel, src.SizeLabel, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(Path.GetFileNameWithoutExtension(d.ImageFilename),
-                                  Path.GetFileNameWithoutExtension(src.ImageFilename),
-                                  StringComparison.OrdinalIgnoreCase));
+        int repairs = 0;
+        var unmatched = new List<UnifiedOrderItem>(sourceItems);
 
-                if (db == null ||
-                    !string.Equals(db.ImageFilename, src.ImageFilename, StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(db.ImageFilepath, src.ImageFilepath, StringComparison.OrdinalIgnoreCase) ||
-                    db.Quantity != src.Quantity ||
-                    db.IsNoritsu != src.IsNoritsu)
+        foreach (var dbItem in dbItems)
+        {
+            var match = unmatched.FirstOrDefault(t =>
+                string.Equals(t.ImageFilename, dbItem.ImageFilename, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.SizeLabel, dbItem.SizeLabel, StringComparison.OrdinalIgnoreCase));
+
+            if (match != null)
+            {
+                unmatched.Remove(match);
+
+                bool needsRepair = false;
+                if (!string.Equals(match.MediaType ?? "", dbItem.MediaType ?? "", StringComparison.OrdinalIgnoreCase)) needsRepair = true;
+                if (match.Quantity != dbItem.Quantity) needsRepair = true;
+                if (!string.Equals(match.ImageFilepath ?? "", dbItem.ImageFilepath ?? "", StringComparison.OrdinalIgnoreCase)) needsRepair = true;
+                if (match.IsNoritsu != dbItem.IsNoritsu) needsRepair = true;
+
+                if (needsRepair)
                 {
-                    needsReplace = true;
-                    break;
+                    var matchCategory = match.Options.FirstOrDefault(o => o.Key == "Category")?.Value ?? "";
+                    var matchSubCategory = match.Options.FirstOrDefault(o => o.Key == "SubCategory")?.Value ?? "";
+                    _orders.UpdateItem(dbItem.Id,
+                        match.SizeLabel ?? "", match.MediaType ?? "",
+                        match.ImageFilename ?? "", match.ImageFilepath ?? "",
+                        match.Quantity, match.IsNoritsu, matchCategory, matchSubCategory);
+                    repairs++;
                 }
             }
         }
 
-        if (!needsReplace) return 0;
+        // Source items not in DB — insert them
+        foreach (var missing in unmatched)
+        {
+            _orders.InsertItem(dbOrderId, missing);
+            repairs++;
+        }
 
-        // Build diff summary before replacing
-        var dbSet = dbItems.Select(d => $"{d.SizeLabel}|{d.ImageFilename}|qty={d.Quantity}").OrderBy(s => s).ToList();
-        var srcSet = sourceItems.Select(s => $"{s.SizeLabel}|{s.ImageFilename}|qty={s.Quantity}").OrderBy(s => s).ToList();
-        var removed = dbSet.Except(srcSet).ToList();
-        var added = srcSet.Except(dbSet).ToList();
+        if (repairs > 0)
+            _history.AddNote(dbOrderId,
+                $"Repaired at {DateTime.Now:yyyy-MM-dd HH:mm} — {repairs} item(s) updated from {sourceFileName}",
+                "system");
 
-        var diffParts = new List<string>();
-        if (removed.Count > 0) diffParts.Add($"Removed: {string.Join(", ", removed)}");
-        if (added.Count > 0) diffParts.Add($"Added: {string.Join(", ", added)}");
-        var diffSummary = diffParts.Count > 0 ? string.Join("; ", diffParts) : "paths updated";
-
-        _orders.ReplaceItems(dbOrderId, sourceItems);
-        _history.AddNote(dbOrderId,
-            $"Items replaced from {sourceFileName} ({dbItems.Count}→{sourceItems.Count}): {diffSummary}",
-            "system");
-        return sourceItems.Count;
+        return repairs;
     }
 
     // ── Insert from disk (order on disk but not in DB) ──
@@ -387,10 +368,7 @@ public class OrderVerifier : IOrderVerifier
                         }
                     }
                 }
-                catch (Exception ex)
-                {
-                    AppLog.Info($"Verify: TXT parse failed for {txtPath}, using folder name as fallback: {ex.Message}");
-                }
+                catch { /* use folder name as fallback */ }
             }
             else if (source == "dakis")
             {
@@ -432,33 +410,5 @@ public class OrderVerifier : IOrderVerifier
 
             list.TryAdd(orderId, (dir, source));
         }
-    }
-
-    /// <summary>
-    /// Returns true if the folder path is under one of our configured local roots.
-    /// Orders synced from the other store have folder paths on that store's drive.
-    /// </summary>
-    private bool IsLocalFolder(string folderPath)
-    {
-        if (string.IsNullOrWhiteSpace(folderPath))
-            return false;
-
-        var normalized = Path.GetFullPath(folderPath);
-
-        if (!string.IsNullOrWhiteSpace(_settings.OrderOutputPath))
-        {
-            var pixRoot = Path.GetFullPath(_settings.OrderOutputPath);
-            if (normalized.StartsWith(pixRoot, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(_settings.DakisWatchFolder))
-        {
-            var dakisRoot = Path.GetFullPath(_settings.DakisWatchFolder);
-            if (normalized.StartsWith(dakisRoot, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
     }
 }

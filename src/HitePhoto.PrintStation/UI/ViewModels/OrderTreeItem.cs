@@ -19,6 +19,7 @@ public class SizeTreeItem : INotifyPropertyChanged
     private int _missingFileCount;
     private int? _channelNumber;
     private string _channelName = "";
+    private string? _layoutName;
     private bool _isSelected;
 
     public OrderTreeItem? ParentOrder { get; set; }
@@ -65,6 +66,12 @@ public class SizeTreeItem : INotifyPropertyChanged
         set { _channelName = value; OnPropertyChanged(); OnPropertyChanged(nameof(ChannelLabel)); }
     }
 
+    public string? LayoutName
+    {
+        get => _layoutName;
+        set { _layoutName = value; OnPropertyChanged(); OnPropertyChanged(nameof(ChannelLabel)); }
+    }
+
     public bool IsSelected
     {
         get => _isSelected;
@@ -86,7 +93,8 @@ public class SizeTreeItem : INotifyPropertyChanged
     public string ChannelLabel =>
         !ChannelNumber.HasValue || ChannelNumber == 0 ? "(unmapped)"
         : ChannelNumber == -1 ? "(skip)"
-        : !string.IsNullOrEmpty(ChannelName) ? $"Ch {ChannelNumber:D3} — {ChannelName}"
+        : !string.IsNullOrEmpty(LayoutName) ? $"[Layout] {LayoutName} \u2192 Ch {ChannelNumber:D3}"
+        : !string.IsNullOrEmpty(ChannelName) ? $"Ch {ChannelNumber:D3} \u2014 {ChannelName}"
         : $"Ch {ChannelNumber:D3}";
 
     public bool IsUnmapped => !ChannelNumber.HasValue || ChannelNumber == 0;

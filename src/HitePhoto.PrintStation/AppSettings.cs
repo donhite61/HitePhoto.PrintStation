@@ -113,6 +113,12 @@ public class AppSettings
     public string UpdateSftpPassword  { get; set; } = "";
     public string UpdateSftpFolder    { get; set; } = "";
 
+    // ── Inter-store transfer ──
+    public string TransferSftpHost     { get; set; } = "";
+    public int    TransferSftpPort     { get; set; } = 22;
+    public string TransferSftpUsername { get; set; } = "";
+    public string TransferSftpPassword { get; set; } = "";
+
     // ── MariaDB sync ──
     public bool SyncEnabled          { get; set; } = true;
     public int  SyncIntervalSeconds  { get; set; } = 30;

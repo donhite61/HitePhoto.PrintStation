@@ -1,5 +1,7 @@
 using System.IO;
 using HitePhoto.PrintStation.Core.Decisions;
+using HitePhoto.PrintStation.Core.Models;
+using HitePhoto.PrintStation.Core.Processing;
 using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Services;
@@ -10,6 +12,7 @@ public class PrintService : IPrintService
     private readonly IHistoryRepository _history;
     private readonly IChannelDecision _channel;
     private readonly IPrinterWriter _writer;
+    private readonly AppSettings _settings;
     private readonly string _noritsuOutputRoot;
 
     private const char SuccessPrefix = 'e';
@@ -20,12 +23,14 @@ public class PrintService : IPrintService
         IHistoryRepository history,
         IChannelDecision channel,
         IPrinterWriter writer,
+        AppSettings settings,
         string noritsuOutputRoot)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _history = history ?? throw new ArgumentNullException(nameof(history));
         _channel = channel ?? throw new ArgumentNullException(nameof(channel));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _noritsuOutputRoot = noritsuOutputRoot;
     }
 
@@ -66,11 +71,81 @@ public class PrintService : IPrintService
             try
             {
                 var groupItems = group.ToList();
-                var folderName = _writer.WritePrintJob(
-                    order.ExternalOrderId,
-                    group.Key.SizeLabel,
-                    channelResult.ChannelNumber,
-                    groupItems);
+                string folderName;
+                string sizeLabel;
+                int channelNumber;
+
+                // Layout branch: apply layout processing before writing MRK
+                if (channelResult.LayoutName is not null)
+                {
+                    var layout = _settings.Layouts.FirstOrDefault(l =>
+                        l.Name.Equals(channelResult.LayoutName, StringComparison.OrdinalIgnoreCase));
+
+                    if (layout is null)
+                    {
+                        AlertCollector.Error(AlertCategory.Printing,
+                            $"Layout '{channelResult.LayoutName}' not found in settings",
+                            orderId: order.ExternalOrderId,
+                            detail: $"Attempted: print {group.Key.SizeLabel} using layout '{channelResult.LayoutName}'. " +
+                                    $"Expected: layout defined in Settings → Layouts. " +
+                                    $"Found: no matching layout. " +
+                                    $"Context: channel_mappings routing_key='{channelResult.RoutingKey}'. " +
+                                    $"State: order {order.ExternalOrderId}, {groupItems.Count} items.");
+                        skipped.Add(new SkippedItem(
+                            $"{group.Key.SizeLabel} {group.Key.MediaType}".Trim(),
+                            $"Layout '{channelResult.LayoutName}' not found."));
+                        continue;
+                    }
+
+                    var layoutItems = new List<OrderItemRecord>();
+                    foreach (var item in groupItems)
+                    {
+                        if (string.IsNullOrEmpty(item.ImageFilepath))
+                        {
+                            AlertCollector.Error(AlertCategory.Printing,
+                                "Image path missing for layout processing",
+                                orderId: order.ExternalOrderId,
+                                detail: $"Attempted: layout '{layout.Name}' on item {item.Id}. " +
+                                        $"Expected: non-empty ImageFilepath. Found: null/empty. " +
+                                        $"Context: size {group.Key.SizeLabel}. " +
+                                        $"State: order {order.ExternalOrderId}.");
+                            continue;
+                        }
+
+                        string sourcePath = LayoutProcessor.ResolveSourcePath(item.ImageFilepath, order.FolderPath);
+                        string outputPath = LayoutProcessor.BuildLayoutPath(sourcePath, order.FolderPath, layout.Name);
+                        LayoutProcessor.ApplyLayout(sourcePath, outputPath, layout);
+
+                        layoutItems.Add(item with { ImageFilepath = outputPath });
+                    }
+
+                    if (layoutItems.Count == 0)
+                    {
+                        skipped.Add(new SkippedItem(
+                            $"{group.Key.SizeLabel} {group.Key.MediaType}".Trim(),
+                            "No valid images after layout processing."));
+                        continue;
+                    }
+
+                    sizeLabel = layout.TargetSizeLabel;
+                    channelNumber = layout.TargetChannelNumber;
+                    folderName = _writer.WritePrintJob(
+                        order.ExternalOrderId,
+                        sizeLabel,
+                        channelNumber,
+                        layoutItems);
+                }
+                else
+                {
+                    // Standard path — no layout, direct to printer
+                    sizeLabel = group.Key.SizeLabel;
+                    channelNumber = channelResult.ChannelNumber;
+                    folderName = _writer.WritePrintJob(
+                        order.ExternalOrderId,
+                        sizeLabel,
+                        channelNumber,
+                        groupItems);
+                }
 
                 // Mark items as printed
                 var printedIds = groupItems.Select(i => i.Id).ToList();
@@ -78,8 +153,8 @@ public class PrintService : IPrintService
 
                 foreach (var item in groupItems)
                 {
-                    sent.Add(new SentItem(item.Id, group.Key.SizeLabel,
-                        channelResult.ChannelNumber, folderName));
+                    sent.Add(new SentItem(item.Id, sizeLabel,
+                        channelNumber, folderName));
                 }
             }
             catch (Exception ex)

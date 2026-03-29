@@ -142,6 +142,7 @@ public partial class App : Application
                 sp.GetRequiredService<IHistoryRepository>(),
                 sp.GetRequiredService<IChannelDecision>(),
                 sp.GetRequiredService<IPrinterWriter>(),
+                settings,
                 settings.NoritsuOutputRoot));
 
         // TODO: wire real implementations when ready

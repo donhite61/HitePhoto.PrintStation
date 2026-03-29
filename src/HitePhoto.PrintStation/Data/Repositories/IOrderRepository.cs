@@ -101,6 +101,15 @@ public interface IOrderRepository
 
     /// <summary>Batch-load items for multiple orders. Keyed by order ID.</summary>
     Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds);
+
+    /// <summary>Set the is_externally_modified flag (transfer receive or LabApi edit).</summary>
+    void SetExternallyModified(int orderId, bool modified);
+
+    /// <summary>Set the local folder_path for an order (after transfer files arrive).</summary>
+    void SetFolderPath(int orderId, string folderPath);
+
+    /// <summary>Get all stores from the stores table.</summary>
+    List<(int Id, string Name)> GetStores();
 }
 
 public record OrderRow(

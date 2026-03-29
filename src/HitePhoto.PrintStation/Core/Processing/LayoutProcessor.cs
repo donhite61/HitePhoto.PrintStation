@@ -68,6 +68,15 @@ public static class LayoutProcessor
         return outputPath;
     }
 
+    /// <summary>
+    /// Returns the color-corrected image path if it exists, otherwise the original.
+    /// </summary>
+    public static string ResolveSourcePath(string originalPath, string orderFolderPath)
+    {
+        string ccPath = ImageProcessor.BuildCorrectedPath(originalPath, orderFolderPath);
+        return File.Exists(ccPath) ? ccPath : originalPath;
+    }
+
     public static string BuildLayoutPath(
         string originalImagePath,
         string orderFolderPath,

@@ -1,6 +1,6 @@
 # HitePhoto PrintStation — Roadmap
 
-**Last updated:** 2026-03-27 (Session 61)
+**Last updated:** 2026-03-29 (Session 68)
 **Read this before starting any work.**
 
 ## What This Is
@@ -37,26 +37,28 @@ Two stores (BH + WB), each running their own PrintStation. MariaDB on Dell serve
 
 ## Where We Are
 
-**Last status update:** Session 61 (2026-03-27)
+**Last status update:** Session 68 (2026-03-29)
 
 | Component | State |
 |-----------|-------|
-| **PrintStation UI** | Done — 3-tab tree, detail panel, multi-select, context menu, settings, themes |
-| **Processing** | Done — NoritsuMrkWriter, LayoutProcessor, ImagePreparer, multi-select print, mark printed/unprinted |
+| **PrintStation UI** | Done — 3-tab tree, detail panel, multi-select, context menu, settings, themes, build # on titlebar |
+| **Processing** | Done — NoritsuMrkWriter, LayoutProcessor (with print integration), ImagePreparer, multi-select print, mark printed/unprinted |
 | **Color Correction** | Done — full pipeline, 6-up page view, CorrectionStore |
 | **Email/Notify** | Done — EmailService wired via NotificationService, template chooser + preview, pickup/shipped, Send Test |
-| **Alerts/Logging** | Done — AlertCollector, AppLog, alert panel, alert history, ON CONFLICT dedup |
-| **SQLite schema** | Done — all tables including delivery_methods, shipping address columns |
+| **Alerts/Logging** | Done — AlertCollector, AppLog, alert panel, alert history, ON CONFLICT dedup, error caps on sync/verify |
+| **SQLite schema** | Done — all tables including delivery_methods, shipping address columns, file_status, id_map, sync_outbox |
 | **Decision makers** | Done — Hold, FilesNeeded, Channel, Fulfillment |
-| **Services** | Done — Print, Hold, Notification, OrderVerifier |
+| **Services** | Done — Print (with layout support), Hold, Notification, OrderVerifier (file_status column, no disk I/O on refresh) |
 | **Ingest (Pixfizz)** | Done — OHD API poll, FTP download, TXT parse, SQLite write, received push |
 | **Ingest (Dakis)** | Done — folder watch, YML parse, shipping/delivery fields, SQLite write |
-| **Channel mapping** | Done — search dropdown, CSV + DB + layout channels, click-to-assign |
+| **Channel mapping** | Done — search dropdown, CSV + DB + layout channels, click-to-assign, tree shows layout name |
 | **Layout designer** | Done — new/edit/delete in Settings, live preview |
-| **Auto-updater** | Wired — startup check + Settings button, needs end-to-end test |
+| **Layout printing** | Done — PrintService invokes LayoutProcessor, uses layout target size/channel, tree shows [Layout] label |
+| **Auto-updater** | Done — startup check + Settings button, tested |
+| **MariaDB sync** | Done — decorator pattern, outbox, background pull, push on write, error caps, FK guard on notes |
+| **Repository consolidation** | Done — single InsertItemCore, named column access, ViewModel SQL extracted to IOrderRepository |
 | **Inter-store transfers** | Not started |
-| **MariaDB sync** | Not started |
-| **Test project** | Not started — planned next session |
+| **LabApi vendors/services** | Done — migrations 012-014, CRUD endpoints, OrderDomain shared logic |
 
 ## Build Phases
 
@@ -110,31 +112,33 @@ Walk through each workflow step by step, validate assumptions, build decision ma
 - `IPrintEligibility` — single pre-print gate, calls the others
 - `IFulfillmentDecision` — in-house vs outlab vendor
 
-### Phase 2 — Full Feature Parity with PrintRouter (NEARLY COMPLETE)
+### Phase 2 — Full Feature Parity with PrintRouter (COMPLETE)
 
 - ~~Hold/release with history~~ DONE
-- Inter-store transfers (SFTP) — NOT STARTED
 - ~~Customer notifications (email + Pixfizz API)~~ DONE (Pixfizz API call still TODO)
 - ~~Channel mapping UI (learn new mappings, edit existing)~~ DONE
-- ~~Layout system (multi-up tiling for wallets etc.)~~ DONE
-- ~~Auto-updater~~ WIRED (needs end-to-end test)
-- ~~Settings UI for all configuration~~ DONE
-- PrintRouter has been SHUT DOWN — PrintStation is the replacement
+- ~~Layout system (multi-up tiling for wallets etc.)~~ DONE — designer + print integration
+- ~~Auto-updater~~ DONE
+- ~~Settings UI for all configuration~~ DONE — including database settings tab
+- PrintRouter and IngestService are ARCHIVED — PrintStation is the replacement
 
-### Phase 3 — MariaDB Sync (NEXT UP)
+### Phase 3 — MariaDB Sync (COMPLETE)
 
-- Bidirectional sync connector between local SQLite and MariaDB
-- Push: status changes, holds, printed flags, notes → MariaDB
-- Pull: other store's orders, Dashboard actions → local SQLite
-- Outbox pattern for offline resilience
-- PrintStation replaces PrintRouter in production
+- ~~Bidirectional sync connector between local SQLite and MariaDB~~ DONE
+- ~~Push: decorator pattern wraps repositories, fire-and-forget after every mutating write~~ DONE
+- ~~Pull: background timer, all orders/items/notes from MariaDB into local SQLite~~ DONE
+- ~~Outbox pattern for offline resilience~~ DONE
+- ~~Error caps on sync/verify loops (max 10 per cycle) to prevent UI lockup~~ DONE
+- ~~FK guard on notes pull (skip notes for deleted local orders)~~ DONE
+- ~~Only pickup store inserts new orders; all other ops push from any store~~ DONE
+- ~~is_printed never downgraded on pull (local printed state wins)~~ DONE
 
-### Phase 4 — VPN + Second Store
+### Phase 4 — Second Store (NEXT UP)
 
-- WireGuard VPN between WB and BH
-- BH PrintStation connected to MariaDB via VPN
-- Both stores see each other's orders
-- Inter-store transfers via database instead of SFTP
+- BH PrintStation connected to MariaDB on same LAN
+- Both stores see each other's orders via sync
+- Inter-store transfers via database (hold at one store, release at another)
+- Add store 3 to MariaDB for home dev machine
 
 ### Phase 5 — Order Creation (Dashboard)
 
@@ -189,11 +193,17 @@ These build on the foundation above. Each will be planned when preceding phases 
 - **Files-needed: Pixfizz=always, Dakis=only if production store** — no vendor/service lookup needed for this decision
 - **Don't call `/received` immediately** — wait 24 hours verified as safety window
 - **Dakis: no customer.txt needed** — all customer info is in order.yml
-- **MariaDB and PrintRouter are frozen** — production, no changes until PrintStation is ready
+- **PrintRouter and IngestService archived** — replaced by PrintStation, repos kept as reference
+- **Decorator pattern for sync** — wraps IOrderRepository/IHistoryRepository, zero changes to existing service code
+- **is_printed drives tabs** — not status codes. Pending/Printed sorting is based on item printed state.
+- **Sync pull never downgrades is_printed** — local printed state wins (MAX)
+- **Error caps on loops** — sync and verify loops cap at 10 errors per cycle to prevent UI lockup
+- **Layout quantities pass through 1:1** — sold as sheets (2-up, 4-up), no division math
 
 ## Repos
 
-- **PrintStation**: `https://github.com/donhite61/HitePhoto.PrintStation.git`
-- **LabApi**: `https://github.com/donhite61/HitePhoto.LabApi.git` (Shared models, Dashboard, API)
-- **PrintRouter**: `https://github.com/donhite61/PrintRouter.git` (legacy, production fallback)
-- **IngestService**: `https://github.com/donhite61/HitePhoto.IngestService-.git` (being absorbed into PrintStation)
+- **PrintStation**: `https://github.com/donhite61/HitePhoto.PrintStation.git` (active)
+- **LabApi**: `https://github.com/donhite61/HitePhoto.LabApi.git` (Shared models, Dashboard, API — active)
+- **TestServer**: `https://github.com/donhite61/HitePhoto.TestServer.git` (mock Pixfizz for testing)
+- **PrintRouter**: `https://github.com/donhite61/PrintRouter.git` (archived — reference only)
+- **IngestService**: `https://github.com/donhite61/HitePhoto.IngestService-.git` (archived — absorbed into PrintStation)

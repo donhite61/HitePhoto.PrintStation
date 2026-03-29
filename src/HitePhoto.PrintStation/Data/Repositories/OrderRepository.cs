@@ -81,7 +81,7 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, order_id, size_label, media_type, image_filepath,
-                   quantity, is_noritsu, is_printed
+                   quantity, is_noritsu, is_printed, image_filename
             FROM order_items
             WHERE order_id = @id AND is_noritsu = 1
             ORDER BY size_label, media_type
@@ -99,7 +99,8 @@ public class OrderRepository : IOrderRepository
                 ImageFilepath: reader.IsDBNull(4) ? "" : reader.GetString(4),
                 Quantity: reader.GetInt32(5),
                 IsNoritsu: reader.GetInt32(6) == 1,
-                IsPrinted: reader.GetInt32(7) == 1));
+                IsPrinted: reader.GetInt32(7) == 1,
+                ImageFilename: reader.IsDBNull(8) ? "" : reader.GetString(8)));
         }
         return items;
     }
@@ -410,6 +411,7 @@ public class OrderRepository : IOrderRepository
             WHERE o.pickup_store_id = @storeId
               AND (@daysBack = 0 OR o.ordered_at >= @cutoff)
               AND o.is_test = 0
+              AND o.is_transfer = 0
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
         cmd.Parameters.AddWithValue("@daysBack", days);
@@ -793,5 +795,51 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@id", itemId);
             cmd.ExecuteNonQuery();
         }
+    }
+
+    public void SetExternallyModified(int orderId, bool modified)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET is_externally_modified = @val, updated_at = datetime('now') WHERE id = @id";
+        cmd.Parameters.AddWithValue("@val", modified ? 1 : 0);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"SetExternallyModified: order {orderId} not found",
+                orderId: orderId.ToString(),
+                detail: $"Attempted: UPDATE orders SET is_externally_modified={modified} WHERE id={orderId}. " +
+                        $"Expected: 1 row updated. Found: 0 rows. " +
+                        $"Context: transfer or LabApi edit. State: no matching order in SQLite.");
+    }
+
+    public void SetFolderPath(int orderId, string folderPath)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET folder_path = @path, updated_at = datetime('now') WHERE id = @id";
+        cmd.Parameters.AddWithValue("@path", folderPath);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"SetFolderPath: order {orderId} not found",
+                orderId: orderId.ToString(),
+                detail: $"Attempted: UPDATE orders SET folder_path='{folderPath}' WHERE id={orderId}. " +
+                        $"Expected: 1 row updated. Found: 0 rows. " +
+                        $"Context: transfer file receive. State: no matching order in SQLite.");
+    }
+
+    public List<(int Id, string Name)> GetStores()
+    {
+        var stores = new List<(int, string)>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id, short_name FROM stores ORDER BY id";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            stores.Add((reader.GetInt32(0), reader.IsDBNull(1) ? "" : reader.GetString(1)));
+        return stores;
     }
 }

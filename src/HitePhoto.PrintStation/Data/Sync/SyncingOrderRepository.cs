@@ -120,4 +120,7 @@ public class SyncingOrderRepository : IOrderRepository
     public Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds) => _inner.BatchLoadItems(orderIds);
     public void SetItemsUnprinted(int orderId) => _inner.SetItemsUnprinted(orderId);
     public void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates) => _inner.BatchUpdateFileStatus(updates);
+    public void SetExternallyModified(int orderId, bool modified) => _inner.SetExternallyModified(orderId, modified);
+    public void SetFolderPath(int orderId, string folderPath) => _inner.SetFolderPath(orderId, folderPath);
+    public List<(int Id, string Name)> GetStores() => _inner.GetStores();
 }

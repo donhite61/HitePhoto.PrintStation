@@ -545,6 +545,10 @@ public class OrderDb
         // Migration 010: file_status on order_items — verify writes, tree reads.
         // 0 = unchecked, 1 = OK, -1 = error (missing/invalid file)
         AddColumnIfMissing(conn, "order_items", "file_status", "INTEGER NOT NULL DEFAULT 0");
+
+        // Migration 011: is_externally_modified on orders — set by transfer receive or LabApi edit.
+        // When set, PrintService scans disk vs DB before printing and offers choice if mismatch.
+        AddColumnIfMissing(conn, "orders", "is_externally_modified", "INTEGER NOT NULL DEFAULT 0");
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)
