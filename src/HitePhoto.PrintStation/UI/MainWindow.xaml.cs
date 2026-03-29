@@ -38,11 +38,11 @@ public partial class MainWindow : Window
 
     // Timers
     private readonly DispatcherTimer _refreshTimer;
+    private readonly DispatcherTimer _verifyTimer;
     private readonly DispatcherTimer _searchDebounce;
     private readonly DispatcherTimer _alertDrainTimer;
-    private readonly DispatcherTimer _pixfizzPollTimer;
-    private readonly DispatcherTimer _dakisScanTimer;
-    private readonly DispatcherTimer _syncTimer;
+
+    private bool _refreshInProgress;
 
     // Cancellation for async ingest
     private CancellationTokenSource _ingestCts = new();
@@ -81,16 +81,23 @@ public partial class MainWindow : Window
         PrintedTree.ItemsSource = _vm.PrintedOrders;
         OtherStoreTree.ItemsSource = _vm.OtherStoreOrders;
 
-        // Refresh timer — only reload if data changed
+        // Refresh timer — sync → scan → poll → load
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds) };
-        _refreshTimer.Tick += (_, _) =>
+        _refreshTimer.Tick += async (_, _) =>
         {
-            if (_vm.NeedsRefresh)
-            {
-                _vm.LoadOrders();
-                UpdateStatusBar();
-                _vm.NeedsRefresh = false;
-            }
+            if (_refreshInProgress) return;
+            _refreshInProgress = true;
+            try { await RunFullRefreshAsync(); }
+            finally { _refreshInProgress = false; }
+        };
+
+        // Hourly verify — full disk-vs-DB check + self-healing timestamps
+        _verifyTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
+        _verifyTimer.Tick += async (_, _) =>
+        {
+            await Task.Run(() => _vm.VerifyRecentOrders(_settings.DaysToVerify));
+            _vm.LoadOrders();
+            UpdateStatusBar();
         };
 
         // Verify debounce — wait 300ms after last click before running verify on background thread
@@ -127,6 +134,7 @@ public partial class MainWindow : Window
         {
             _searchDebounce.Stop();
             _vm.LoadOrders();
+            UpdateStatusBar();
         };
 
         // Alert drain
@@ -135,60 +143,6 @@ public partial class MainWindow : Window
         _alertDrainTimer.Start();
 
         AlertList.ItemsSource = _sessionAlerts;
-
-        // Pixfizz poll timer
-        _pixfizzPollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(_settings.PollIntervalSeconds) };
-        _pixfizzPollTimer.Tick += async (_, _) =>
-        {
-            try { await _vm.RunPixfizzPollAsync(_ingestCts.Token); }
-            catch (OperationCanceledException) { }
-            catch (Exception ex) { AlertCollector.Error(AlertCategory.Network, "Pixfizz poll failed", ex: ex); }
-        };
-
-        // Dakis scan timer — fallback in case FileSystemWatcher misses an event
-        _dakisScanTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
-        _dakisScanTimer.Tick += (_, _) =>
-        {
-            Task.Run(() =>
-            {
-                _vm.RunDakisScan();
-                Dispatcher.Invoke(() =>
-                {
-                    _vm.LoadOrders();
-                    UpdateStatusBar();
-                });
-            });
-        };
-
-        // MariaDB sync timer — pull changes + retry outbox
-        _syncTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(_settings.SyncIntervalSeconds) };
-        _syncTimer.Tick += async (_, _) =>
-        {
-            try
-            {
-                var sync = App.Services.GetRequiredService<ISyncService>();
-                await Task.Run(async () =>
-                {
-                    await sync.PullAsync();
-                    await sync.ProcessOutboxAsync();
-                });
-                if (_vm.NeedsRefresh)
-                    Dispatcher.Invoke(() => { _vm.LoadOrders(); UpdateStatusBar(); _vm.NeedsRefresh = false; });
-                else
-                    _vm.NeedsRefresh = true; // pulled data may have changed
-            }
-            catch (Exception ex)
-            {
-                AlertCollector.Error(AlertCategory.Database,
-                    "MariaDB sync timer failed",
-                    detail: $"Attempted: sync pull + outbox. " +
-                            $"Expected: sync completed. " +
-                            $"Found: {ex.GetType().Name}: {ex.Message}. " +
-                            $"Context: sync timer tick. " +
-                            $"State: will retry next cycle.",
-                    ex: ex);
-            }
-        };
 
         Loaded += MainWindow_Loaded;
     }
@@ -228,18 +182,10 @@ public partial class MainWindow : Window
             // Enable ingest timers now that initial verify is done
             Dispatcher.Invoke(() =>
             {
-                if (_settings.PixfizzEnabled && !string.IsNullOrWhiteSpace(_settings.PixfizzApiKey))
-                    _pixfizzPollTimer.Start();
-
                 if (_settings.DakisEnabled && !string.IsNullOrWhiteSpace(_settings.DakisWatchFolder))
-                {
                     _vm.StartDakisWatcher();
-                    _dakisScanTimer.Start(); // fallback scan
-                }
 
-                if (_settings.SyncEnabled)
-                    _syncTimer.Start();
-
+                _verifyTimer.Start();
                 _ = Core.AutoUpdater.CheckAndPromptAsync(_settings);
             });
         });
@@ -270,6 +216,19 @@ public partial class MainWindow : Window
             : new SolidColorBrush(Color.FromRgb(0xCF, 0x44, 0x44));
         DbStatusText.Text = _vm.IsDbConnected ? "SQLite OK" : "SQLite error";
         OrderCountText.Text = _vm.StatusText;
+        UpdateTabHeaders();
+    }
+
+    private void UpdateTabHeaders()
+    {
+        var hasSearch = !string.IsNullOrWhiteSpace(_vm.SearchText);
+        var pc = _vm.PendingOrders.Count;
+        var prc = _vm.PrintedOrders.Count;
+        var oc = _vm.OtherStoreOrders.Count;
+
+        PendingTab.Header = hasSearch && pc > 0 ? $"Pending Orders ({pc})" : "Pending Orders";
+        PrintedTab.Header = hasSearch && prc > 0 ? $"Printed Orders ({prc})" : "Printed Orders";
+        OtherStoreTab.Header = hasSearch && oc > 0 ? $"Other Store ({oc})" : "Other Store";
     }
 
     private void DrainAlerts()
@@ -565,6 +524,7 @@ public partial class MainWindow : Window
         DetailOrderId.Text = treeItem.ShortId;
         DetailCustomerName.Text = treeItem.CustomerName;
         DetailPhone.Text = treeItem.CustomerPhone;
+        DetailEmail.Text = treeItem.CustomerEmail;
         DetailStatus.Text = treeItem.StatusCode;
         DetailSource.Text = treeItem.SourceCode;
         DetailStore.Text = treeItem.StoreName;
@@ -886,6 +846,12 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ClearSearch_Click(object sender, RoutedEventArgs e)
+    {
+        SearchBox.Text = "";
+        SearchBox.Focus();
+    }
+
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_vm == null) return;
@@ -904,10 +870,52 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RefreshButton_Click(object sender, RoutedEventArgs e)
+    private async void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
-        _vm.LoadOrders();
-        UpdateStatusBar();
+        await RunFullRefreshAsync(includeVerify: true);
+    }
+
+    private async Task RunFullRefreshAsync(bool includeVerify = false)
+    {
+        try
+        {
+            // 1. Sync pull (MariaDB → SQLite)
+            if (_settings.SyncEnabled)
+            {
+                var sync = App.Services.GetRequiredService<Data.Sync.ISyncService>();
+                await Task.Run(async () =>
+                {
+                    await sync.PullAsync();
+                    await sync.ProcessOutboxAsync();
+                });
+            }
+
+            // 2. Dakis scan
+            await Task.Run(() => _vm.RunDakisScan());
+
+            // 3. Pixfizz poll
+            await _vm.RunPixfizzPollAsync(_ingestCts.Token);
+
+            // 4. Verify (only on button click, new orders, or hourly — not every 30s)
+            if (includeVerify)
+                await Task.Run(() => _vm.VerifyRecentOrders(_settings.DaysToVerify));
+
+            // 5. Load from SQLite + display
+            _vm.LoadOrders();
+            UpdateStatusBar();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.General,
+                "Refresh cycle failed",
+                detail: $"Attempted: full refresh (sync → scan → poll → verify → load). " +
+                        $"Expected: completed. " +
+                        $"Found: {ex.GetType().Name}: {ex.Message}. " +
+                        $"Context: manual or timer refresh. " +
+                        $"State: tree may show stale data.",
+                ex: ex);
+        }
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
@@ -925,7 +933,6 @@ public partial class MainWindow : Window
                 _refreshTimer.Interval = TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds);
                 _refreshTimer.Start();
             }
-            _pixfizzPollTimer.Interval = TimeSpan.FromSeconds(_settings.PollIntervalSeconds);
             _vm.LoadOrders();
         }
     }
@@ -1187,8 +1194,30 @@ public partial class MainWindow : Window
     private void TransferButton_Click(object sender, RoutedEventArgs e)
     {
         if (_selectedOrderItem == null) return;
-        // TODO: delegate to TransferService via ViewModel
-        MessageBox.Show("Transfer not yet wired.", "TODO", MessageBoxButton.OK, MessageBoxImage.Information);
+
+        var transfer = App.Services.GetService<Core.Services.ITransferService>();
+        if (transfer == null)
+        {
+            AlertCollector.Error(AlertCategory.Transfer,
+                "TransferService not registered",
+                detail: "Attempted: open transfer window. Expected: ITransferService in DI. Found: null.");
+            return;
+        }
+
+        var win = new TransferWindow(
+            _selectedOrderItem.DbId,
+            _selectedOrderItem.ExternalOrderId,
+            _selectedOrderItem.FolderPath,
+            transfer,
+            _orders,
+            _settings)
+        { Owner = this };
+
+        if (win.ShowDialog() == true)
+        {
+            _vm.LoadOrders();
+            UpdateStatusBar();
+        }
     }
 
     private async void PrintSelectedButton_Click(object sender, RoutedEventArgs e)
@@ -1215,6 +1244,21 @@ public partial class MainWindow : Window
         {
             foreach (var order in orders)
             {
+                // Transfer mismatch check — warn if files don't match DB after transfer
+                if (order.IsTransfer)
+                {
+                    var mismatches = _vm.CheckTransferMismatches(order.DbId);
+                    if (mismatches.Count > 0)
+                    {
+                        var details = string.Join("\n", mismatches.Select(m => $"  {m.ItemDescription}: {m.Issue}"));
+                        var proceed = MessageBox.Show(
+                            $"Order {order.ShortId} was transferred and has {mismatches.Count} mismatch(es):\n\n{details}\n\nPrint anyway?",
+                            "Transfer Mismatch", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                        if (proceed != MessageBoxResult.Yes)
+                            continue;
+                    }
+                }
+
                 var result = await Task.Run(() => _vm.PrintOrder(
                     order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode, sizeFilter));
 
@@ -1353,19 +1397,14 @@ public partial class MainWindow : Window
     private void StopTimers()
     {
         _refreshTimer.Stop();
-        _pixfizzPollTimer.Stop();
-        _dakisScanTimer.Stop();
-        _syncTimer.Stop();
+        _verifyTimer.Stop();
     }
 
     private void StartTimers()
     {
         if (_settings.RefreshIntervalSeconds > 0)
             _refreshTimer.Start();
-        _pixfizzPollTimer.Start();
-        _dakisScanTimer.Start();
-        if (_settings.SyncEnabled)
-            _syncTimer.Start();
+        _verifyTimer.Start();
     }
 }
 

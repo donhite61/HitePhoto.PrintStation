@@ -503,6 +503,46 @@
                 </ScrollViewer>
             </TabItem>
 
+            <!-- TRANSFER -->
+            <TabItem Header="Transfer">
+                <ScrollViewer Margin="12">
+                    <StackPanel MaxWidth="650">
+                        <TextBlock Text="Inter-Store Transfer" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Text="SFTP connection to the other store's machine. Used to transfer order files between stores."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,12" TextWrapping="Wrap"/>
+
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <Label Content="Host" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="TransferSftpHostBox" FontFamily="Consolas" FontSize="11"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                <Label Content="Port" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="TransferSftpPortBox" FontFamily="Consolas" FontSize="11" Width="60" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,4,0">
+                                <Label Content="Username" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <TextBox x:Name="TransferSftpUserBox" FontFamily="Consolas" FontSize="11"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="4,0,0,0">
+                                <Label Content="Password" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
+                                <PasswordBox x:Name="TransferSftpPassBox" FontFamily="Consolas" FontSize="11"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button Content="Test Transfer Connection" Width="180" Click="TestTransferSftp_Click"/>
+                            <TextBlock x:Name="TransferSftpTestStatus" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <!-- NOTIFICATIONS -->
             <TabItem Header="Notifications">
                 <ScrollViewer Margin="12">
@@ -615,6 +655,15 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <Button x:Name="WipeDbBtn" Content="Wipe Database" Width="140" Click="WipeDb_Click"/>
                             <TextBlock x:Name="WipeDbStatus" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"/>
+                        </StackPanel>
+
+                        <TextBlock Text="Repair" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Scan all Dakis order folders, read :billing_store: from each order.yml, and fix any orders where pickup_store_id doesn't match."
+                                   Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                            <Button Content="Repair Store Assignments" Width="200" Click="RepairStoreAssignments_Click"/>
+                            <TextBlock x:Name="RepairStoreStatus" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11"/>
                         </StackPanel>
 
                         <TextBlock Text="Test Data" Foreground="{DynamicResource TextHeading}"

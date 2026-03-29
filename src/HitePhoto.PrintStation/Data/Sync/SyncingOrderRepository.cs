@@ -123,4 +123,7 @@ public class SyncingOrderRepository : IOrderRepository
     public void SetExternallyModified(int orderId, bool modified) => _inner.SetExternallyModified(orderId, modified);
     public void SetFolderPath(int orderId, string folderPath) => _inner.SetFolderPath(orderId, folderPath);
     public List<(int Id, string Name)> GetStores() => _inner.GetStores();
+    public int? ResolveStoreId(string source, string externalId) => _inner.ResolveStoreId(source, externalId);
+    public void SetPickupStore(int orderId, int storeId) => _inner.SetPickupStore(orderId, storeId);
+    public List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders() => _inner.GetDakisOrders();
 }

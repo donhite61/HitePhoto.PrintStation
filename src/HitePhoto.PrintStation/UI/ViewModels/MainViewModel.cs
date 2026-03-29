@@ -25,6 +25,7 @@ public class MainViewModel : ViewModelBase
     private readonly IFilesNeededDecision _filesNeededDecision;
     private readonly IOrderVerifier _verifier;
     private readonly IPrintService _printService;
+    private readonly ITransferService _transferService;
     private readonly PixfizzIngestService _pixfizzIngest;
     private readonly DakisIngestService _dakisIngest;
     private readonly AppSettings _settings;
@@ -35,6 +36,7 @@ public class MainViewModel : ViewModelBase
     public ObservableCollection<OrderTreeItem> OtherStoreOrders { get; } = new();
 
     private Dictionary<int, string> _channelNames = new();
+    private Dictionary<string, int> _channelByRoutingKey = new();
     private Dictionary<string, string> _layoutByRoutingKey = new();
     private bool _channelNamesDirty = true;
 
@@ -99,6 +101,7 @@ public class MainViewModel : ViewModelBase
         IFilesNeededDecision filesNeededDecision,
         IOrderVerifier verifier,
         IPrintService printService,
+        ITransferService transferService,
         PixfizzIngestService pixfizzIngest,
         DakisIngestService dakisIngest,
         AppSettings settings)
@@ -112,6 +115,7 @@ public class MainViewModel : ViewModelBase
         _filesNeededDecision = filesNeededDecision;
         _verifier = verifier;
         _printService = printService;
+        _transferService = transferService;
         _pixfizzIngest = pixfizzIngest;
         _dakisIngest = dakisIngest;
         _settings = settings;
@@ -162,6 +166,8 @@ public class MainViewModel : ViewModelBase
                 _channelNames = allChannels
                     .GroupBy(c => c.ChannelNumber)
                     .ToDictionary(g => g.Key, g => $"{g.First().SizeLabel} {g.First().MediaType}".Trim());
+                _channelByRoutingKey = allChannels
+                    .ToDictionary(c => c.RoutingKey, c => c.ChannelNumber);
                 _layoutByRoutingKey = allChannels
                     .Where(c => !string.IsNullOrEmpty(c.Description))
                     .ToDictionary(c => c.RoutingKey, c => c.Description);
@@ -202,12 +208,11 @@ public class MainViewModel : ViewModelBase
                    s.short_name AS store_name
             FROM orders o
             LEFT JOIN stores s ON s.id = o.pickup_store_id
-            WHERE o.pickup_store_id = @storeId
+            WHERE o.files_local = 1
               AND o.status_code IN ({placeholders})
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
-        cmd.Parameters.AddWithValue("@storeId", _settings.StoreId);
         for (int i = 0; i < statusCodes.Length; i++)
             cmd.Parameters.AddWithValue($"@s{i}", statusCodes[i]);
 
@@ -231,12 +236,11 @@ public class MainViewModel : ViewModelBase
                    s.short_name AS store_name
             FROM orders o
             LEFT JOIN stores s ON s.id = o.pickup_store_id
-            WHERE o.pickup_store_id != @storeId
+            WHERE o.files_local = 0
               AND o.status_code NOT IN ('{OrderStatusCode.PickedUp}', '{OrderStatusCode.Cancelled}')
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
-        cmd.Parameters.AddWithValue("@storeId", _settings.StoreId);
 
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
@@ -326,6 +330,7 @@ public class MainViewModel : ViewModelBase
         ExternalOrderId = order.ExternalOrderId,
         CustomerName = $"{order.CustomerFirstName} {order.CustomerLastName}".Trim(),
         CustomerPhone = order.CustomerPhone,
+        CustomerEmail = order.CustomerEmail,
         SourceCode = order.SourceCode,
         StatusCode = order.StatusCode,
         StoreName = order.StoreName,
@@ -342,6 +347,7 @@ public class MainViewModel : ViewModelBase
         if (existing.ExternalOrderId != row.ExternalOrderId) existing.ExternalOrderId = row.ExternalOrderId;
         if (existing.CustomerName != name) existing.CustomerName = name;
         if (existing.CustomerPhone != row.CustomerPhone) existing.CustomerPhone = row.CustomerPhone;
+        if (existing.CustomerEmail != row.CustomerEmail) existing.CustomerEmail = row.CustomerEmail;
         if (existing.SourceCode != row.SourceCode) existing.SourceCode = row.SourceCode;
         if (existing.StatusCode != row.StatusCode) existing.StatusCode = row.StatusCode;
         if (existing.StoreName != row.StoreName) existing.StoreName = row.StoreName;
@@ -365,12 +371,13 @@ public class MainViewModel : ViewModelBase
         int printedCount = 0;
         var orderItems = new List<HitePhoto.Shared.Models.OrderItem>();
         int totalQty = 0;
-        int channelNumber = 0;
-        bool first = true;
+
+        // Channel comes from channel_mappings, not from order_items
+        var routingKey = Core.OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
+        _channelByRoutingKey.TryGetValue(routingKey, out int channelNumber);
 
         foreach (var item in group)
         {
-            if (first) { channelNumber = item.ChannelNumber; first = false; }
             if (verifyFiles && !string.IsNullOrEmpty(item.ImageFilepath))
             {
                 var error = OrderHelpers.VerifyFile(item.ImageFilepath);
@@ -387,14 +394,13 @@ public class MainViewModel : ViewModelBase
                 Quantity = item.Quantity,
                 ImageFilename = item.ImageFilename,
                 ImageFilepath = item.ImageFilepath,
-                ChannelNumber = item.ChannelNumber,
+                ChannelNumber = channelNumber,
                 IsPrinted = item.IsPrinted,
                 OptionsJson = item.OptionsJson
             });
         }
 
         var chName = channelNumber > 0 && _channelNames.TryGetValue(channelNumber, out var n) ? n : "";
-        var routingKey = Core.OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
         _layoutByRoutingKey.TryGetValue(routingKey, out var layoutName);
         return new SizeGroupResult(sizeLabel, mediaType, totalQty, printedCount, missingCount, channelNumber, chName, layoutName, orderItems);
     }
@@ -468,7 +474,7 @@ public class MainViewModel : ViewModelBase
         var placeholders = string.Join(",", orderIds.Select((_, i) => $"@id{i}"));
         cmd.CommandText = $"""
             SELECT oi.order_id, oi.id, oi.size_label, oi.media_type, oi.quantity,
-                   oi.image_filename, oi.image_filepath, oi.channel_number,
+                   oi.image_filename, oi.image_filepath,
                    oi.is_noritsu, oi.is_printed, oi.options_json
             FROM order_items oi
             WHERE oi.order_id IN ({placeholders})
@@ -488,10 +494,9 @@ public class MainViewModel : ViewModelBase
                 Quantity: reader.GetInt32(4),
                 ImageFilename: reader.IsDBNull(5) ? "" : reader.GetString(5),
                 ImageFilepath: reader.IsDBNull(6) ? "" : reader.GetString(6),
-                ChannelNumber: reader.IsDBNull(7) ? 0 : reader.GetInt32(7),
-                IsNoritsu: reader.GetInt32(8) == 1,
-                IsPrinted: reader.GetInt32(9) == 1,
-                OptionsJson: reader.IsDBNull(10) ? "[]" : reader.GetString(10));
+                IsNoritsu: reader.GetInt32(7) == 1,
+                IsPrinted: reader.GetInt32(8) == 1,
+                OptionsJson: reader.IsDBNull(9) ? "[]" : reader.GetString(9));
 
             if (!result.ContainsKey(orderId))
                 result[orderId] = new List<ItemRow>();
@@ -605,6 +610,9 @@ public class MainViewModel : ViewModelBase
         return result;
     }
 
+    public List<TransferMismatch> CheckTransferMismatches(int orderId)
+        => _transferService.CheckTransferMismatches(orderId);
+
     public List<Core.Models.ChannelInfo> GetAllChannels() => _orders.GetAllChannels();
 
     public void AssignChannel(string sizeLabel, string mediaType, int channelNumber, string? layoutName = null)
@@ -665,4 +673,4 @@ internal record OrderRow(
 internal record ItemRow(
     int Id, string SizeLabel, string MediaType, int Quantity,
     string ImageFilename, string ImageFilepath,
-    int ChannelNumber, bool IsNoritsu, bool IsPrinted, string OptionsJson);
+    bool IsNoritsu, bool IsPrinted, string OptionsJson);

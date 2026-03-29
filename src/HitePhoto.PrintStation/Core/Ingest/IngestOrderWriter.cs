@@ -1,3 +1,4 @@
+using System.IO;
 using HitePhoto.PrintStation.Core.Services;
 using HitePhoto.PrintStation.Data.Repositories;
 
@@ -50,6 +51,11 @@ public class IngestOrderWriter
 
             _history.AddNote(orderId, $"Order received at {DateTime.Now:g}");
             AppLog.Info($"Inserted {sourceCode} order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
+
+            // Stamp folder LastWriteTime to match ordered_at so verify's filesystem
+            // cutoff and DB cutoff use the same date
+            if (order.OrderedAt.HasValue && !string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
+                Directory.SetLastWriteTime(folderPath, order.OrderedAt.Value);
         }
         else
         {

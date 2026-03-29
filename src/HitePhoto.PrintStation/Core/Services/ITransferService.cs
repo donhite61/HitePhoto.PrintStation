@@ -11,4 +11,12 @@ public interface ITransferService
 
     /// <summary>Transfer specific items to another store.</summary>
     void TransferItems(int orderId, List<int> itemIds, int targetStoreId, string operatorName, string comment);
+
+    /// <summary>
+    /// For transferred orders (is_externally_modified=1), check if disk files match DB items.
+    /// Returns a list of mismatches. Empty list = all good.
+    /// </summary>
+    List<TransferMismatch> CheckTransferMismatches(int orderId);
 }
+
+public record TransferMismatch(string ItemDescription, string Issue);

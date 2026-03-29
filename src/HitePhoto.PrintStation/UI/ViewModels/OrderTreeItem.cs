@@ -120,6 +120,7 @@ public class OrderTreeItem : INotifyPropertyChanged
     private string _externalOrderId = "";
     private string _customerName = "";
     private string _customerPhone = "";
+    private string _customerEmail = "";
     private string _sourceCode = "";
     private string _statusCode = "";
     private string _storeName = "";
@@ -155,6 +156,12 @@ public class OrderTreeItem : INotifyPropertyChanged
     {
         get => _customerPhone;
         set { _customerPhone = value; OnPropertyChanged(); }
+    }
+
+    public string CustomerEmail
+    {
+        get => _customerEmail;
+        set { _customerEmail = value; OnPropertyChanged(); }
     }
 
     public string SourceCode

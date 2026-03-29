@@ -19,6 +19,7 @@ public enum AlertCategory
     Database,     // MariaDB/SQLite queries
     Settings,     // Config issues, missing paths
     Update,       // Auto-updater
+    Transfer,     // Inter-store file transfer
     General       // Catch-all
 }
 

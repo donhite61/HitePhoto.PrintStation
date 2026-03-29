@@ -89,6 +89,12 @@ public partial class SettingsWindow : Window
         UpdateSftpPassBox.Password = _settings.UpdateSftpPassword;
         UpdateSftpFolderBox.Text = _settings.UpdateSftpFolder;
 
+        // Transfer SFTP
+        TransferSftpHostBox.Text = _settings.TransferSftpHost;
+        TransferSftpPortBox.Text = _settings.TransferSftpPort.ToString();
+        TransferSftpUserBox.Text = _settings.TransferSftpUsername;
+        TransferSftpPassBox.Password = _settings.TransferSftpPassword;
+
         // Appearance
         var theme = _settings.Theme ?? "Light";
         foreach (ComboBoxItem item in ThemeCombo.Items)
@@ -197,6 +203,12 @@ public partial class SettingsWindow : Window
         _settings.UpdateSftpUsername = UpdateSftpUserBox.Text.Trim();
         _settings.UpdateSftpPassword = UpdateSftpPassBox.Password;
         _settings.UpdateSftpFolder = UpdateSftpFolderBox.Text.Trim();
+
+        // Transfer SFTP
+        _settings.TransferSftpHost = TransferSftpHostBox.Text.Trim();
+        _settings.TransferSftpPort = int.TryParse(TransferSftpPortBox.Text.Trim(), out int tp) ? tp : 22;
+        _settings.TransferSftpUsername = TransferSftpUserBox.Text.Trim();
+        _settings.TransferSftpPassword = TransferSftpPassBox.Password;
 
         // Appearance
         if (ThemeCombo.SelectedItem is ComboBoxItem themeItem && themeItem.Tag is string themeName)
@@ -926,6 +938,48 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void TestTransferSftp_Click(object sender, RoutedEventArgs e)
+    {
+        TransferSftpTestStatus.Text = "Connecting...";
+        TransferSftpTestStatus.Foreground = (Brush)FindResource("TextSecondary");
+
+        var host = TransferSftpHostBox.Text.Trim();
+        var port = int.TryParse(TransferSftpPortBox.Text.Trim(), out int p) ? p : 22;
+        var user = TransferSftpUserBox.Text.Trim();
+        var pass = TransferSftpPassBox.Password;
+
+        if (string.IsNullOrEmpty(host) || string.IsNullOrEmpty(user))
+        {
+            TransferSftpTestStatus.Text = "Host and username required";
+            TransferSftpTestStatus.Foreground = (Brush)FindResource("AccentRed");
+            return;
+        }
+
+        var error = await Task.Run(() =>
+        {
+            try
+            {
+                using var client = new Renci.SshNet.SftpClient(host, port, user, pass);
+                client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(10);
+                client.Connect();
+                client.Disconnect();
+                return (string?)null;
+            }
+            catch (Exception ex) { return ex.Message; }
+        });
+
+        if (error == null)
+        {
+            TransferSftpTestStatus.Text = "Connected!";
+            TransferSftpTestStatus.Foreground = (Brush)FindResource("AccentGreen");
+        }
+        else
+        {
+            TransferSftpTestStatus.Text = error;
+            TransferSftpTestStatus.Foreground = (Brush)FindResource("AccentRed");
+        }
+    }
+
     private async void TestDb_Click(object sender, RoutedEventArgs e)
     {
         DbTestStatus.Text = "Connecting...";
@@ -997,20 +1051,18 @@ public partial class SettingsWindow : Window
         {
             var db = App.Services.GetRequiredService<Data.OrderDb>();
             using var conn = db.OpenConnection();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                DELETE FROM order_item_options;
-                DELETE FROM order_items;
-                DELETE FROM order_history;
-                DELETE FROM color_corrections;
-                DELETE FROM alerts;
-                DELETE FROM sync_outbox;
-                DELETE FROM sync_metadata;
-                DELETE FROM option_defaults;
-                DELETE FROM id_map;
-                DELETE FROM orders;
-                """;
-            cmd.ExecuteNonQuery();
+            var tables = new[] {
+                "order_item_options", "order_items", "order_history",
+                "color_corrections", "alerts", "sync_outbox",
+                "sync_metadata", "option_defaults", "id_map", "orders"
+            };
+            foreach (var table in tables)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"DELETE FROM {table}";
+                var rows = cmd.ExecuteNonQuery();
+                AppLog.Info($"Wipe: deleted {rows} rows from {table}");
+            }
 
             Core.AlertCollector.Clear();
             WipeDbStatus.Text = "Database wiped";
@@ -1027,6 +1079,116 @@ public partial class SettingsWindow : Window
 
     // ══════════════════════════════════════════════════════════════════════
     //  Seed from disk
+    private async void RepairStoreAssignments_Click(object sender, RoutedEventArgs e)
+    {
+        RepairStoreStatus.Text = "Scanning...";
+        RepairStoreStatus.Foreground = (Brush)FindResource("TextSecondary");
+
+        var repo = App.Services.GetRequiredService<IOrderRepository>();
+        var deserializer = new YamlDotNet.Serialization.DeserializerBuilder().Build();
+
+        var result = await Task.Run(() =>
+        {
+            var orders = repo.GetDakisOrders();
+            int scanned = 0, fixed_ = 0, skipped = 0, errors = 0;
+
+            // YamlDotNet may parse ":key:" as ":key:" or ":key" — try both
+            static object? YGet(Dictionary<object, object> d, string key)
+            {
+                if (d.TryGetValue(key, out var v)) return v;
+                if (key.EndsWith(':') && d.TryGetValue(key[..^1], out v)) return v;
+                if (!key.EndsWith(':') && d.TryGetValue(key + ":", out v)) return v;
+                return null;
+            }
+
+            static string? YStr(Dictionary<object, object> d, string key)
+                => YGet(d, key)?.ToString()?.Trim().Trim('"');
+
+            foreach (var (id, externalOrderId, folderPath, currentPickupStoreId) in orders)
+            {
+                scanned++;
+                try
+                {
+                    if (string.IsNullOrEmpty(folderPath))
+                    { skipped++; continue; }
+
+                    var ymlPath = Path.Combine(folderPath, "order.yml");
+                    if (!File.Exists(ymlPath))
+                    { skipped++; continue; }
+
+                    var yaml = File.ReadAllText(ymlPath);
+                    var root = deserializer.Deserialize<object>(yaml);
+                    if (root is not Dictionary<object, object> dict)
+                    { skipped++; continue; }
+
+                    // Extract billing_store from :fulfillment: section
+                    string? billingStoreId = null;
+
+                    var ful = YGet(dict, ":fulfillment:") ?? YGet(dict, ":order_fulfillment:");
+                    if (ful is Dictionary<object, object> fulDict)
+                        billingStoreId = YStr(fulDict, ":billing_store:");
+
+                    // Fallback: :store: name → look up in :all_stores:
+                    if (string.IsNullOrEmpty(billingStoreId))
+                    {
+                        var store = YGet(dict, ":store:");
+                        if (store is Dictionary<object, object> storeDict)
+                        {
+                            var storeName = YStr(storeDict, ":name:");
+                            if (!string.IsNullOrEmpty(storeName))
+                            {
+                                var allStores = YGet(dict, ":all_stores:");
+                                if (allStores is List<object> storeList)
+                                {
+                                    foreach (var s in storeList)
+                                    {
+                                        if (s is Dictionary<object, object> sd)
+                                        {
+                                            var sName = YStr(sd, ":name:");
+                                            if (sName == storeName)
+                                            {
+                                                billingStoreId = YStr(sd, ":id:");
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(billingStoreId))
+                    { skipped++; continue; }
+
+                    var correctStoreId = repo.ResolveStoreId("dakis", billingStoreId);
+                    if (!correctStoreId.HasValue)
+                    { skipped++; continue; }
+
+                    if (currentPickupStoreId != correctStoreId.Value)
+                    {
+                        repo.SetPickupStore(id, correctStoreId.Value);
+                        fixed_++;
+                        AppLog.Info($"Repair: order {externalOrderId} pickup_store_id {currentPickupStoreId} → {correctStoreId.Value}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors++;
+                    AlertCollector.Error(AlertCategory.DataQuality,
+                        $"Repair failed for order {externalOrderId}",
+                        orderId: externalOrderId, ex: ex);
+                }
+            }
+
+            return (scanned, fixed_, skipped, errors);
+        });
+
+        RepairStoreStatus.Text = $"Scanned {result.scanned}: {result.fixed_} fixed, {result.skipped} skipped, {result.errors} errors";
+        RepairStoreStatus.Foreground = result.fixed_ > 0
+            ? (Brush)FindResource("AccentGreen")
+            : (Brush)FindResource("TextSecondary");
+    }
+
     // ══════════════════════════════════════════════════════════════════════
 
     private void SeedFromDisk_Click(object sender, RoutedEventArgs e)

@@ -59,6 +59,7 @@ public class OrderDb
 
             Execute(conn, CreateLookupTables);
             Execute(conn, CreateStoresTable);
+            Execute(conn, CreateStoreIdentifiersTable);
             Execute(conn, CreateVendorsTable);
             Execute(conn, CreateProductCategoriesTable);
             Execute(conn, CreateServicesTable);
@@ -128,6 +129,19 @@ public class OrderDb
             store_name TEXT NOT NULL,
             short_name TEXT DEFAULT '',
             is_local   INTEGER NOT NULL DEFAULT 0
+        );
+        """;
+
+    // ── Store Identifiers ──────────────────────────────────────────────
+
+    private const string CreateStoreIdentifiersTable = """
+        CREATE TABLE IF NOT EXISTS store_identifiers (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            store_id    INTEGER NOT NULL,
+            source      TEXT NOT NULL,
+            external_id TEXT NOT NULL,
+            FOREIGN KEY (store_id) REFERENCES stores(id),
+            UNIQUE(source, external_id)
         );
         """;
 
@@ -206,6 +220,7 @@ public class OrderDb
             hold_reason               TEXT DEFAULT NULL,
             pickup_store_id           INTEGER NOT NULL,
             current_location_store_id INTEGER,
+            files_local               INTEGER NOT NULL DEFAULT 0,
             total_amount              REAL DEFAULT 0,
             payment_status            TEXT DEFAULT '',
             special_instructions      TEXT DEFAULT '',
@@ -420,6 +435,18 @@ public class OrderDb
                 (2, 'West Bloomfield',  'WB');
             """);
 
+        // Store identifiers — map external IDs to our store IDs
+        Execute(conn, """
+            INSERT OR IGNORE INTO store_identifiers (store_id, source, external_id) VALUES
+                (1, 'dakis',   '881'),
+                (2, 'dakis',   '882'),
+                (2, 'pixfizz', 'hitephoto'),
+                (1, 'pixfizz', 'hitephotobh'),
+                (1, 'pixfizz', 'hitephoto_bh'),
+                (2, 'pixfizz', '61f26d7f-1c65-4cb8-a44f-ab2cd8b1bafc'),
+                (1, 'pixfizz', 'c3977291-4913-4bcd-a846-834f5df0b0c8');
+            """);
+
         // In-house vendors (one per store)
         Execute(conn, """
             INSERT OR IGNORE INTO vendors (id, vendor_name, vendor_type, store_id, default_needs_files)
@@ -549,6 +576,10 @@ public class OrderDb
         // Migration 011: is_externally_modified on orders — set by transfer receive or LabApi edit.
         // When set, PrintService scans disk vs DB before printing and offers choice if mismatch.
         AddColumnIfMissing(conn, "orders", "is_externally_modified", "INTEGER NOT NULL DEFAULT 0");
+
+        // Migration 012: files_local — 1 = this machine has the image files on disk.
+        // Tree filters on this. Set on ingest, never cleared by sync or transfer.
+        AddColumnIfMissing(conn, "orders", "files_local", "INTEGER NOT NULL DEFAULT 0");
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)

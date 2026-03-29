@@ -11,6 +11,7 @@ public class DakisIngestService : IDisposable
 {
     private readonly DakisOrderParser _parser;
     private readonly IngestOrderWriter _writer;
+    private readonly Data.Repositories.IOrderRepository _orders;
     private readonly AppSettings _settings;
 
     private FileSystemWatcher? _watcher;
@@ -18,10 +19,12 @@ public class DakisIngestService : IDisposable
     public DakisIngestService(
         DakisOrderParser parser,
         IngestOrderWriter writer,
+        Data.Repositories.IOrderRepository orders,
         AppSettings settings)
     {
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
@@ -147,7 +150,12 @@ public class DakisIngestService : IDisposable
         // File verification happens in verify after insert — not here
         order = order with { DownloadStatus = IngestConstants.StatusReady };
 
-        _writer.WriteToSqlite(order, _settings.StoreId, "dakis", order.FolderPath ?? "");
+        // Resolve pickup store from Dakis billing_store ID (e.g. "881" → store 1)
+        AppLog.Info($"Dakis ingest {order.ExternalOrderId}: billing='{order.BillingStoreId}' resolving...");
+        var pickupStoreId = _orders.ResolveStoreId("dakis", order.BillingStoreId ?? "")
+                            ?? _settings.StoreId;
+
+        _writer.WriteToSqlite(order, pickupStoreId, "dakis", order.FolderPath ?? "");
     }
 
     public void Dispose()

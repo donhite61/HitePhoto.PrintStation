@@ -21,7 +21,7 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, external_order_id, source_code, pickup_store_id,
-                   customer_email, folder_path, is_held
+                   customer_email, folder_path, is_held, is_externally_modified
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", orderId);
@@ -36,7 +36,8 @@ public class OrderRepository : IOrderRepository
             PickupStoreId: reader.GetInt32(3),
             CustomerEmail: reader.IsDBNull(4) ? "" : reader.GetString(4),
             FolderPath: reader.IsDBNull(5) ? "" : reader.GetString(5),
-            IsHeld: reader.GetInt32(6) == 1);
+            IsHeld: reader.GetInt32(6) == 1,
+            IsExternallyModified: reader.GetInt32(7) == 1);
     }
 
     public HitePhoto.Shared.Models.Order? GetFullOrder(int orderId)
@@ -408,12 +409,11 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = """
             SELECT o.id, o.external_order_id, o.folder_path, o.source_code
             FROM orders o
-            WHERE o.pickup_store_id = @storeId
+            WHERE o.files_local = 1
               AND (@daysBack = 0 OR o.ordered_at >= @cutoff)
               AND o.is_test = 0
               AND o.is_transfer = 0
             """;
-        cmd.Parameters.AddWithValue("@storeId", storeId);
         cmd.Parameters.AddWithValue("@daysBack", days);
         cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
         using var reader = cmd.ExecuteReader();
@@ -447,7 +447,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test
+                    is_test, files_local
                 ) VALUES (
                     @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
@@ -458,7 +458,7 @@ public class OrderRepository : IOrderRepository
                     @deliveryMethod, @shipFname, @shipLname,
                     @shipAddr1, @shipAddr2, @shipCity,
                     @shipState, @shipZip, @shipCountry, @shipMethod,
-                    @isTest
+                    @isTest, 1
                 );
                 SELECT last_insert_rowid();
                 """;
@@ -841,5 +841,54 @@ public class OrderRepository : IOrderRepository
         while (reader.Read())
             stores.Add((reader.GetInt32(0), reader.IsDBNull(1) ? "" : reader.GetString(1)));
         return stores;
+    }
+
+    public int? ResolveStoreId(string source, string externalId)
+    {
+        if (string.IsNullOrEmpty(externalId)) return null;
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT store_id FROM store_identifiers WHERE source = @source AND external_id = @eid";
+        cmd.Parameters.AddWithValue("@source", source);
+        cmd.Parameters.AddWithValue("@eid", externalId);
+        var result = cmd.ExecuteScalar();
+        return result is long id ? (int)id : null;
+    }
+
+    public void SetPickupStore(int orderId, int storeId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET pickup_store_id = @store, updated_at = datetime('now') WHERE id = @id";
+        cmd.Parameters.AddWithValue("@store", storeId);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"SetPickupStore: order {orderId} not found",
+                detail: $"Attempted: UPDATE orders SET pickup_store_id={storeId} WHERE id={orderId}. " +
+                        $"Expected: 1 row updated. Found: 0.");
+    }
+
+    public List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders()
+    {
+        var results = new List<(int, string, string, int)>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, external_order_id, folder_path, pickup_store_id
+            FROM orders WHERE source_code = 'dakis'
+            """;
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            results.Add((
+                reader.GetInt32(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? "" : reader.GetString(2),
+                reader.GetInt32(3)));
+        }
+        return results;
     }
 }

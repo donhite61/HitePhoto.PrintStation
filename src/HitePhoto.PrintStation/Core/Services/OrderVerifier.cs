@@ -323,10 +323,16 @@ public class OrderVerifier : IOrderVerifier
             new Dictionary<string, string> { ["folder_path"] = dir });
         var order = _dakisParser.Parse(raw);
 
-        var existingId = _orders.FindOrderId(order.ExternalOrderId, _settings.StoreId);
+        var billingId = order.BillingStoreId ?? "";
+        var pickupStoreId = _orders.ResolveStoreId("dakis", billingId)
+                            ?? _settings.StoreId;
+
+        AppLog.Info($"Verify insert Dakis {externalOrderId}: billing='{billingId}' → pickup={pickupStoreId}");
+
+        var existingId = _orders.FindOrderId(order.ExternalOrderId, pickupStoreId);
         if (existingId != null) return;
 
-        var orderId = _orders.InsertOrder(order, _settings.StoreId);
+        var orderId = _orders.InsertOrder(order, pickupStoreId);
         _history.AddNote(orderId, $"Order received at {DateTime.Now:g} (discovered by verify)");
     }
 

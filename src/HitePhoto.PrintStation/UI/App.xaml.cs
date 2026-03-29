@@ -149,7 +149,11 @@ public partial class App : Application
         services.AddSingleton<IEmailSender>(sp =>
             new Core.Processing.EmailService(sp.GetRequiredService<AppSettings>()));
         services.AddSingleton<IPixfizzNotifier, StubPixfizzNotifier>();
-        // services.AddSingleton<ITransferService, TransferService>();
+        services.AddSingleton<ITransferService>(sp =>
+            new TransferService(
+                sp.GetRequiredService<IOrderRepository>(),
+                sp.GetRequiredService<IHistoryRepository>(),
+                sp.GetRequiredService<AppSettings>()));
 
         // ViewModel
         services.AddSingleton<ViewModels.MainViewModel>();

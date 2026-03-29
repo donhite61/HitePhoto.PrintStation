@@ -110,6 +110,15 @@ public interface IOrderRepository
 
     /// <summary>Get all stores from the stores table.</summary>
     List<(int Id, string Name)> GetStores();
+
+    /// <summary>Resolve an external store ID (Dakis "881", Pixfizz slug) to our DB store ID.</summary>
+    int? ResolveStoreId(string source, string externalId);
+
+    /// <summary>Update an order's pickup_store_id.</summary>
+    void SetPickupStore(int orderId, int storeId);
+
+    /// <summary>Get all Dakis orders with their folder paths for repair scans.</summary>
+    List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders();
 }
 
 public record OrderRow(
@@ -134,7 +143,8 @@ public record OrderRecord(
     int PickupStoreId,
     string CustomerEmail,
     string FolderPath,
-    bool IsHeld);
+    bool IsHeld,
+    bool IsExternallyModified = false);
 
 public record OrderItemRecord(
     int Id,
