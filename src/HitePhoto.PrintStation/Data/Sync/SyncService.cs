@@ -519,13 +519,12 @@ public class SyncService : ISyncService
             cmd.CommandText = """
                 UPDATE order_items SET
                     quantity = @qty, image_filepath = @fpath,
-                    channel_number = @channel, options_json = @options,
+                    options_json = @options,
                     is_printed = @printed, updated_at = datetime('now')
                 WHERE id = @id
                 """;
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);
             cmd.Parameters.AddWithValue("@fpath", (string?)item.image_filepath ?? "");
-            cmd.Parameters.AddWithValue("@channel", item.channel_number != null ? (int)item.channel_number : 0);
             cmd.Parameters.AddWithValue("@options", (string?)item.options_json ?? "[]");
             cmd.Parameters.AddWithValue("@printed", Convert.ToBoolean(item.is_printed ?? false) ? 1 : 0);
             cmd.Parameters.AddWithValue("@id", Convert.ToInt32(existingId));
@@ -538,11 +537,11 @@ public class SyncService : ISyncService
             cmd.CommandText = """
                 INSERT INTO order_items (
                     order_id, size_label, media_type, quantity,
-                    image_filename, image_filepath, channel_number,
+                    image_filename, image_filepath,
                     options_json, is_printed
                 ) VALUES (
                     @oid, @size, @media, @qty,
-                    @fname, @fpath, @channel,
+                    @fname, @fpath,
                     @options, @printed
                 )
                 """;
@@ -552,7 +551,6 @@ public class SyncService : ISyncService
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);
             cmd.Parameters.AddWithValue("@fname", imageFilename);
             cmd.Parameters.AddWithValue("@fpath", (string?)item.image_filepath ?? "");
-            cmd.Parameters.AddWithValue("@channel", item.channel_number != null ? (int)item.channel_number : 0);
             cmd.Parameters.AddWithValue("@options", (string?)item.options_json ?? "[]");
             cmd.Parameters.AddWithValue("@printed", Convert.ToBoolean(item.is_printed ?? false) ? 1 : 0);
             cmd.ExecuteNonQuery();

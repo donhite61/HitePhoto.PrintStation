@@ -46,6 +46,9 @@ public class OrderDb
 
     public string DbPath => _dbPath;
 
+    /// <summary>Re-create the database after file deletion.</summary>
+    public void Reinitialize() => Initialize();
+
     // ══════════════════════════════════════════════════════════════════════
     //  Schema initialization
     // ══════════════════════════════════════════════════════════════════════

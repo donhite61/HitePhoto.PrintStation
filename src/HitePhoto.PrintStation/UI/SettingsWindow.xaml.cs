@@ -13,6 +13,7 @@ using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Core.Models;
 using HitePhoto.PrintStation.Core.Processing;
+using Microsoft.Data.Sqlite;
 using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.UI;
@@ -1039,8 +1040,9 @@ public partial class SettingsWindow : Window
     private void WipeDb_Click(object sender, RoutedEventArgs e)
     {
         var result = MessageBox.Show(
-            "This will delete ALL orders, items, alerts, and history.\n\n" +
-            "Channel mappings and layouts will be kept.\n" +
+            "This will delete the database file and restart fresh.\n\n" +
+            "All orders, items, alerts, and history will be lost.\n" +
+            "Channel mappings and layouts will be lost.\n" +
             "Orders will re-ingest from disk on next scan.\n\n" +
             "Continue?",
             "Wipe Database", MessageBoxButton.YesNo, MessageBoxImage.Warning);
@@ -1050,22 +1052,27 @@ public partial class SettingsWindow : Window
         try
         {
             var db = App.Services.GetRequiredService<Data.OrderDb>();
-            using var conn = db.OpenConnection();
-            var tables = new[] {
-                "order_item_options", "order_items", "order_history",
-                "color_corrections", "alerts", "sync_outbox",
-                "sync_metadata", "option_defaults", "id_map", "orders"
-            };
-            foreach (var table in tables)
+            var dbPath = db.DbPath;
+
+            // Force SQLite to close all connections and flush WAL
+            SqliteConnection.ClearAllPools();
+
+            // Delete the DB file and WAL/SHM files
+            foreach (var ext in new[] { "", "-shm", "-wal" })
             {
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = $"DELETE FROM {table}";
-                var rows = cmd.ExecuteNonQuery();
-                AppLog.Info($"Wipe: deleted {rows} rows from {table}");
+                var path = dbPath + ext;
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                    AppLog.Info($"Wipe: deleted {path}");
+                }
             }
 
+            // Re-initialize fresh DB (creates tables + seeds)
+            db.Reinitialize();
+
             Core.AlertCollector.Clear();
-            WipeDbStatus.Text = "Database wiped";
+            WipeDbStatus.Text = "Database wiped — restart recommended";
             WipeDbStatus.Foreground = (Brush)FindResource("AccentGreen");
         }
         catch (Exception ex)
