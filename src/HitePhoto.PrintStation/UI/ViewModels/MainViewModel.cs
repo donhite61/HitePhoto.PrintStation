@@ -36,6 +36,7 @@ public class MainViewModel : ViewModelBase
     public ObservableCollection<OrderTreeItem> OtherStoreOrders { get; } = new();
 
     private Dictionary<int, string> _channelNames = new();
+    private bool _csvChannelNamesLoaded;
     private Dictionary<string, int> _channelByRoutingKey = new();
     private Dictionary<string, string> _layoutByRoutingKey = new();
     private bool _channelNamesDirty = true;
@@ -169,17 +170,20 @@ public class MainViewModel : ViewModelBase
                     .Where(c => !string.IsNullOrEmpty(c.Description))
                     .ToDictionary(c => c.RoutingKey, c => c.Description);
 
-                // Channel names come from Noritsu CSV (the printer's actual labels),
-                // NOT from the routing key (which is just the ordered size text)
-                _channelNames = new Dictionary<int, string>();
-                if (!string.IsNullOrWhiteSpace(_settings.ChannelsCsvPath))
+                // Channel names come from Noritsu CSV — read once, not on every refresh
+                if (!_csvChannelNamesLoaded)
                 {
-                    var csvChannels = new Core.Processing.ChannelsCsvReader(_settings.ChannelsCsvPath).Load();
-                    foreach (var c in csvChannels)
+                    _channelNames = new Dictionary<int, string>();
+                    if (!string.IsNullOrWhiteSpace(_settings.ChannelsCsvPath))
                     {
-                        _channelNames.TryAdd(c.ChannelNumber,
-                            $"{c.SizeLabel} {c.MediaType}".Trim());
+                        var csvChannels = new Core.Processing.ChannelsCsvReader(_settings.ChannelsCsvPath).Load();
+                        foreach (var c in csvChannels)
+                        {
+                            _channelNames.TryAdd(c.ChannelNumber,
+                                $"{c.SizeLabel} {c.MediaType}".Trim());
+                        }
                     }
+                    _csvChannelNamesLoaded = true;
                 }
                 _channelNamesDirty = false;
             }

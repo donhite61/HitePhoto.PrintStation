@@ -513,7 +513,7 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = """
             SELECT routing_key, channel_number, layout_name
             FROM channel_mappings
-            WHERE channel_number > 0
+            WHERE channel_number != 0
             ORDER BY channel_number
             """;
         using var reader = cmd.ExecuteReader();
