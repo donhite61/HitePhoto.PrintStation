@@ -392,7 +392,7 @@ public class MainViewModel : ViewModelBase
 
         foreach (var item in group)
         {
-            if (verifyFiles && !string.IsNullOrEmpty(item.ImageFilepath))
+            if (verifyFiles && item.IsLocalProduction && !string.IsNullOrEmpty(item.ImageFilepath))
             {
                 var error = OrderHelpers.VerifyFile(item.ImageFilepath);
                 if (error != null) missingCount++;
