@@ -160,30 +160,10 @@ public class OrderVerifier : IOrderVerifier
             }
         }
 
-        // ── Leftover in DB list: in DB but not on disk → error state ──
-        int missingFolderCount = 0;
-        foreach (var kvp in dbList)
-        {
-            missingFolderCount++;
-            if (missingFolderCount <= 10)
-            {
-                AlertCollector.Error(AlertCategory.DataQuality,
-                    $"Order {kvp.Key} in DB but folder missing from disk",
-                    orderId: kvp.Key,
-                    detail: $"Attempted: find folder for order {kvp.Key}. Expected: folder at '{kvp.Value.FolderPath}'. " +
-                            $"Found: folder missing. Context: source {kvp.Value.SourceCode}, DB id {kvp.Value.Id}. " +
-                            $"State: order is in database but files are gone.");
-            }
-            errors++;
-        }
-        if (missingFolderCount > 10)
-        {
-            AlertCollector.Error(AlertCategory.DataQuality,
-                $"{missingFolderCount} orders in DB but folders missing from disk",
-                detail: $"Attempted: verify all orders. Expected: folders on disk. " +
-                        $"Found: {missingFolderCount} missing. Context: showing first 10 only. " +
-                        $"State: likely running on wrong machine or orders were purged.");
-        }
+        // Leftover in DB list = orders not found in folder scan.
+        // Expected for synced orders (files_local=0) and orders outside scan date range.
+        if (dbList.Count > 0)
+            AppLog.Info($"Verify: {dbList.Count} DB orders not in folder scan (synced or outside date range)");
 
         AppLog.Info($"Verify complete: {matchCount} matched, {inserted} inserted, {repaired} repaired, {errors} errors");
         return new VerifyResult(matchCount, inserted, repaired, errors);
