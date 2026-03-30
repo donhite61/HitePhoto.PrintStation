@@ -310,14 +310,6 @@ public class DakisOrderParser
 
             info.FulfillmentType = YStr(fulfillment, ":fulfillment_type:");
 
-            // Invoice-only detection
-            if (!string.IsNullOrEmpty(currentStoreId))
-            {
-                var fulfillers = YList(fulfillment, ":fulfillers:");
-                if (fulfillers != null && fulfillers.Count > 0)
-                    info.IsInvoiceOnly = !fulfillers.Any(f => f?.ToString() == currentStoreId);
-            }
-
             // Printing order options (for print orders)
             info.PrintingOrderOptions = YList(root, ":printing_order_options:");
         }
@@ -404,11 +396,6 @@ public class DakisOrderParser
 
                     var fulfillmentStoreId = YStr(print, ":fulfillment_store_id:");
 
-                    // Filter: only this store's items
-                    if (!string.IsNullOrEmpty(info.CurrentStoreId) &&
-                        fulfillmentStoreId != info.CurrentStoreId)
-                        continue;
-
                     // Calculate expected path
                     // Dakis strips dots from folder names (e.g. "2.5x3.5" → "25x35")
                     // Dakis keeps trailing spaces from :text: in folder names
@@ -482,11 +469,6 @@ public class DakisOrderParser
 
             decimal.TryParse(YStr(gift, ":price:"), NumberStyles.Number,
                 CultureInfo.InvariantCulture, out var price);
-
-            // Filter: only this store's items
-            if (!string.IsNullOrEmpty(info.CurrentStoreId) &&
-                fulfillmentStoreId != info.CurrentStoreId)
-                continue;
 
             if (string.IsNullOrWhiteSpace(text))
             {
