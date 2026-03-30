@@ -330,6 +330,9 @@ public class SyncService : ISyncService
                 }
             }
 
+            // One-time: purge system junk from MariaDB so it stops syncing back
+            await PurgeMariaDbNotesOnceAsync();
+
             // Pull notes
             var lastNotesSync = _outbox.GetLastSyncAt("order_notes", "pull") ?? DateTime.MinValue;
             var remoteNotes = await _remoteDb.GetOrderNotesSinceAsync(lastNotesSync);
@@ -557,6 +560,29 @@ public class SyncService : ISyncService
         }
     }
 
+    private async Task PurgeMariaDbNotesOnceAsync()
+    {
+        using var conn = _localDb.OpenConnection();
+        using var check = conn.CreateCommand();
+        check.CommandText = """
+            CREATE TABLE IF NOT EXISTS migrations_applied (
+                id TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """;
+        check.ExecuteNonQuery();
+
+        using var exists = conn.CreateCommand();
+        exists.CommandText = "SELECT 1 FROM migrations_applied WHERE id = '013_purge_mariadb_notes'";
+        if (exists.ExecuteScalar() != null) return;
+
+        await _remoteDb.PurgeSystemNotesAsync();
+
+        using var mark = conn.CreateCommand();
+        mark.CommandText = "INSERT INTO migrations_applied (id) VALUES ('013_purge_mariadb_notes')";
+        mark.ExecuteNonQuery();
+    }
+
     private void InsertRemoteNote(dynamic note)
     {
         int mariaDbNoteId = (int)note.id;
@@ -582,6 +608,12 @@ public class SyncService : ISyncService
         string noteText = (string)note.note_text;
         string employeeName = ((string?)note.EmployeeName ?? "").Trim();
         string createdAt = ((DateTime)note.created_at).ToString("o");
+
+        // Skip system noise — ingest/verify bookkeeping doesn't belong in operator history
+        if (noteText.StartsWith("Order received", StringComparison.OrdinalIgnoreCase) ||
+            noteText.StartsWith("Verify:", StringComparison.OrdinalIgnoreCase) ||
+            noteText.StartsWith("Repaired at", StringComparison.OrdinalIgnoreCase))
+            return;
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """

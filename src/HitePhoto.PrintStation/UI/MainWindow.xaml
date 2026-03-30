@@ -203,7 +203,7 @@
         <Border DockPanel.Dock="Top" Background="{DynamicResource ToolbarBg}" Padding="8,5">
             <StackPanel Orientation="Horizontal">
                 <Button x:Name="PrintBtn" Content="Print"
-                        Width="60" Margin="0,0,6,0" Background="{DynamicResource ButtonPrintBg}"
+                        Width="100" Margin="0,0,6,0" Background="{DynamicResource ButtonPrintBg}"
                         Click="PrintSelectedButton_Click"/>
                 <Button x:Name="DoneBtn" Content="Mark Printed" Width="100" Margin="0,0,6,0"
                         Click="DoneButton_Click"/>
@@ -466,23 +466,26 @@
                                 BorderThickness="0,0,0,1" Margin="0,4,0,0"/>
                     </StackPanel>
 
-                    <!-- Notes (compact) -->
-                    <ListBox x:Name="NotesListBox" Grid.Row="3" MaxHeight="80" Margin="10,4,10,0"
-                             Background="{DynamicResource SurfaceBg}"
-                             BorderBrush="{DynamicResource BorderBrush}"
-                             BorderThickness="0">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Orientation="Horizontal" Margin="0,1">
-                                    <TextBlock Text="{Binding CreatedAt}"
-                                               Foreground="{DynamicResource TextMuted}" FontSize="10"/>
-                                    <TextBlock Text="{Binding Note}"
-                                               Foreground="{DynamicResource TextPrimary}" FontSize="11"
-                                               Margin="8,0,0,0" TextWrapping="NoWrap"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                    <!-- Notes (last 2 + History button) -->
+                    <StackPanel Grid.Row="3" Margin="10,4,10,0">
+                        <ItemsControl x:Name="NotesPreview">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Margin="0,1">
+                                        <TextBlock Text="{Binding CreatedAt}"
+                                                   Foreground="{DynamicResource TextMuted}" FontSize="10"/>
+                                        <TextBlock Text="{Binding Note}"
+                                                   Foreground="{DynamicResource TextPrimary}" FontSize="11"
+                                                   Margin="8,0,0,0" TextWrapping="NoWrap"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button x:Name="HistoryButton" Content="History..."
+                                HorizontalAlignment="Left" Padding="6,2" Margin="0,2,0,0"
+                                FontSize="10" Visibility="Collapsed"
+                                Click="HistoryButton_Click"/>
+                    </StackPanel>
 
                     <!-- Thumbnail strip (pinned to bottom) -->
                     <Border Grid.Row="5" Background="{DynamicResource WindowBg}"

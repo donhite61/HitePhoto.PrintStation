@@ -501,7 +501,8 @@ public partial class MainWindow : Window
         DetailContent.Visibility = Visibility.Collapsed;
         SizeDetailPanel.Visibility = Visibility.Collapsed;
         ThumbnailPanel.Children.Clear();
-        NotesListBox.ItemsSource = null;
+        NotesPreview.ItemsSource = null;
+        HistoryButton.Visibility = Visibility.Collapsed;
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -534,8 +535,10 @@ public partial class MainWindow : Window
         // Order options (Glossy, Matte, etc.)
         LoadOrderOptions(treeItem);
 
-        // Notes from ViewModel
-        NotesListBox.ItemsSource = _vm.OrderNotes;
+        // Notes — show last 2 in preview, button for full history
+        var allNotes = _vm.OrderNotes;
+        NotesPreview.ItemsSource = allNotes.Take(2).ToList();
+        HistoryButton.Visibility = allNotes.Count > 2 ? Visibility.Visible : Visibility.Collapsed;
 
         SizeDetailPanel.Visibility = Visibility.Collapsed;
 
@@ -1390,6 +1393,15 @@ public partial class MainWindow : Window
         var folder = _selectedOrderItem.FolderPath;
         if (!string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder))
             Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true });
+    }
+
+    private void HistoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedOrderItem == null) return;
+        var label = $"{_selectedOrderItem.CustomerName} — {_selectedOrderItem.ExternalOrderId}";
+        var notes = _vm.OrderNotes.ToList();
+        var win = new OrderHistoryWindow(label, notes) { Owner = this };
+        win.ShowDialog();
     }
 
     // ── Timer helpers ──────────────────────────────────────────────────────

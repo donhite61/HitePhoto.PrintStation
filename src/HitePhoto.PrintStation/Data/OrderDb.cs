@@ -583,6 +583,11 @@ public class OrderDb
         // Migration 012: files_local — 1 = this machine has the image files on disk.
         // Tree filters on this. Set on ingest, never cleared by sync or transfer.
         AddColumnIfMissing(conn, "orders", "files_local", "INTEGER NOT NULL DEFAULT 0");
+
+        // Migration 013: One-time purge of all pre-existing history.
+        // Old ingest/verify code spammed junk notes. Wipe the slate —
+        // only operator actions (print, hold, notify) create notes going forward.
+        RunOnce(conn, "013_purge_history", "DELETE FROM order_history");
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)
@@ -611,5 +616,27 @@ public class OrderDb
                 return;
         }
         Execute(conn, $"ALTER TABLE {table} ADD COLUMN {column} {definition}");
+    }
+
+    private static void RunOnce(SqliteConnection conn, string migrationId, string sql)
+    {
+        Execute(conn, """
+            CREATE TABLE IF NOT EXISTS migrations_applied (
+                id TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """);
+
+        using var check = conn.CreateCommand();
+        check.CommandText = "SELECT 1 FROM migrations_applied WHERE id = @id";
+        check.Parameters.AddWithValue("@id", migrationId);
+        if (check.ExecuteScalar() != null) return;
+
+        Execute(conn, sql);
+
+        using var insert = conn.CreateCommand();
+        insert.CommandText = "INSERT INTO migrations_applied (id) VALUES (@id)";
+        insert.Parameters.AddWithValue("@id", migrationId);
+        insert.ExecuteNonQuery();
     }
 }

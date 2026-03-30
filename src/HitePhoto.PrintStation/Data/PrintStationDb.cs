@@ -349,6 +349,28 @@ public class PrintStationDb
         }
     }
 
+    /// <summary>Delete system-generated junk notes from MariaDB (one-time cleanup).</summary>
+    public async Task PurgeSystemNotesAsync()
+    {
+        const string sql = """
+            DELETE FROM order_notes
+            WHERE note_text LIKE 'Order received%'
+               OR note_text LIKE 'Verify:%'
+               OR note_text LIKE 'Repaired at%'
+            """;
+        try
+        {
+            await using var conn = CreateConnection();
+            var deleted = await conn.ExecuteAsync(sql);
+            if (deleted > 0)
+                AppLog.Info($"Purged {deleted} system notes from MariaDB");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Info($"MariaDB note purge failed: {ex.Message}");
+        }
+    }
+
     /// <summary>Add a note to an order.</summary>
     public async Task<bool> AddNoteAsync(int orderId, int? employeeId, string noteText, string noteType = "general")
     {

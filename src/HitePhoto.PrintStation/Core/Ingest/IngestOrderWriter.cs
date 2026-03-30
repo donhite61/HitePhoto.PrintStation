@@ -11,7 +11,6 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 public class IngestOrderWriter
 {
     private readonly IOrderRepository _orders;
-    private readonly IHistoryRepository _history;
     private readonly IOrderVerifier _verifier;
 
     public IngestOrderWriter(
@@ -20,7 +19,7 @@ public class IngestOrderWriter
         IOrderVerifier verifier)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
-        _history = history ?? throw new ArgumentNullException(nameof(history));
+        // history parameter kept for DI compatibility but no longer used — ingest events go to AppLog
         _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
     }
 
@@ -49,7 +48,7 @@ public class IngestOrderWriter
                 throw new InvalidOperationException($"InsertOrder returned {orderId} for {order.ExternalOrderId}");
             }
 
-            _history.AddNoteIfNew(orderId, "Order received");
+            // Ingest events go to AppLog, not operator history
             AppLog.Info($"Inserted {sourceCode} order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
 
             // Stamp folder LastWriteTime to match ordered_at so verify's filesystem

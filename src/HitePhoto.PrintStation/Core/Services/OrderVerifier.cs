@@ -17,7 +17,6 @@ namespace HitePhoto.PrintStation.Core.Services;
 public class OrderVerifier : IOrderVerifier
 {
     private readonly IOrderRepository _orders;
-    private readonly IHistoryRepository _history;
     private readonly IFilesNeededDecision _filesNeededDecision;
     private readonly DakisOrderParser _dakisParser;
     private readonly PixfizzOrderParser _pixfizzParser;
@@ -32,7 +31,7 @@ public class OrderVerifier : IOrderVerifier
         AppSettings settings)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
-        _history = history ?? throw new ArgumentNullException(nameof(history));
+        // history parameter kept for DI compatibility but no longer used — verify events go to AppLog
         _filesNeededDecision = filesNeededDecision ?? throw new ArgumentNullException(nameof(filesNeededDecision));
         _dakisParser = dakisParser ?? throw new ArgumentNullException(nameof(dakisParser));
         _pixfizzParser = pixfizzParser ?? throw new ArgumentNullException(nameof(pixfizzParser));
@@ -127,8 +126,7 @@ public class OrderVerifier : IOrderVerifier
 
                 if (itemIssues.Count > 0)
                 {
-                    var note = $"Verify: {itemIssues.Count} file issue(s) — {string.Join("; ", itemIssues.Take(5))}";
-                    _history.AddNoteIfNew(db.Id, note, "system");
+                    AppLog.Info($"Verify: order {orderId} has {itemIssues.Count} file issue(s) — {string.Join("; ", itemIssues.Take(5))}");
                     errors += itemIssues.Count;
                 }
             }
@@ -165,7 +163,6 @@ public class OrderVerifier : IOrderVerifier
             missingFolderCount++;
             if (missingFolderCount <= 10)
             {
-                _history.AddNoteIfNew(kvp.Value.Id, "Verify: order folder not found on disk", "system");
                 AlertCollector.Error(AlertCategory.DataQuality,
                     $"Order {kvp.Key} in DB but folder missing from disk",
                     orderId: kvp.Key,
@@ -286,9 +283,7 @@ public class OrderVerifier : IOrderVerifier
         }
 
         if (repairs > 0)
-            _history.AddNote(dbOrderId,
-                $"Repaired at {DateTime.Now:yyyy-MM-dd HH:mm} — {repairs} item(s) updated from {sourceFileName}",
-                "system");
+            AppLog.Info($"Repaired order {dbOrderId}: {repairs} item(s) updated from {sourceFileName}");
 
         return repairs;
     }
@@ -313,7 +308,7 @@ public class OrderVerifier : IOrderVerifier
         if (existingId != null) return;
 
         var orderId = _orders.InsertOrder(order, _settings.StoreId);
-        _history.AddNoteIfNew(orderId, "Order received (discovered by verify)");
+        AppLog.Info($"Order {orderId} discovered by verify");
     }
 
     private void InsertDakisFromDisk(string externalOrderId, string dir)
@@ -333,7 +328,7 @@ public class OrderVerifier : IOrderVerifier
         if (existingId != null) return;
 
         var orderId = _orders.InsertOrder(order, pickupStoreId);
-        _history.AddNoteIfNew(orderId, "Order received (discovered by verify)");
+        AppLog.Info($"Order {orderId} discovered by verify");
     }
 
     // ── Folder scanning ──
