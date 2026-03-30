@@ -696,7 +696,11 @@ public partial class MainWindow : Window
             }
 
             var defaults = _optionDefaults.GetAll();
-            OptionsList.ItemsSource = options.Select(o =>
+            var hiddenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "Category", "SubCategory", "Price" };
+            var visible = options.Where(o => !hiddenKeys.Contains(o.Key)).ToList();
+            if (visible.Count == 0) { OptionsPanel.Visibility = Visibility.Collapsed; return; }
+            OptionsList.ItemsSource = visible.Select(o =>
                 new ViewModels.OptionBadge(o.Key, o.Value, defaults.Contains((o.Key, o.Value)))).ToList();
             OptionsPanel.Visibility = Visibility.Visible;
         }

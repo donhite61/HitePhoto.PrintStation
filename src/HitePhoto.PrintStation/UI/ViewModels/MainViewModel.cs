@@ -225,7 +225,7 @@ public class MainViewModel : ViewModelBase
               AND o.status_code NOT IN ('cancelled')
               AND EXISTS (
                   SELECT 1 FROM order_items oi
-                  WHERE oi.order_id = o.id AND oi.is_local_production = 1 AND oi.is_printed = 0
+                  WHERE oi.order_id = o.id AND oi.is_printed = 0
               )
             ORDER BY o.ordered_at DESC
             """;
@@ -253,7 +253,7 @@ public class MainViewModel : ViewModelBase
               AND o.status_code NOT IN ('cancelled')
               AND NOT EXISTS (
                   SELECT 1 FROM order_items oi
-                  WHERE oi.order_id = o.id AND oi.is_local_production = 1 AND oi.is_printed = 0
+                  WHERE oi.order_id = o.id AND oi.is_printed = 0
               )
             ORDER BY o.ordered_at DESC
             """;
