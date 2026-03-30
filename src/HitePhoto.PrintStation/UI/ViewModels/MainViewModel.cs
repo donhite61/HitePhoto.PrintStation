@@ -251,6 +251,9 @@ public class MainViewModel : ViewModelBase
             WHERE o.files_local = 1
               AND o.is_test = 0
               AND o.status_code NOT IN ('cancelled')
+              AND EXISTS (
+                  SELECT 1 FROM order_items oi WHERE oi.order_id = o.id
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM order_items oi
                   WHERE oi.order_id = o.id AND oi.is_printed = 0
@@ -675,13 +678,14 @@ public class MainViewModel : ViewModelBase
 
     public void MarkDone(int orderId)
     {
-        _orders.UpdateOrderStatus(orderId, OrderStatusCode.PickedUp);
+        var allIds = _orders.GetItems(orderId).Select(i => i.Id).ToList();
+        _orders.SetItemsPrinted(allIds);
         _history.AddNote(orderId, "Marked done by operator", "operator");
     }
 
     public void MarkUnprinted(int orderId)
     {
-        _orders.UpdateOrderStatus(orderId, OrderStatusCode.New);
+        _orders.SetItemsUnprinted(orderId);
         _history.AddNote(orderId, "Marked unprinted by operator", "operator");
     }
 
