@@ -524,7 +524,7 @@ public partial class MainWindow : Window
 
         DetailOrderId.Text = treeItem.ShortId;
         DetailCustomerName.Text = treeItem.CustomerName;
-        DetailPhone.Text = treeItem.CustomerPhone;
+        DetailPhone.Text = FormatPhone(treeItem.CustomerPhone);
         DetailEmail.Text = treeItem.CustomerEmail;
         DetailStatus.Text = treeItem.StatusCode;
         DetailSource.Text = treeItem.SourceCode;
@@ -1402,6 +1402,17 @@ public partial class MainWindow : Window
         var notes = _vm.OrderNotes.ToList();
         var win = new OrderHistoryWindow(label, notes) { Owner = this };
         win.ShowDialog();
+    }
+
+    private static string FormatPhone(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        var digits = new string(raw.Where(char.IsDigit).ToArray());
+        if (digits.Length == 10)
+            return $"({digits[..3]}) {digits[3..6]}-{digits[6..]}";
+        if (digits.Length == 11 && digits[0] == '1')
+            return $"({digits[1..4]}) {digits[4..7]}-{digits[7..]}";
+        return raw;
     }
 
     // ── Timer helpers ──────────────────────────────────────────────────────
