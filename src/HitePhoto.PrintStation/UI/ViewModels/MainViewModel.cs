@@ -163,14 +163,24 @@ public class MainViewModel : ViewModelBase
             if (_channelNamesDirty)
             {
                 var allChannels = _orders.GetAllChannels();
-                _channelNames = allChannels
-                    .GroupBy(c => c.ChannelNumber)
-                    .ToDictionary(g => g.Key, g => $"{g.First().SizeLabel} {g.First().MediaType}".Trim());
                 _channelByRoutingKey = allChannels
                     .ToDictionary(c => c.RoutingKey, c => c.ChannelNumber);
                 _layoutByRoutingKey = allChannels
                     .Where(c => !string.IsNullOrEmpty(c.Description))
                     .ToDictionary(c => c.RoutingKey, c => c.Description);
+
+                // Channel names come from Noritsu CSV (the printer's actual labels),
+                // NOT from the routing key (which is just the ordered size text)
+                _channelNames = new Dictionary<int, string>();
+                if (!string.IsNullOrWhiteSpace(_settings.ChannelsCsvPath))
+                {
+                    var csvChannels = new Core.Processing.ChannelsCsvReader(_settings.ChannelsCsvPath).Load();
+                    foreach (var c in csvChannels)
+                    {
+                        _channelNames.TryAdd(c.ChannelNumber,
+                            $"{c.SizeLabel} {c.MediaType}".Trim());
+                    }
+                }
                 _channelNamesDirty = false;
             }
 
