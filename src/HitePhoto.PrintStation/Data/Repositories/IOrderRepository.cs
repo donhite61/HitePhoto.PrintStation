@@ -102,6 +102,9 @@ public interface IOrderRepository
     /// <summary>Batch-load items for multiple orders. Keyed by order ID.</summary>
     Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds);
 
+    /// <summary>Set files_local flag (1 = image files exist on this machine's disk).</summary>
+    void SetFilesLocal(int orderId, bool local);
+
     /// <summary>Set the is_externally_modified flag (transfer receive or LabApi edit).</summary>
     void SetExternallyModified(int orderId, bool modified);
 

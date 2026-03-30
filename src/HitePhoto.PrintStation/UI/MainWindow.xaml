@@ -216,7 +216,8 @@
                 <Button Content="Hold" Width="60" Margin="0,0,6,0"
                         Click="HoldButton_Click"/>
                 <Button Content="Transfer" Width="80" Margin="0,0,6,0"
-                        Click="TransferButton_Click"/>
+                        Click="TransferButton_Click"
+                        Visibility="Collapsed"/>
                 <Button Content="Refresh" Width="80" Margin="0,0,6,0"
                         Click="RefreshButton_Click"/>
                 <Button Content="Color Correct" Width="110" Margin="0,0,6,0"

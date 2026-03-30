@@ -313,7 +313,7 @@ public class OrderVerifier : IOrderVerifier
         if (existingId != null) return;
 
         var orderId = _orders.InsertOrder(order, _settings.StoreId);
-        _history.AddNote(orderId, $"Order received at {DateTime.Now:g} (discovered by verify)");
+        _history.AddNoteIfNew(orderId, "Order received (discovered by verify)");
     }
 
     private void InsertDakisFromDisk(string externalOrderId, string dir)
@@ -333,7 +333,7 @@ public class OrderVerifier : IOrderVerifier
         if (existingId != null) return;
 
         var orderId = _orders.InsertOrder(order, pickupStoreId);
-        _history.AddNote(orderId, $"Order received at {DateTime.Now:g} (discovered by verify)");
+        _history.AddNoteIfNew(orderId, "Order received (discovered by verify)");
     }
 
     // ── Folder scanning ──

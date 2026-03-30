@@ -797,6 +797,23 @@ public class OrderRepository : IOrderRepository
         }
     }
 
+    public void SetFilesLocal(int orderId, bool local)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET files_local = @val, updated_at = datetime('now') WHERE id = @id";
+        cmd.Parameters.AddWithValue("@val", local ? 1 : 0);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        var rows = cmd.ExecuteNonQuery();
+        if (rows == 0)
+            AlertCollector.Error(AlertCategory.Database,
+                $"SetFilesLocal: order {orderId} not found",
+                orderId: orderId.ToString(),
+                detail: $"Attempted: UPDATE orders SET files_local={local} WHERE id={orderId}. " +
+                        $"Expected: 1 row updated. Found: 0 rows. " +
+                        $"Context: local ingest found existing order (sync race). State: no matching order in SQLite.");
+    }
+
     public void SetExternallyModified(int orderId, bool modified)
     {
         using var conn = _db.OpenConnection();

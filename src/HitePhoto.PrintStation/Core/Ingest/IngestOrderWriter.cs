@@ -49,7 +49,7 @@ public class IngestOrderWriter
                 throw new InvalidOperationException($"InsertOrder returned {orderId} for {order.ExternalOrderId}");
             }
 
-            _history.AddNote(orderId, $"Order received at {DateTime.Now:g}");
+            _history.AddNoteIfNew(orderId, "Order received");
             AppLog.Info($"Inserted {sourceCode} order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
 
             // Stamp folder LastWriteTime to match ordered_at so verify's filesystem
@@ -59,6 +59,7 @@ public class IngestOrderWriter
         }
         else
         {
+            _orders.SetFilesLocal(existingId.Value, true);
             _verifier.VerifyOrder(order.ExternalOrderId, folderPath, sourceCode, existingId.Value);
         }
     }
