@@ -83,6 +83,16 @@ public class OrderVerifier : IOrderVerifier
             // Order is on disk — ensure files_local = 1 (sync may have set it to 0)
             _orders.SetFilesLocal(db.Id, true);
 
+            // Skip verify for fully printed orders — no need to check files or repair
+            var dbItems = _orders.GetItems(db.Id);
+            if (dbItems.Count > 0 && dbItems.All(i => i.IsPrinted))
+            {
+                folderList.Remove(orderId);
+                dbList.Remove(orderId);
+                matchCount++;
+                continue;
+            }
+
             OrderSource source;
             try { source = OrderSourceExtensions.FromCode(db.SourceCode); }
             catch { folderList.Remove(orderId); dbList.Remove(orderId); matchCount++; continue; }
@@ -91,8 +101,6 @@ public class OrderVerifier : IOrderVerifier
 
             if (filesRequired)
             {
-                // Verify files on disk using OrderHelpers.VerifyFile (the ONE verification function)
-                var dbItems = _orders.GetItems(db.Id);
                 var itemIssues = new List<string>();
                 foreach (var item in dbItems)
                 {
