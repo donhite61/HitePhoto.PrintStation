@@ -48,10 +48,6 @@ public class DakisOrderParser
 
         var folderPath = raw.Metadata?.GetValueOrDefault("folder_path");
 
-        // Invoice-only: another store produces this order, we just hold the header
-        if (info.IsInvoiceOnly)
-            return BuildUnifiedOrder(info, folderPath, items: [], isInvoiceOnly: true);
-
         // ── Order type detection ──
         var printFormats = YList(root, ":print_formats:");
         var giftOrders = YList(root, ":photo_gift_orders:");
@@ -536,6 +532,9 @@ public class DakisOrderParser
                 }
             }
 
+            bool localGift = string.IsNullOrEmpty(fulfillmentStoreId) ||
+                             fulfillmentStoreId == info.CurrentStoreId;
+
             items.Add(new UnifiedOrderItem
             {
                 ExternalLineId = $"{info.OrderId}_gift_{giftingOrderId}",
@@ -546,6 +545,7 @@ public class DakisOrderParser
                 ImageFilepath = imageFilepath,
                 ImageFilename = imageFilename,
                 IsNoritsu = false,
+                IsLocalProduction = localGift,
                 FulfillmentStore = fulfillmentStoreId,
                 Options = giftOptions
             });
