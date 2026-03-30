@@ -82,7 +82,7 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, order_id, size_label, media_type, image_filepath,
-                   quantity, is_noritsu, is_printed, image_filename
+                   quantity, is_noritsu, is_local_production, is_printed, image_filename
             FROM order_items
             WHERE order_id = @id AND is_noritsu = 1
             ORDER BY size_label, media_type
@@ -100,8 +100,9 @@ public class OrderRepository : IOrderRepository
                 ImageFilepath: reader.IsDBNull(4) ? "" : reader.GetString(4),
                 Quantity: reader.GetInt32(5),
                 IsNoritsu: reader.GetInt32(6) == 1,
-                IsPrinted: reader.GetInt32(7) == 1,
-                ImageFilename: reader.IsDBNull(8) ? "" : reader.GetString(8)));
+                IsLocalProduction: reader.GetInt32(7) == 1,
+                IsPrinted: reader.GetInt32(8) == 1,
+                ImageFilename: reader.IsDBNull(9) ? "" : reader.GetString(9)));
         }
         return items;
     }
@@ -214,8 +215,8 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, order_id, size_label, media_type, image_filepath,
-                   quantity, is_noritsu, is_printed, image_filename,
-                   category, sub_category
+                   quantity, is_noritsu, is_local_production, is_printed,
+                   image_filename, category, sub_category
             FROM order_items
             WHERE order_id = @id
             ORDER BY size_label, media_type
@@ -233,10 +234,11 @@ public class OrderRepository : IOrderRepository
                 ImageFilepath: reader.IsDBNull(4) ? "" : reader.GetString(4),
                 Quantity: reader.GetInt32(5),
                 IsNoritsu: reader.GetInt32(6) == 1,
-                IsPrinted: reader.GetInt32(7) == 1,
-                ImageFilename: reader.IsDBNull(8) ? "" : reader.GetString(8),
-                Category: reader.IsDBNull(9) ? "" : reader.GetString(9),
-                SubCategory: reader.IsDBNull(10) ? "" : reader.GetString(10)));
+                IsLocalProduction: reader.GetInt32(7) == 1,
+                IsPrinted: reader.GetInt32(8) == 1,
+                ImageFilename: reader.IsDBNull(9) ? "" : reader.GetString(9),
+                Category: reader.IsDBNull(10) ? "" : reader.GetString(10),
+                SubCategory: reader.IsDBNull(11) ? "" : reader.GetString(11)));
         }
         return items;
     }
@@ -329,11 +331,11 @@ public class OrderRepository : IOrderRepository
             INSERT INTO order_items (
                 order_id, size_label, media_type, category, sub_category,
                 quantity, image_filename, image_filepath, original_image_filepath,
-                is_noritsu, is_printed, options_json
+                is_noritsu, is_local_production, is_printed, options_json
             ) VALUES (
                 @oid, @size, @media, @cat, @subcat,
                 @qty, @fname, @fpath, @orig,
-                @noritsu, @printed, @options
+                @noritsu, @localProd, @printed, @options
             )
             """;
         cmd.Parameters.AddWithValue("@oid", orderId);
@@ -346,6 +348,7 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
         cmd.Parameters.AddWithValue("@orig", item.OriginalImageFilepath ?? item.ImageFilepath ?? "");
         cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
+        cmd.Parameters.AddWithValue("@localProd", item.IsLocalProduction ? 1 : 0);
         cmd.Parameters.AddWithValue("@printed", isPrinted ? 1 : 0);
         cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
             ? System.Text.Json.JsonSerializer.Serialize(item.Options)
@@ -731,7 +734,8 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = $"""
             SELECT oi.order_id, oi.id, oi.size_label, oi.media_type, oi.quantity,
                    oi.image_filename, oi.image_filepath,
-                   oi.is_noritsu, oi.is_printed, oi.options_json, oi.file_status
+                   oi.is_noritsu, oi.is_local_production, oi.is_printed,
+                   oi.options_json, oi.file_status
             FROM order_items oi
             WHERE oi.order_id IN ({placeholders})
             ORDER BY oi.order_id, oi.size_label, oi.media_type
@@ -751,6 +755,7 @@ public class OrderRepository : IOrderRepository
                 ImageFilename: reader.IsDBNull(reader.GetOrdinal("image_filename")) ? "" : reader.GetString(reader.GetOrdinal("image_filename")),
                 ImageFilepath: reader.IsDBNull(reader.GetOrdinal("image_filepath")) ? "" : reader.GetString(reader.GetOrdinal("image_filepath")),
                 IsNoritsu: reader.GetInt32(reader.GetOrdinal("is_noritsu")) == 1,
+                IsLocalProduction: reader.GetInt32(reader.GetOrdinal("is_local_production")) == 1,
                 IsPrinted: reader.GetInt32(reader.GetOrdinal("is_printed")) == 1,
                 OptionsJson: reader.IsDBNull(reader.GetOrdinal("options_json")) ? "[]" : reader.GetString(reader.GetOrdinal("options_json")),
                 FileStatus: reader.GetInt32(reader.GetOrdinal("file_status")));

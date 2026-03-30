@@ -136,7 +136,7 @@ public record OrderRow(
 public record ItemRow(
     int Id, string SizeLabel, string MediaType, int Quantity,
     string ImageFilename, string ImageFilepath,
-    bool IsNoritsu, bool IsPrinted, string OptionsJson,
+    bool IsNoritsu, bool IsLocalProduction, bool IsPrinted, string OptionsJson,
     int FileStatus = 0);
 
 public record OrderRecord(
@@ -157,6 +157,7 @@ public record OrderItemRecord(
     string ImageFilepath,
     int Quantity,
     bool IsNoritsu,
+    bool IsLocalProduction,
     bool IsPrinted,
     string ImageFilename = "",
     string Category = "",

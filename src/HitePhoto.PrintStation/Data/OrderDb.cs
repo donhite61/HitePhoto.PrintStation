@@ -588,6 +588,10 @@ public class OrderDb
         // Old ingest/verify code spammed junk notes. Wipe the slate —
         // only operator actions (print, hold, notify) create notes going forward.
         RunOnce(conn, "013_purge_history", "DELETE FROM order_history");
+
+        // Migration 014: is_local_production on order_items — 1 = this store produces it (files expected).
+        // 0 = another store produces it (files not expected on this machine's disk).
+        AddColumnIfMissing(conn, "order_items", "is_local_production", "INTEGER NOT NULL DEFAULT 1");
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)

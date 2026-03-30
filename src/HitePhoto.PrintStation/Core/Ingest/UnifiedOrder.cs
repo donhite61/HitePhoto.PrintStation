@@ -77,6 +77,12 @@ public record UnifiedOrderItem
     /// </summary>
     public bool IsNoritsu { get; init; } = true;
 
+    /// <summary>
+    /// True = this store produces this item (files expected on disk).
+    /// False = another store produces it (files not expected here).
+    /// </summary>
+    public bool IsLocalProduction { get; init; } = true;
+
     public string? FulfillmentStore { get; init; }
     public int ExpectedPrintCount { get; init; }
     public int OutlabCount { get; init; }

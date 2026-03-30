@@ -402,6 +402,8 @@ public class DakisOrderParser
                     var diskSizeLabel = YRaw(print, ":text:").Replace(".", "");
                     var printFilename = filename;
                     var expectedPath = "";
+                    bool localItem = string.IsNullOrEmpty(fulfillmentStoreId) ||
+                                     fulfillmentStoreId == info.CurrentStoreId;
 
                     if (!string.IsNullOrEmpty(folderPath))
                     {
@@ -415,10 +417,6 @@ public class DakisOrderParser
                             printFilename = Path.ChangeExtension(printFilename, ".jpg");
                             expectedPath = Path.Combine(printDir, printFilename);
                         }
-
-                        // Only verify and set path for files produced at this store
-                        bool localItem = string.IsNullOrEmpty(fulfillmentStoreId) ||
-                                         fulfillmentStoreId == info.CurrentStoreId;
                         if (localItem)
                         {
                             var verifyError = OrderHelpers.VerifyFile(expectedPath);
@@ -434,11 +432,6 @@ public class DakisOrderParser
                                             $"State: file missing or invalid — operator must fix.");
                             }
                         }
-                        else
-                        {
-                            // Files are on the other store's disk — don't set a path
-                            expectedPath = "";
-                        }
                     }
 
                     items.Add(new UnifiedOrderItem
@@ -449,7 +442,8 @@ public class DakisOrderParser
                         Quantity = qty,
                         ImageFilename = printFilename,
                         ImageFilepath = expectedPath,
-                        IsNoritsu = localItem,
+                        IsNoritsu = true,
+                        IsLocalProduction = localItem,
                         FulfillmentStore = info.CurrentStoreId,
                         Options = options
                     });

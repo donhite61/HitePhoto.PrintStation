@@ -489,7 +489,7 @@ public class MainViewModel : ViewModelBase
         cmd.CommandText = $"""
             SELECT oi.order_id, oi.id, oi.size_label, oi.media_type, oi.quantity,
                    oi.image_filename, oi.image_filepath,
-                   oi.is_noritsu, oi.is_printed, oi.options_json
+                   oi.is_noritsu, oi.is_local_production, oi.is_printed, oi.options_json
             FROM order_items oi
             WHERE oi.order_id IN ({placeholders})
             ORDER BY oi.order_id, oi.size_label, oi.media_type
@@ -509,8 +509,9 @@ public class MainViewModel : ViewModelBase
                 ImageFilename: reader.IsDBNull(5) ? "" : reader.GetString(5),
                 ImageFilepath: reader.IsDBNull(6) ? "" : reader.GetString(6),
                 IsNoritsu: reader.GetInt32(7) == 1,
-                IsPrinted: reader.GetInt32(8) == 1,
-                OptionsJson: reader.IsDBNull(9) ? "[]" : reader.GetString(9));
+                IsLocalProduction: reader.GetInt32(8) == 1,
+                IsPrinted: reader.GetInt32(9) == 1,
+                OptionsJson: reader.IsDBNull(10) ? "[]" : reader.GetString(10));
 
             if (!result.ContainsKey(orderId))
                 result[orderId] = new List<ItemRow>();
@@ -687,4 +688,4 @@ internal record OrderRow(
 internal record ItemRow(
     int Id, string SizeLabel, string MediaType, int Quantity,
     string ImageFilename, string ImageFilepath,
-    bool IsNoritsu, bool IsPrinted, string OptionsJson);
+    bool IsNoritsu, bool IsLocalProduction, bool IsPrinted, string OptionsJson);

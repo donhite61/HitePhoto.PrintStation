@@ -93,6 +93,7 @@ public class OrderVerifier : IOrderVerifier
                 var itemIssues = new List<string>();
                 foreach (var item in dbItems)
                 {
+                    if (!item.IsLocalProduction) continue;
                     if (string.IsNullOrWhiteSpace(item.ImageFilepath)) continue;
                     var error = OrderHelpers.VerifyFile(item.ImageFilepath);
                     if (error != null)
