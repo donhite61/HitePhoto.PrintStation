@@ -379,15 +379,15 @@ public class MainViewModel : ViewModelBase
         int ChannelNumber, string ChannelName, string? LayoutName,
         List<HitePhoto.Shared.Models.OrderItem> Items);
 
-    private SizeGroupResult ProcessSizeGroup(IEnumerable<ItemRow> group, string sizeLabel, string mediaType, bool verifyFiles)
+    private SizeGroupResult ProcessSizeGroup(IEnumerable<ItemRow> group, string sizeLabel, string optionsKey, bool verifyFiles)
     {
         int missingCount = 0;
         int printedCount = 0;
         var orderItems = new List<HitePhoto.Shared.Models.OrderItem>();
         int totalQty = 0;
 
-        // Channel comes from channel_mappings, not from order_items
-        var routingKey = Core.OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
+        // Routing key is size + options (e.g. "5x7|white border")
+        var routingKey = string.IsNullOrEmpty(optionsKey) ? sizeLabel.Trim().ToLowerInvariant() : $"{sizeLabel.Trim().ToLowerInvariant()}|{optionsKey}";
         _channelByRoutingKey.TryGetValue(routingKey, out int channelNumber);
 
         foreach (var item in group)
@@ -416,13 +416,16 @@ public class MainViewModel : ViewModelBase
 
         var chName = channelNumber > 0 && _channelNames.TryGetValue(channelNumber, out var n) ? n : "";
         _layoutByRoutingKey.TryGetValue(routingKey, out var layoutName);
-        return new SizeGroupResult(sizeLabel, mediaType, totalQty, printedCount, missingCount, channelNumber, chName, layoutName, orderItems);
+        return new SizeGroupResult(sizeLabel, optionsKey, totalQty, printedCount, missingCount, channelNumber, chName, layoutName, orderItems);
     }
 
     private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
     {
         var groups = items
-            .GroupBy(i => new { Size = string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel, i.MediaType })
+            .GroupBy(i => new {
+                Size = string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel,
+                OptionsKey = OrderHelpers.BuildOptionsKey(i.OptionsJson)
+            })
             .ToList();
 
         var existingByKey = new Dictionary<string, SizeTreeItem>();
@@ -435,7 +438,7 @@ public class MainViewModel : ViewModelBase
         for (int i = 0; i < groups.Count; i++)
         {
             var group = groups[i];
-            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.MediaType, verifyFiles);
+            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.OptionsKey, verifyFiles);
             var key = $"{r.SizeLabel}|{r.MediaType}";
 
             totalImages += r.ImageCount;
@@ -528,11 +531,14 @@ public class MainViewModel : ViewModelBase
         bool hasMissing = false;
 
         var groups = items
-            .GroupBy(i => new { Size = string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel, i.MediaType });
+            .GroupBy(i => new {
+                Size = string.IsNullOrEmpty(i.SizeLabel) ? "(no size)" : i.SizeLabel,
+                OptionsKey = OrderHelpers.BuildOptionsKey(i.OptionsJson)
+            });
 
         foreach (var group in groups)
         {
-            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.MediaType, verifyFiles);
+            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.OptionsKey, verifyFiles);
             var sizeItem = new SizeTreeItem
             {
                 SizeLabel = r.SizeLabel, MediaType = r.MediaType,
