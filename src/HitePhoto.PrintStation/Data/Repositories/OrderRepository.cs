@@ -884,6 +884,19 @@ public class OrderRepository : IOrderRepository
                         $"Expected: 1 row updated. Found: 0.");
     }
 
+    public HashSet<int> FindOrderIdsBySizeLabel(string search)
+    {
+        var ids = new HashSet<int>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT DISTINCT order_id FROM order_items WHERE size_label LIKE @search";
+        cmd.Parameters.AddWithValue("@search", $"%{search}%");
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            ids.Add(reader.GetInt32(0));
+        return ids;
+    }
+
     public List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders()
     {
         var results = new List<(int, string, string, int)>();

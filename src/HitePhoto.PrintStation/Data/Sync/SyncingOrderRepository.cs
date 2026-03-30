@@ -126,5 +126,6 @@ public class SyncingOrderRepository : IOrderRepository
     public List<(int Id, string Name)> GetStores() => _inner.GetStores();
     public int? ResolveStoreId(string source, string externalId) => _inner.ResolveStoreId(source, externalId);
     public void SetPickupStore(int orderId, int storeId) => _inner.SetPickupStore(orderId, storeId);
+    public HashSet<int> FindOrderIdsBySizeLabel(string search) => _inner.FindOrderIdsBySizeLabel(search);
     public List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders() => _inner.GetDakisOrders();
 }

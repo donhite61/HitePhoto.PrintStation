@@ -120,6 +120,9 @@ public interface IOrderRepository
     /// <summary>Update an order's pickup_store_id.</summary>
     void SetPickupStore(int orderId, int storeId);
 
+    /// <summary>Find order IDs that have items matching a size label search.</summary>
+    HashSet<int> FindOrderIdsBySizeLabel(string search);
+
     /// <summary>Get all Dakis orders with their folder paths for repair scans.</summary>
     List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders();
 }

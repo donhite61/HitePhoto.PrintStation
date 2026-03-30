@@ -565,12 +565,14 @@ public class MainViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(_searchText))
         {
             var search = _searchText.Trim();
+            var itemMatchIds = _orders.FindOrderIdsBySizeLabel(search);
             result = result.Where(o =>
                 o.ExternalOrderId.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 o.CustomerFirstName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 o.CustomerLastName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 o.CustomerEmail.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                o.CustomerPhone.Contains(search, StringComparison.OrdinalIgnoreCase));
+                o.CustomerPhone.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                itemMatchIds.Contains(o.Id));
         }
 
         return result.ToList();
