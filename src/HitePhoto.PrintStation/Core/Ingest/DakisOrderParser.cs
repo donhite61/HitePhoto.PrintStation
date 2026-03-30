@@ -416,17 +416,28 @@ public class DakisOrderParser
                             expectedPath = Path.Combine(printDir, printFilename);
                         }
 
-                        var verifyError = OrderHelpers.VerifyFile(expectedPath);
-                        if (verifyError != null)
+                        // Only verify and set path for files produced at this store
+                        bool localItem = string.IsNullOrEmpty(fulfillmentStoreId) ||
+                                         fulfillmentStoreId == info.CurrentStoreId;
+                        if (localItem)
                         {
-                            AlertCollector.Error(AlertCategory.DataQuality,
-                                $"Dakis file not at expected path: {printFilename}",
-                                orderId: info.OrderId,
-                                detail: $"Attempted: verify file at '{expectedPath}'. " +
-                                        $"Expected: valid image for size '{sizeLabel}'. " +
-                                        $"Found: {verifyError}. " +
-                                        $"Context: order {info.OrderId}, qty {qty}. " +
-                                        $"State: file missing or invalid — operator must fix.");
+                            var verifyError = OrderHelpers.VerifyFile(expectedPath);
+                            if (verifyError != null)
+                            {
+                                AlertCollector.Error(AlertCategory.DataQuality,
+                                    $"Dakis file not at expected path: {printFilename}",
+                                    orderId: info.OrderId,
+                                    detail: $"Attempted: verify file at '{expectedPath}'. " +
+                                            $"Expected: valid image for size '{sizeLabel}'. " +
+                                            $"Found: {verifyError}. " +
+                                            $"Context: order {info.OrderId}, qty {qty}. " +
+                                            $"State: file missing or invalid — operator must fix.");
+                            }
+                        }
+                        else
+                        {
+                            // Files are on the other store's disk — don't set a path
+                            expectedPath = "";
                         }
                     }
 
@@ -438,7 +449,7 @@ public class DakisOrderParser
                         Quantity = qty,
                         ImageFilename = printFilename,
                         ImageFilepath = expectedPath,
-                        IsNoritsu = true,
+                        IsNoritsu = localItem,
                         FulfillmentStore = info.CurrentStoreId,
                         Options = options
                     });
