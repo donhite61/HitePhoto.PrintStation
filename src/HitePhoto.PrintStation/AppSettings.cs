@@ -59,8 +59,8 @@ public class AppSettings
     public bool   NotificationsEnabled     { get; set; } = false;
     public string SmtpHost                 { get; set; } = "mail.hitephoto.com";
     public int    SmtpPort                 { get; set; } = 465;
-    public string SmtpUsername             { get; set; } = "";
-    public string SmtpPassword             { get; set; } = "";
+    public string SmtpUsername             { get; set; } = "noreply@hitephoto.com";
+    public string SmtpPassword             { get; set; } = "Hite1985?";
     public string NotificationFromEmail    { get; set; } = "noreply@hitephoto.com";
     public string NotificationSubject      { get; set; } = "Your photos are ready for pickup!";
     public string NotificationBodyTemplate { get; set; } =
