@@ -188,8 +188,8 @@ public class MainViewModel : ViewModelBase
                 _channelNamesDirty = false;
             }
 
-            var pending = LoadOrdersWithStatus(conn, OrderStatusCode.New, OrderStatusCode.InProgress);
-            var printed = LoadOrdersWithStatus(conn, OrderStatusCode.Ready, OrderStatusCode.Notified, OrderStatusCode.PickedUp);
+            var pending = LoadPendingOrders(conn);
+            var printed = LoadPrintedOrders(conn);
             var otherStore = LoadOtherStoreOrders(conn);
 
             DiffAndPatch(PendingOrders, pending, verifyFiles: true);
@@ -207,13 +207,11 @@ public class MainViewModel : ViewModelBase
         }
     }
 
-    private List<OrderRow> LoadOrdersWithStatus(SqliteConnection conn, params string[] statusCodes)
+    private List<OrderRow> LoadPendingOrders(SqliteConnection conn)
     {
         var results = new List<OrderRow>();
         using var cmd = conn.CreateCommand();
-
-        var placeholders = string.Join(",", statusCodes.Select((_, i) => $"@s{i}"));
-        cmd.CommandText = $"""
+        cmd.CommandText = """
             SELECT o.id, o.external_order_id, o.source_code, o.status_code,
                    o.customer_first_name, o.customer_last_name,
                    o.customer_email, o.customer_phone,
@@ -223,17 +221,45 @@ public class MainViewModel : ViewModelBase
             FROM orders o
             LEFT JOIN stores s ON s.id = o.pickup_store_id
             WHERE o.files_local = 1
-              AND o.status_code IN ({placeholders})
               AND o.is_test = 0
+              AND o.status_code NOT IN ('cancelled')
+              AND EXISTS (
+                  SELECT 1 FROM order_items oi
+                  WHERE oi.order_id = o.id AND oi.is_local_production = 1 AND oi.is_printed = 0
+              )
             ORDER BY o.ordered_at DESC
             """;
-        for (int i = 0; i < statusCodes.Length; i++)
-            cmd.Parameters.AddWithValue($"@s{i}", statusCodes[i]);
-
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
+        return results;
+    }
 
+    private List<OrderRow> LoadPrintedOrders(SqliteConnection conn)
+    {
+        var results = new List<OrderRow>();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
+                   o.customer_first_name, o.customer_last_name,
+                   o.customer_email, o.customer_phone,
+                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
+                   o.folder_path, o.special_instructions, o.download_status,
+                   s.short_name AS store_name
+            FROM orders o
+            LEFT JOIN stores s ON s.id = o.pickup_store_id
+            WHERE o.files_local = 1
+              AND o.is_test = 0
+              AND o.status_code NOT IN ('cancelled')
+              AND NOT EXISTS (
+                  SELECT 1 FROM order_items oi
+                  WHERE oi.order_id = o.id AND oi.is_local_production = 1 AND oi.is_printed = 0
+              )
+            ORDER BY o.ordered_at DESC
+            """;
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add(ReadOrderRow(reader));
         return results;
     }
 
