@@ -50,20 +50,23 @@ public class PrintService : IPrintService
             return new SendResult(sent, skipped);
         }
 
-        // Group by size/media, optionally filter to selected sizes
+        // Group by size + options (border type etc. affects channel routing)
         var sizeGroups = items
             .Where(i => !i.IsPrinted)
-            .Where(i => sizeFilter == null || sizeFilter.Contains($"{i.SizeLabel}|{i.MediaType}"))
-            .GroupBy(i => new { i.SizeLabel, i.MediaType })
+            .Where(i => sizeFilter == null || sizeFilter.Contains($"{i.SizeLabel}|{OrderHelpers.BuildOptionsKey(i.OptionsJson)}"))
+            .GroupBy(i => new { i.SizeLabel, OptionsKey = OrderHelpers.BuildOptionsKey(i.OptionsJson) })
             .ToList();
 
         foreach (var group in sizeGroups)
         {
-            var channelResult = _channel.Resolve(group.Key.SizeLabel, group.Key.MediaType);
+            var routingKey = string.IsNullOrEmpty(group.Key.OptionsKey)
+                ? group.Key.SizeLabel.Trim().ToLowerInvariant()
+                : $"{group.Key.SizeLabel.Trim().ToLowerInvariant()}|{group.Key.OptionsKey}";
+            var channelResult = _channel.ResolveByKey(routingKey);
             if (channelResult.ChannelNumber == 0)
             {
                 skipped.Add(new SkippedItem(
-                    $"{group.Key.SizeLabel} {group.Key.MediaType}".Trim(),
+                    $"{group.Key.SizeLabel} {group.Key.OptionsKey}".Trim(),
                     "No channel assigned."));
                 continue;
             }
@@ -92,7 +95,7 @@ public class PrintService : IPrintService
                                     $"Context: channel_mappings routing_key='{channelResult.RoutingKey}'. " +
                                     $"State: order {order.ExternalOrderId}, {groupItems.Count} items.");
                         skipped.Add(new SkippedItem(
-                            $"{group.Key.SizeLabel} {group.Key.MediaType}".Trim(),
+                            $"{group.Key.SizeLabel} {group.Key.OptionsKey}".Trim(),
                             $"Layout '{channelResult.LayoutName}' not found."));
                         continue;
                     }
@@ -122,7 +125,7 @@ public class PrintService : IPrintService
                     if (layoutItems.Count == 0)
                     {
                         skipped.Add(new SkippedItem(
-                            $"{group.Key.SizeLabel} {group.Key.MediaType}".Trim(),
+                            $"{group.Key.SizeLabel} {group.Key.OptionsKey}".Trim(),
                             "No valid images after layout processing."));
                         continue;
                     }
@@ -163,7 +166,7 @@ public class PrintService : IPrintService
                     $"Print failed for {group.Key.SizeLabel} in order {order.ExternalOrderId}",
                     orderId: order.ExternalOrderId, ex: ex);
                 skipped.Add(new SkippedItem(
-                    $"{group.Key.SizeLabel} {group.Key.MediaType}".Trim(),
+                    $"{group.Key.SizeLabel} {group.Key.OptionsKey}".Trim(),
                     ex.Message));
             }
         }

@@ -82,7 +82,8 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, order_id, size_label, media_type, image_filepath,
-                   quantity, is_noritsu, is_local_production, is_printed, image_filename
+                   quantity, is_noritsu, is_local_production, is_printed,
+                   image_filename, options_json
             FROM order_items
             WHERE order_id = @id AND is_noritsu = 1
             ORDER BY size_label, media_type
@@ -102,7 +103,8 @@ public class OrderRepository : IOrderRepository
                 IsNoritsu: reader.GetInt32(6) == 1,
                 IsLocalProduction: reader.GetInt32(7) == 1,
                 IsPrinted: reader.GetInt32(8) == 1,
-                ImageFilename: reader.IsDBNull(9) ? "" : reader.GetString(9)));
+                ImageFilename: reader.IsDBNull(9) ? "" : reader.GetString(9),
+                OptionsJson: reader.IsDBNull(10) ? "[]" : reader.GetString(10)));
         }
         return items;
     }

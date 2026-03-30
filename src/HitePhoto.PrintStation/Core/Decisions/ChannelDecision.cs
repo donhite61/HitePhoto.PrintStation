@@ -14,9 +14,10 @@ public class ChannelDecision : IChannelDecision
     }
 
     public ChannelResult Resolve(string sizeLabel, string mediaType)
-    {
-        var routingKey = OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
+        => ResolveByKey(OrderHelpers.BuildRoutingKey(sizeLabel, mediaType));
 
+    public ChannelResult ResolveByKey(string routingKey)
+    {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT channel_number, layout_name FROM channel_mappings WHERE routing_key = @key";
@@ -30,7 +31,6 @@ public class ChannelDecision : IChannelDecision
             return new ChannelResult(channel, layout, routingKey);
         }
 
-        // Not mapped — return 0, operator must assign
         return new ChannelResult(0, null, routingKey);
     }
 

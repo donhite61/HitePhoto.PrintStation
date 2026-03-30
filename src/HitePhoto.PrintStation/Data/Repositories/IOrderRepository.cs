@@ -165,4 +165,5 @@ public record OrderItemRecord(
     bool IsPrinted,
     string ImageFilename = "",
     string Category = "",
-    string SubCategory = "");
+    string SubCategory = "",
+    string OptionsJson = "[]");

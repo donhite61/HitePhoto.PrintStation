@@ -8,6 +8,7 @@ namespace HitePhoto.PrintStation.Core.Decisions;
 public interface IChannelDecision
 {
     ChannelResult Resolve(string sizeLabel, string mediaType);
+    ChannelResult ResolveByKey(string routingKey);
 
     /// <summary>
     /// Load all channel mappings in one query. Returns dictionary keyed by routing_key.
