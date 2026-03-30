@@ -32,7 +32,8 @@ public class IngestOrderWriter
         ValidateOrder(order, storeId, sourceCode);
         ValidateItems(order, sourceCode);
 
-        var existingId = _orders.FindOrderId(order.ExternalOrderId, storeId);
+        var existingId = _orders.FindOrderId(order.ExternalOrderId, storeId)
+                         ?? _orders.FindOrderIdAnyStore(order.ExternalOrderId);
 
         if (existingId == null)
         {

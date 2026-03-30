@@ -208,6 +208,16 @@ public class OrderRepository : IOrderRepository
         return result != null ? Convert.ToInt32(result) : null;
     }
 
+    public int? FindOrderIdAnyStore(string externalOrderId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id FROM orders WHERE external_order_id = @eid LIMIT 1";
+        cmd.Parameters.AddWithValue("@eid", externalOrderId);
+        var result = cmd.ExecuteScalar();
+        return result != null ? Convert.ToInt32(result) : null;
+    }
+
     public List<OrderItemRecord> GetItems(int orderId)
     {
         var items = new List<OrderItemRecord>();

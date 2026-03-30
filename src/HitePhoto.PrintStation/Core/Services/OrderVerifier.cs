@@ -308,8 +308,12 @@ public class OrderVerifier : IOrderVerifier
 
         var order = _pixfizzParser.Parse(raw);
 
-        var existingId = _orders.FindOrderId(order.ExternalOrderId, _settings.StoreId);
-        if (existingId != null) return;
+        var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
+        if (existingId != null)
+        {
+            _orders.SetFilesLocal(existingId.Value, true);
+            return;
+        }
 
         var orderId = _orders.InsertOrder(order, _settings.StoreId);
         AppLog.Info($"Order {orderId} discovered by verify");
@@ -328,8 +332,12 @@ public class OrderVerifier : IOrderVerifier
 
         AppLog.Info($"Verify insert Dakis {externalOrderId}: billing='{billingId}' → pickup={pickupStoreId}");
 
-        var existingId = _orders.FindOrderId(order.ExternalOrderId, pickupStoreId);
-        if (existingId != null) return;
+        var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
+        if (existingId != null)
+        {
+            _orders.SetFilesLocal(existingId.Value, true);
+            return;
+        }
 
         var orderId = _orders.InsertOrder(order, pickupStoreId);
         AppLog.Info($"Order {orderId} discovered by verify");
