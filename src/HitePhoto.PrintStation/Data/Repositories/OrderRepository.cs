@@ -412,10 +412,8 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = """
             SELECT o.id, o.external_order_id, o.folder_path, o.source_code
             FROM orders o
-            WHERE o.files_local = 1
-              AND (@daysBack = 0 OR o.ordered_at >= @cutoff)
+            WHERE (@daysBack = 0 OR o.ordered_at >= @cutoff)
               AND o.is_test = 0
-              AND o.is_transfer = 0
             """;
         cmd.Parameters.AddWithValue("@daysBack", days);
         cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
