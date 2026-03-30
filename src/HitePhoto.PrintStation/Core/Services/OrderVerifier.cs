@@ -83,9 +83,9 @@ public class OrderVerifier : IOrderVerifier
             // Order is on disk — ensure files_local = 1 (sync may have set it to 0)
             _orders.SetFilesLocal(db.Id, true);
 
-            // Skip verify for fully printed orders — no need to check files or repair
+            // Skip verify for fully printed orders or orders with no items
             var dbItems = _orders.GetItems(db.Id);
-            if (dbItems.Count > 0 && dbItems.All(i => i.IsPrinted))
+            if (dbItems.Count == 0 || dbItems.All(i => i.IsPrinted))
             {
                 folderList.Remove(orderId);
                 dbList.Remove(orderId);
