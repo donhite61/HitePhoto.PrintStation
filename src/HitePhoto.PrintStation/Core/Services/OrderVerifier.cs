@@ -80,6 +80,9 @@ public class OrderVerifier : IOrderVerifier
             var folder = folderList[orderId];
             var db = dbList[orderId];
 
+            // Order is on disk — ensure files_local = 1 (sync may have set it to 0)
+            _orders.SetFilesLocal(db.Id, true);
+
             OrderSource source;
             try { source = OrderSourceExtensions.FromCode(db.SourceCode); }
             catch { folderList.Remove(orderId); dbList.Remove(orderId); matchCount++; continue; }
