@@ -109,7 +109,7 @@
                 <StackPanel Orientation="Horizontal">
                     <TextBlock x:Name="NameText"
                                Text="{Binding DisplayLabel}"
-                               Foreground="{DynamicResource TextPrimary}"
+                               Foreground="{Binding StoreName, Converter={StaticResource StoreColorConverter}}"
                                FontSize="14" FontWeight="Bold"
                                VerticalAlignment="Center"/>
                     <TextBlock x:Name="SrcTag"
