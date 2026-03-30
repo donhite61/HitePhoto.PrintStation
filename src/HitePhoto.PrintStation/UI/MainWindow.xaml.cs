@@ -1449,3 +1449,19 @@ public class StringToVisibilityConverter : System.Windows.Data.IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
         => throw new NotSupportedException();
 }
+
+public class StoreColorConverter : System.Windows.Data.IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+    {
+        var name = (value as string ?? "").ToUpperInvariant();
+        return name switch
+        {
+            "BH" => new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 120, 60)),
+            "WB" => new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 80, 160)),
+            _ => new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(128, 128, 128))
+        };
+    }
+    public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        => throw new NotSupportedException();
+}
