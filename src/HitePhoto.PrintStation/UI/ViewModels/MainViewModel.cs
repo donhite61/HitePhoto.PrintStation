@@ -251,9 +251,6 @@ public class MainViewModel : ViewModelBase
             WHERE o.files_local = 1
               AND o.is_test = 0
               AND o.status_code NOT IN ('cancelled')
-              AND EXISTS (
-                  SELECT 1 FROM order_items oi WHERE oi.order_id = o.id
-              )
               AND NOT EXISTS (
                   SELECT 1 FROM order_items oi
                   WHERE oi.order_id = o.id AND oi.is_printed = 0
