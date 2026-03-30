@@ -632,6 +632,8 @@ public class MainViewModel : ViewModelBase
 
     public List<Core.Models.ChannelInfo> GetAllChannels() => _orders.GetAllChannels();
 
+    public string GetLocalStoreName() => _orders.GetStoreName(_settings.StoreId);
+
     public void AssignChannel(string sizeLabel, string mediaType, int channelNumber, string? layoutName = null)
     {
         var routingKey = OrderHelpers.BuildRoutingKey(sizeLabel, mediaType);
