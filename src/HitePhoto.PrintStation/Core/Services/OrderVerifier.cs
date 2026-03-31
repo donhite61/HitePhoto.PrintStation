@@ -53,7 +53,7 @@ public class OrderVerifier : IOrderVerifier
             ScanFoldersIntoList(_settings.OrderOutputPath, "pixfizz", cutoff, folderList);
             ScanFoldersIntoList(_settings.DakisWatchFolder, "dakis", cutoff, folderList);
 
-            var dbList = _orders.GetRecentOrders(_settings.StoreId, days);
+            var dbList = _orders.GetRecentOrders(days);
 
             return VerifyOrders(folderList, dbList);
         }

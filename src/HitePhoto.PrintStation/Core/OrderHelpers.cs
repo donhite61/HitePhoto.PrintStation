@@ -36,12 +36,6 @@ public static class OrderHelpers
         return string.IsNullOrEmpty(options) ? size : $"{size}|{options}";
     }
 
-    public static string BuildRoutingKeyFromOptions(string sizeLabel, string optionsJson)
-    {
-        var size = (sizeLabel ?? "").Trim().ToLowerInvariant();
-        var optionsPart = BuildOptionsKey(optionsJson);
-        return string.IsNullOrEmpty(optionsPart) ? size : $"{size}|{optionsPart}";
-    }
 
     /// <summary>
     /// Build display-friendly options string, filtering out defaults.
@@ -81,6 +75,17 @@ public static class OrderHelpers
     /// Returns null if valid, error message if not.
     /// Called at ingest and on order click.
     /// </summary>
+    public static string FormatPhone(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        var digits = new string(raw.Where(char.IsDigit).ToArray());
+        if (digits.Length == 10)
+            return $"({digits[..3]}) {digits[3..6]}-{digits[6..]}";
+        if (digits.Length == 11 && digits[0] == '1')
+            return $"({digits[1..4]}) {digits[4..7]}-{digits[7..]}";
+        return raw;
+    }
+
     public static string? VerifyFile(string filepath)
     {
         if (string.IsNullOrEmpty(filepath))

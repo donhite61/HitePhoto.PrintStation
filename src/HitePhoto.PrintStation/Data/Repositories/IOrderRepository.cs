@@ -61,7 +61,7 @@ public interface IOrderRepository
     /// Get recent orders for a store within a date range.
     /// Used by verify to build the DB side of the two-list reconciliation.
     /// </summary>
-    Dictionary<string, (int Id, string FolderPath, string SourceCode)> GetRecentOrders(int storeId, int days);
+    Dictionary<string, (int Id, string FolderPath, string SourceCode)> GetRecentOrders(int days);
 
     /// <summary>
     /// Get all configured channels from the channel_mappings table.

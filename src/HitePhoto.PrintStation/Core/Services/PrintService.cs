@@ -59,9 +59,7 @@ public class PrintService : IPrintService
 
         foreach (var group in sizeGroups)
         {
-            var routingKey = string.IsNullOrEmpty(group.Key.OptionsKey)
-                ? group.Key.SizeLabel.Trim().ToLowerInvariant()
-                : $"{group.Key.SizeLabel.Trim().ToLowerInvariant()}|{group.Key.OptionsKey}";
+            var routingKey = OrderHelpers.BuildRoutingKey(group.Key.SizeLabel, group.Key.OptionsKey);
             var channelResult = _channel.ResolveByKey(routingKey);
             if (channelResult.ChannelNumber == 0)
             {

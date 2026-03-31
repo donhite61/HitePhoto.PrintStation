@@ -49,6 +49,75 @@ public class OrderDb
     /// <summary>Re-create the database after file deletion.</summary>
     public void Reinitialize() => Initialize();
 
+    /// <summary>
+    /// Wipe all order data but preserve channel mappings and option defaults.
+    /// </summary>
+    public void WipePreservingConfig()
+    {
+        var savedMappings = new List<(string Key, int Channel, string? Layout, string Source)>();
+        var savedDefaults = new List<(string Key, string Value)>();
+
+        try
+        {
+            using var conn = OpenConnection();
+            using var mapCmd = conn.CreateCommand();
+            mapCmd.CommandText = "SELECT routing_key, channel_number, layout_name, source FROM channel_mappings";
+            using var mapReader = mapCmd.ExecuteReader();
+            while (mapReader.Read())
+                savedMappings.Add((mapReader.GetString(0), mapReader.GetInt32(1),
+                    mapReader.IsDBNull(2) ? null : mapReader.GetString(2),
+                    mapReader.IsDBNull(3) ? "" : mapReader.GetString(3)));
+
+            using var defCmd = conn.CreateCommand();
+            defCmd.CommandText = "SELECT option_key, option_value FROM option_defaults";
+            using var defReader = defCmd.ExecuteReader();
+            while (defReader.Read())
+                savedDefaults.Add((defReader.GetString(0), defReader.GetString(1)));
+        }
+        catch { /* DB may be corrupt — proceed with wipe */ }
+
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        foreach (var ext in new[] { "", "-shm", "-wal" })
+        {
+            var path = _dbPath + ext;
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                AppLog.Info($"Wipe: deleted {path}");
+            }
+        }
+
+        Reinitialize();
+
+        if (savedMappings.Count > 0 || savedDefaults.Count > 0)
+        {
+            using var conn = OpenConnection();
+            foreach (var m in savedMappings)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = """
+                    INSERT OR REPLACE INTO channel_mappings (routing_key, channel_number, layout_name, source, updated_at)
+                    VALUES (@key, @ch, @layout, @src, datetime('now'))
+                    """;
+                cmd.Parameters.AddWithValue("@key", m.Key);
+                cmd.Parameters.AddWithValue("@ch", m.Channel);
+                cmd.Parameters.AddWithValue("@layout", (object?)m.Layout ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@src", m.Source);
+                cmd.ExecuteNonQuery();
+            }
+            foreach (var d in savedDefaults)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "INSERT OR IGNORE INTO option_defaults (option_key, option_value) VALUES (@k, @v)";
+                cmd.Parameters.AddWithValue("@k", d.Key);
+                cmd.Parameters.AddWithValue("@v", d.Value);
+                cmd.ExecuteNonQuery();
+            }
+            AppLog.Info($"Wipe: restored {savedMappings.Count} channel mappings, {savedDefaults.Count} option defaults");
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  Schema initialization
     // ══════════════════════════════════════════════════════════════════════

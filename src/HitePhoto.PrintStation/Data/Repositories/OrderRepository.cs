@@ -415,7 +415,7 @@ public class OrderRepository : IOrderRepository
         transaction.Commit();
     }
 
-    public Dictionary<string, (int Id, string FolderPath, string SourceCode)> GetRecentOrders(int storeId, int days)
+    public Dictionary<string, (int Id, string FolderPath, string SourceCode)> GetRecentOrders(int days)
     {
         var cutoff = days > 0 ? DateTime.Now.AddDays(-days) : DateTime.MinValue;
         var result = new Dictionary<string, (int Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase);

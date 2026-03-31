@@ -32,6 +32,8 @@ public partial class MainWindow : Window
     private readonly IAlertRepository _alertRepo;
     private readonly Core.Services.INotificationService _notificationService;
     private readonly Data.Repositories.IOptionDefaultsRepository _optionDefaults;
+    private static readonly HashSet<string> MetadataOptionKeys = new(StringComparer.OrdinalIgnoreCase)
+        { "Category", "SubCategory", "Price" };
 
     private readonly System.Collections.ObjectModel.ObservableCollection<AlertItemViewModel> _sessionAlerts = new();
     private int _nextAlertId;
@@ -531,7 +533,7 @@ public partial class MainWindow : Window
 
         DetailOrderId.Text = treeItem.ShortId;
         DetailCustomerName.Text = treeItem.CustomerName;
-        DetailPhone.Text = FormatPhone(treeItem.CustomerPhone);
+        DetailPhone.Text = Core.OrderHelpers.FormatPhone(treeItem.CustomerPhone);
         DetailEmail.Text = treeItem.CustomerEmail;
         DetailStatus.Text = treeItem.StatusCode;
         DetailSource.Text = treeItem.SourceCode;
@@ -704,9 +706,7 @@ public partial class MainWindow : Window
             }
 
             var defaults = _optionDefaults.GetAll();
-            var hiddenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                { "Category", "SubCategory", "Price" };
-            var visible = options.Where(o => !hiddenKeys.Contains(o.Key)).ToList();
+            var visible = options.Where(o => !MetadataOptionKeys.Contains(o.Key)).ToList();
             if (visible.Count == 0) { OptionsPanel.Visibility = Visibility.Collapsed; return; }
             OptionsList.ItemsSource = visible.Select(o =>
                 new ViewModels.OptionBadge(o.Key, o.Value, defaults.Contains((o.Key, o.Value)))).ToList();
@@ -1415,17 +1415,6 @@ public partial class MainWindow : Window
         var notes = _vm.OrderNotes.ToList();
         var win = new OrderHistoryWindow(label, notes) { Owner = this };
         win.ShowDialog();
-    }
-
-    private static string FormatPhone(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw)) return "";
-        var digits = new string(raw.Where(char.IsDigit).ToArray());
-        if (digits.Length == 10)
-            return $"({digits[..3]}) {digits[3..6]}-{digits[6..]}";
-        if (digits.Length == 11 && digits[0] == '1')
-            return $"({digits[1..4]}) {digits[4..7]}-{digits[7..]}";
-        return raw;
     }
 
     // ── Timer helpers ──────────────────────────────────────────────────────
