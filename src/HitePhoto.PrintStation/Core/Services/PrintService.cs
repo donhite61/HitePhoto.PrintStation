@@ -52,7 +52,6 @@ public class PrintService : IPrintService
 
         // Group by size + options (border type etc. affects channel routing)
         var sizeGroups = items
-            .Where(i => !i.IsPrinted)
             .Where(i => sizeFilter == null || sizeFilter.Contains($"{i.SizeLabel}|{OrderHelpers.BuildOptionsKey(i.OptionsJson)}"))
             .GroupBy(i => new { i.SizeLabel, OptionsKey = OrderHelpers.BuildOptionsKey(i.OptionsJson) })
             .ToList();
