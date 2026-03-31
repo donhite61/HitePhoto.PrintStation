@@ -193,9 +193,9 @@ public class MainViewModel : ViewModelBase
                 _channelNamesDirty = false;
             }
 
-            var pending = LoadPendingOrders(conn);
-            var printed = LoadPrintedOrders(conn);
-            var otherStore = LoadOtherStoreOrders(conn);
+            var pending = _orders.LoadPendingOrders(_settings.StoreId);
+            var printed = _orders.LoadPrintedOrders(_settings.StoreId);
+            var otherStore = _orders.LoadOtherStoreOrders(_settings.StoreId);
 
             DiffAndPatch(PendingOrders, pending, verifyFiles: true);
             DiffAndPatch(PrintedOrders, printed, verifyFiles: false);
@@ -211,96 +211,6 @@ public class MainViewModel : ViewModelBase
                 "Failed to load orders from SQLite", ex: ex);
         }
     }
-
-    private List<OrderRow> LoadPendingOrders(SqliteConnection conn)
-    {
-        var results = new List<OrderRow>();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
-                   o.customer_first_name, o.customer_last_name,
-                   o.customer_email, o.customer_phone,
-                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
-                   o.folder_path, o.special_instructions, o.download_status,
-                   s.short_name AS store_name
-            FROM orders o
-            LEFT JOIN stores s ON s.id = o.pickup_store_id
-            WHERE o.is_printed = 0
-              AND o.is_test = 0
-            ORDER BY o.ordered_at DESC
-            """;
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-            results.Add(ReadOrderRow(reader));
-        return results;
-    }
-
-    private List<OrderRow> LoadPrintedOrders(SqliteConnection conn)
-    {
-        var results = new List<OrderRow>();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
-                   o.customer_first_name, o.customer_last_name,
-                   o.customer_email, o.customer_phone,
-                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
-                   o.folder_path, o.special_instructions, o.download_status,
-                   s.short_name AS store_name
-            FROM orders o
-            LEFT JOIN stores s ON s.id = o.pickup_store_id
-            WHERE o.is_printed = 1
-              AND o.is_test = 0
-            ORDER BY o.ordered_at DESC
-            """;
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-            results.Add(ReadOrderRow(reader));
-        return results;
-    }
-
-    private List<OrderRow> LoadOtherStoreOrders(SqliteConnection conn)
-    {
-        var results = new List<OrderRow>();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"""
-            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
-                   o.customer_first_name, o.customer_last_name,
-                   o.customer_email, o.customer_phone,
-                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
-                   o.folder_path, o.special_instructions, o.download_status,
-                   s.short_name AS store_name
-            FROM orders o
-            LEFT JOIN stores s ON s.id = o.pickup_store_id
-            WHERE o.files_local = 0
-              AND o.status_code NOT IN ('{OrderStatusCode.PickedUp}', '{OrderStatusCode.Cancelled}')
-              AND o.is_test = 0
-            ORDER BY o.ordered_at DESC
-            """;
-
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-            results.Add(ReadOrderRow(reader));
-
-        return results;
-    }
-
-    private static OrderRow ReadOrderRow(SqliteDataReader reader) => new(
-        Id: reader.GetInt32(0),
-        ExternalOrderId: reader.GetString(1),
-        SourceCode: reader.IsDBNull(2) ? "" : reader.GetString(2),
-        StatusCode: reader.IsDBNull(3) ? "" : reader.GetString(3),
-        CustomerFirstName: reader.IsDBNull(4) ? "" : reader.GetString(4),
-        CustomerLastName: reader.IsDBNull(5) ? "" : reader.GetString(5),
-        CustomerEmail: reader.IsDBNull(6) ? "" : reader.GetString(6),
-        CustomerPhone: reader.IsDBNull(7) ? "" : reader.GetString(7),
-        OrderedAt: reader.IsDBNull(8) ? null : reader.GetString(8),
-        TotalAmount: reader.IsDBNull(9) ? 0 : reader.GetDecimal(9),
-        IsHeld: reader.GetInt32(10) == 1,
-        IsTransfer: reader.GetInt32(11) == 1,
-        FolderPath: reader.IsDBNull(12) ? "" : reader.GetString(12),
-        SpecialInstructions: reader.IsDBNull(13) ? "" : reader.GetString(13),
-        DownloadStatus: reader.IsDBNull(14) ? "" : reader.GetString(14),
-        StoreName: reader.IsDBNull(15) ? "" : reader.GetString(15));
 
     // ══════════════════════════════════════════════════════════════════════
     //  Tree building
@@ -713,16 +623,7 @@ public class MainViewModel : ViewModelBase
     public void StartDakisWatcher() => _dakisIngest.StartWatching();
 }
 
-// ── Internal data records (not exposed outside ViewModel) ──
-
-internal record OrderRow(
-    int Id, string ExternalOrderId, string SourceCode, string StatusCode,
-    string CustomerFirstName, string CustomerLastName,
-    string CustomerEmail, string CustomerPhone,
-    string? OrderedAt, decimal TotalAmount,
-    bool IsHeld, bool IsTransfer,
-    string FolderPath, string SpecialInstructions, string DownloadStatus,
-    string StoreName);
+// ── Internal data records ──
 
 internal record ItemRow(
     int Id, string SizeLabel, string MediaType, int Quantity,

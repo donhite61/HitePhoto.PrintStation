@@ -10,6 +10,17 @@ public class OrderRepository : IOrderRepository
 {
     private readonly OrderDb _db;
 
+    private const string OrderSelectBase = """
+        SELECT o.id, o.external_order_id, o.source_code, o.status_code,
+               o.customer_first_name, o.customer_last_name,
+               o.customer_email, o.customer_phone,
+               o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
+               o.folder_path, o.special_instructions, o.download_status,
+               s.short_name AS store_name
+        FROM orders o
+        LEFT JOIN stores s ON s.id = o.pickup_store_id
+        """;
+
     public OrderRepository(OrderDb db)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -644,29 +655,14 @@ public class OrderRepository : IOrderRepository
         var results = new List<OrderRow>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
-                   o.customer_first_name, o.customer_last_name,
-                   o.customer_email, o.customer_phone,
-                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
-                   o.folder_path, o.special_instructions, o.download_status,
-                   s.short_name AS store_name
-            FROM orders o
-            LEFT JOIN stores s ON s.id = o.pickup_store_id
-            WHERE o.pickup_store_id = @storeId
+        cmd.CommandText = OrderSelectBase + """
+            WHERE o.is_printed = 0
               AND o.is_test = 0
-              AND EXISTS (
-                  SELECT 1 FROM order_items i
-                  WHERE i.order_id = o.id AND i.is_printed = 0
-              )
             ORDER BY o.ordered_at DESC
             """;
-        cmd.Parameters.AddWithValue("@storeId", storeId);
-
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
-
         return results;
     }
 
@@ -675,33 +671,14 @@ public class OrderRepository : IOrderRepository
         var results = new List<OrderRow>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
-                   o.customer_first_name, o.customer_last_name,
-                   o.customer_email, o.customer_phone,
-                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
-                   o.folder_path, o.special_instructions, o.download_status,
-                   s.short_name AS store_name
-            FROM orders o
-            LEFT JOIN stores s ON s.id = o.pickup_store_id
-            WHERE o.pickup_store_id = @storeId
+        cmd.CommandText = OrderSelectBase + """
+            WHERE o.is_printed = 1
               AND o.is_test = 0
-              AND NOT EXISTS (
-                  SELECT 1 FROM order_items i
-                  WHERE i.order_id = o.id AND i.is_printed = 0
-              )
-              AND EXISTS (
-                  SELECT 1 FROM order_items i
-                  WHERE i.order_id = o.id
-              )
             ORDER BY o.ordered_at DESC
             """;
-        cmd.Parameters.AddWithValue("@storeId", storeId);
-
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
-
         return results;
     }
 
@@ -710,25 +687,15 @@ public class OrderRepository : IOrderRepository
         var results = new List<OrderRow>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT o.id, o.external_order_id, o.source_code, o.status_code,
-                   o.customer_first_name, o.customer_last_name,
-                   o.customer_email, o.customer_phone,
-                   o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
-                   o.folder_path, o.special_instructions, o.download_status,
-                   s.short_name AS store_name
-            FROM orders o
-            LEFT JOIN stores s ON s.id = o.pickup_store_id
+        cmd.CommandText = OrderSelectBase + """
             WHERE o.pickup_store_id != @storeId
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
-
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
-
         return results;
     }
 
