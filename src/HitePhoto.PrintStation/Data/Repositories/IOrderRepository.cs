@@ -91,13 +91,13 @@ public interface IOrderRepository
     /// <summary>Batch update file_status on order_items. 0=unchecked, 1=OK, -1=error.</summary>
     void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates);
 
-    /// <summary>Load orders that have at least one unprinted item.</summary>
+    /// <summary>Pending tab: is_printed=0 ONLY. Do not add files_local, status_code, or item subqueries.</summary>
     List<OrderRow> LoadPendingOrders(int storeId);
 
-    /// <summary>Load orders where all items are printed.</summary>
+    /// <summary>Printed tab: is_printed=1 ONLY. Do not add files_local, status_code, or item subqueries.</summary>
     List<OrderRow> LoadPrintedOrders(int storeId);
 
-    /// <summary>Load orders belonging to other stores (excludes picked_up, cancelled).</summary>
+    /// <summary>Other Store tab: pickup_store_id != storeId ONLY. Do not add files_local or status_code.</summary>
     List<OrderRow> LoadOtherStoreOrders(int storeId);
 
     /// <summary>Batch-load items for multiple orders. Keyed by order ID.</summary>

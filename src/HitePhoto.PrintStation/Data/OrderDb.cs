@@ -650,7 +650,7 @@ public class OrderDb
         AddColumnIfMissing(conn, "orders", "is_externally_modified", "INTEGER NOT NULL DEFAULT 0");
 
         // Migration 012: files_local — 1 = this machine has the image files on disk.
-        // Tree filters on this. Set on ingest, never cleared by sync or transfer.
+        // Used by VERIFY ONLY. NOT for tab queries. Set on ingest, flipped by verify.
         AddColumnIfMissing(conn, "orders", "files_local", "INTEGER NOT NULL DEFAULT 0");
 
         // Migration 013: One-time purge of all pre-existing history.

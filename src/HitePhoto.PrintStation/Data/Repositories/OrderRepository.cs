@@ -650,6 +650,18 @@ public class OrderRepository : IOrderRepository
                         $"Context: marking Pixfizz /received pushed. State: no matching order in SQLite");
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  TAB QUERIES — LOCKED CONTRACTS (Session 71-72)
+    //
+    //  Pending  = is_printed = 0.  Nothing else.
+    //  Printed  = is_printed = 1.  Nothing else.
+    //  Other    = pickup_store_id != this store.  Nothing else.
+    //
+    //  DO NOT add files_local, status_code, is_local_production,
+    //  is_transfer, or item subqueries to these filters.
+    //  See memory/feedback_field_purposes.md for why.
+    // ═══════════════════════════════════════════════════════════════
+
     public List<OrderRow> LoadPendingOrders(int storeId)
     {
         var results = new List<OrderRow>();
