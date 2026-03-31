@@ -176,13 +176,9 @@ public class PrintService : IPrintService
             var sizes = string.Join(", ", sent.Select(s => s.SizeLabel).Distinct());
             _history.AddNote(orderId, $"Sent to printer: {sizes}");
 
-            // Mark non-local production items as printed so order can move to Printed tab
-            var nonLocalIds = _orders.GetItems(orderId)
-                .Where(i => !i.IsLocalProduction && !i.IsPrinted)
-                .Select(i => i.Id)
-                .ToList();
-            if (nonLocalIds.Count > 0)
-                _orders.SetItemsPrinted(nonLocalIds);
+            // Auto-set order.is_printed if all items are now printed
+            if (_orders.AreAllItemsPrinted(orderId))
+                _orders.SetOrderPrinted(orderId, true);
         }
 
         return new SendResult(sent, skipped);

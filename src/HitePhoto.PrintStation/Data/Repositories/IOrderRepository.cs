@@ -106,6 +106,12 @@ public interface IOrderRepository
     /// <summary>Set files_local flag (1 = image files exist on this machine's disk).</summary>
     void SetFilesLocal(int orderId, bool local);
 
+    /// <summary>Set order-level is_printed flag (drives Pending vs Printed tab).</summary>
+    void SetOrderPrinted(int orderId, bool printed);
+
+    /// <summary>Check if all items on an order are printed.</summary>
+    bool AreAllItemsPrinted(int orderId);
+
     /// <summary>Set the is_externally_modified flag (transfer receive or LabApi edit).</summary>
     void SetExternallyModified(int orderId, bool modified);
 

@@ -24,11 +24,16 @@ public static class OrderHelpers
     /// Build a deterministic routing key from size and media.
     /// Used by IChannelDecision and channel mapping UI.
     /// </summary>
-    public static string BuildRoutingKey(string sizeLabel, string mediaType)
+    /// <summary>
+    /// Build routing key from size + options key (already extracted from JSON).
+    /// Format: "4x6" (no options) or "4x6|white border" (with options).
+    /// This is the ONE routing key format — used by save, lookup, and display.
+    /// </summary>
+    public static string BuildRoutingKey(string sizeLabel, string optionsKey)
     {
         var size = (sizeLabel ?? "").Trim().ToLowerInvariant();
-        var media = (mediaType ?? "").Trim().ToLowerInvariant();
-        return $"{size}|{media}";
+        var options = (optionsKey ?? "").Trim().ToLowerInvariant();
+        return string.IsNullOrEmpty(options) ? size : $"{size}|{options}";
     }
 
     public static string BuildRoutingKeyFromOptions(string sizeLabel, string optionsJson)
@@ -45,7 +50,7 @@ public static class OrderHelpers
         {
             var options = System.Text.Json.JsonSerializer.Deserialize<List<HitePhoto.Shared.Parsers.OrderItemOption>>(optionsJson);
             if (options == null || options.Count == 0) return "";
-            return string.Join("|", options.OrderBy(o => o.Key).Select(o => o.Value.Trim().ToLowerInvariant()));
+            return string.Join("|", options.Where(o => !string.IsNullOrEmpty(o.Value)).OrderBy(o => o.Key ?? "").Select(o => o.Value.Trim().ToLowerInvariant()));
         }
         catch { return ""; }
     }

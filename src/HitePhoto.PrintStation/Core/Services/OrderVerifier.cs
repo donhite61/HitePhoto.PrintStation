@@ -149,6 +149,7 @@ public class OrderVerifier : IOrderVerifier
         }
 
         // ── Leftover in folder list: on disk but not in DB → insert ──
+        int insertErrors = 0;
         foreach (var kvp in folderList)
         {
             try
@@ -161,9 +162,19 @@ public class OrderVerifier : IOrderVerifier
             }
             catch (Exception ex)
             {
-                AlertCollector.Error(AlertCategory.Parsing,
-                    $"Verify insert failed for {kvp.Key}",
-                    orderId: kvp.Key, ex: ex);
+                insertErrors++;
+                if (insertErrors <= 10)
+                {
+                    AlertCollector.Error(AlertCategory.Parsing,
+                        $"Verify insert failed for {kvp.Key}",
+                        orderId: kvp.Key, ex: ex);
+                }
+                if (insertErrors == 10)
+                {
+                    AlertCollector.Error(AlertCategory.Parsing,
+                        $"Verify: too many insert errors ({insertErrors}+), skipping remaining");
+                    break;
+                }
                 errors++;
             }
         }

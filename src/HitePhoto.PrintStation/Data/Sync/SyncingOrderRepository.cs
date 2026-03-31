@@ -122,6 +122,8 @@ public class SyncingOrderRepository : IOrderRepository
     public void SetItemsUnprinted(int orderId) => _inner.SetItemsUnprinted(orderId);
     public void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates) => _inner.BatchUpdateFileStatus(updates);
     public void SetFilesLocal(int orderId, bool local) => _inner.SetFilesLocal(orderId, local);
+    public void SetOrderPrinted(int orderId, bool printed) => _inner.SetOrderPrinted(orderId, printed);
+    public bool AreAllItemsPrinted(int orderId) => _inner.AreAllItemsPrinted(orderId);
     public void SetExternallyModified(int orderId, bool modified) => _inner.SetExternallyModified(orderId, modified);
     public void SetFolderPath(int orderId, string folderPath) => _inner.SetFolderPath(orderId, folderPath);
     public List<(int Id, string Name)> GetStores() => _inner.GetStores();

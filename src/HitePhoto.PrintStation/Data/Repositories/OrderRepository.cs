@@ -822,6 +822,25 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
+    public void SetOrderPrinted(int orderId, bool printed)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET is_printed = @val, updated_at = datetime('now') WHERE id = @id";
+        cmd.Parameters.AddWithValue("@val", printed ? 1 : 0);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public bool AreAllItemsPrinted(int orderId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM order_items WHERE order_id = @id AND is_printed = 0";
+        cmd.Parameters.AddWithValue("@id", orderId);
+        return Convert.ToInt32(cmd.ExecuteScalar()) == 0;
+    }
+
     public void SetExternallyModified(int orderId, bool modified)
     {
         using var conn = _db.OpenConnection();

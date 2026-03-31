@@ -592,6 +592,25 @@ public class OrderDb
         // Migration 014: is_local_production on order_items — 1 = this store produces it (files expected).
         // 0 = another store produces it (files not expected on this machine's disk).
         AddColumnIfMissing(conn, "order_items", "is_local_production", "INTEGER NOT NULL DEFAULT 1");
+
+        // Migration 015: order-level is_printed — drives tab sorting (Pending vs Printed).
+        // Set automatically when all items printed, or manually by operator via Mark Done.
+        AddColumnIfMissing(conn, "orders", "is_printed", "INTEGER NOT NULL DEFAULT 0");
+
+        // Backfill: mark orders as printed where all items are already printed
+        RunOnce(conn, "015_backfill_order_is_printed", """
+            UPDATE orders SET is_printed = 1
+            WHERE id IN (
+                SELECT o.id FROM orders o
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM order_items oi
+                    WHERE oi.order_id = o.id AND oi.is_printed = 0
+                )
+                AND EXISTS (
+                    SELECT 1 FROM order_items oi WHERE oi.order_id = o.id
+                )
+            )
+            """);
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)

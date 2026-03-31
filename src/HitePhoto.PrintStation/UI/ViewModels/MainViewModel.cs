@@ -220,13 +220,8 @@ public class MainViewModel : ViewModelBase
                    s.short_name AS store_name
             FROM orders o
             LEFT JOIN stores s ON s.id = o.pickup_store_id
-            WHERE o.files_local = 1
+            WHERE o.is_printed = 0
               AND o.is_test = 0
-              AND o.status_code NOT IN ('cancelled')
-              AND EXISTS (
-                  SELECT 1 FROM order_items oi
-                  WHERE oi.order_id = o.id AND oi.is_printed = 0
-              )
             ORDER BY o.ordered_at DESC
             """;
         using var reader = cmd.ExecuteReader();
@@ -248,13 +243,8 @@ public class MainViewModel : ViewModelBase
                    s.short_name AS store_name
             FROM orders o
             LEFT JOIN stores s ON s.id = o.pickup_store_id
-            WHERE o.files_local = 1
+            WHERE o.is_printed = 1
               AND o.is_test = 0
-              AND o.status_code NOT IN ('cancelled')
-              AND NOT EXISTS (
-                  SELECT 1 FROM order_items oi
-                  WHERE oi.order_id = o.id AND oi.is_printed = 0
-              )
             ORDER BY o.ordered_at DESC
             """;
         using var reader = cmd.ExecuteReader();
@@ -677,12 +667,14 @@ public class MainViewModel : ViewModelBase
     {
         var allIds = _orders.GetItems(orderId).Select(i => i.Id).ToList();
         _orders.SetItemsPrinted(allIds);
+        _orders.SetOrderPrinted(orderId, true);
         _history.AddNote(orderId, "Marked done by operator", "operator");
     }
 
     public void MarkUnprinted(int orderId)
     {
         _orders.SetItemsUnprinted(orderId);
+        _orders.SetOrderPrinted(orderId, false);
         _history.AddNote(orderId, "Marked unprinted by operator", "operator");
     }
 
