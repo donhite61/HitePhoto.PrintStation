@@ -120,7 +120,7 @@ public class AppSettings
     public string TransferSftpPassword { get; set; } = "";
 
     // ── MariaDB sync ──
-    public bool SyncEnabled          { get; set; } = true;
+    public bool SyncEnabled          { get; set; } = false;
     public int  SyncIntervalSeconds  { get; set; } = 30;
 
     // ── Developer mode ──
