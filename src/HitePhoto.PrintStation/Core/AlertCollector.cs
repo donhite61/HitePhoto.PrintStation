@@ -81,6 +81,9 @@ public static class AlertCollector
     private static readonly HashSet<string> _seen = new();
     private static readonly List<IAlertSink> _sinks = new();
 
+    /// <summary>When true, alerts are logged but not persisted to sinks. Used during verify to prevent UI lockup.</summary>
+    public static bool SuspendPersistence { get; set; }
+
     /// <summary>Register a persistence sink. Called at startup after DI is built.</summary>
     public static void AddSink(IAlertSink sink)
     {
@@ -121,28 +124,9 @@ public static class AlertCollector
             default:                    AppLog.Info(logMsg);   break;
         }
 
-        // Persist errors and warnings to all registered sinks
-        if (alert.Severity != AlertSeverity.Info)
-        {
-            var record = new AlertRecord(
-                Id: 0,
-                Severity: alert.SeverityLabel,
-                Category: alert.CategoryLabel,
-                Summary: alert.Summary,
-                OrderId: alert.OrderId,
-                Detail: alert.Detail,
-                Exception: alert.Exception,
-                SourceMethod: alert.Method,
-                SourceFile: alert.SourceFile,
-                SourceLine: alert.SourceLine,
-                CreatedAt: alert.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
-                Acknowledged: false);
-
-            List<IAlertSink> sinks;
-            lock (_lock) { sinks = new List<IAlertSink>(_sinks); }
-            foreach (var sink in sinks)
-                sink.Persist(record);
-        }
+        // Alert persistence disabled — alerts log to file only.
+        // SQLite sink writes were locking up the UI during verify/ingest.
+        // Re-enable when POS system needs alert history.
     }
 
     // ── Convenience methods (auto-capture caller info) ───────────────────

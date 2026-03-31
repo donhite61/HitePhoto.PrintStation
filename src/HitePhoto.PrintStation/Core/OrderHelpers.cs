@@ -43,6 +43,27 @@ public static class OrderHelpers
         return string.IsNullOrEmpty(optionsPart) ? size : $"{size}|{optionsPart}";
     }
 
+    /// <summary>
+    /// Build display-friendly options string, filtering out defaults.
+    /// Returns empty string if all options are defaults.
+    /// </summary>
+    public static string BuildDisplayOptions(string optionsJson, HashSet<(string Key, string Value)> defaults)
+    {
+        if (string.IsNullOrEmpty(optionsJson) || optionsJson == "[]") return "";
+        try
+        {
+            var options = System.Text.Json.JsonSerializer.Deserialize<List<HitePhoto.Shared.Parsers.OrderItemOption>>(optionsJson);
+            if (options == null || options.Count == 0) return "";
+            var nonDefaults = options
+                .Where(o => !string.IsNullOrEmpty(o.Value))
+                .Where(o => !defaults.Contains((o.Key ?? "", o.Value.Trim())))
+                .Select(o => o.Value.Trim())
+                .ToList();
+            return string.Join(", ", nonDefaults);
+        }
+        catch { return ""; }
+    }
+
     public static string BuildOptionsKey(string optionsJson)
     {
         if (string.IsNullOrEmpty(optionsJson) || optionsJson == "[]") return "";

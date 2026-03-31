@@ -26,6 +26,7 @@ public class MainViewModel : ViewModelBase
     private readonly IOrderVerifier _verifier;
     private readonly IPrintService _printService;
     private readonly ITransferService _transferService;
+    private readonly IOptionDefaultsRepository _optionDefaultsRepo;
     private readonly PixfizzIngestService _pixfizzIngest;
     private readonly DakisIngestService _dakisIngest;
     private readonly AppSettings _settings;
@@ -39,6 +40,7 @@ public class MainViewModel : ViewModelBase
     private bool _csvChannelNamesLoaded;
     private Dictionary<string, int> _channelByRoutingKey = new();
     private Dictionary<string, string> _layoutByRoutingKey = new();
+    private HashSet<(string Key, string Value)> _optionDefaults = new();
     private bool _channelNamesDirty = true;
 
     // ── Selected state ──
@@ -103,6 +105,7 @@ public class MainViewModel : ViewModelBase
         IOrderVerifier verifier,
         IPrintService printService,
         ITransferService transferService,
+        IOptionDefaultsRepository optionDefaultsRepo,
         PixfizzIngestService pixfizzIngest,
         DakisIngestService dakisIngest,
         AppSettings settings)
@@ -117,6 +120,7 @@ public class MainViewModel : ViewModelBase
         _verifier = verifier;
         _printService = printService;
         _transferService = transferService;
+        _optionDefaultsRepo = optionDefaultsRepo;
         _pixfizzIngest = pixfizzIngest;
         _dakisIngest = dakisIngest;
         _settings = settings;
@@ -185,6 +189,7 @@ public class MainViewModel : ViewModelBase
                     }
                     _csvChannelNamesLoaded = true;
                 }
+                _optionDefaults = _optionDefaultsRepo.GetAll();
                 _channelNamesDirty = false;
             }
 
@@ -390,7 +395,7 @@ public class MainViewModel : ViewModelBase
     }
 
     private record SizeGroupResult(
-        string SizeLabel, string MediaType,
+        string SizeLabel, string MediaType, string DisplayOptions,
         int ImageCount, int PrintedCount, int MissingCount,
         int ChannelNumber, string ChannelName, string? LayoutName,
         List<HitePhoto.Shared.Models.OrderItem> Items);
@@ -432,7 +437,9 @@ public class MainViewModel : ViewModelBase
 
         var chName = channelNumber > 0 && _channelNames.TryGetValue(channelNumber, out var n) ? n : "";
         _layoutByRoutingKey.TryGetValue(routingKey, out var layoutName);
-        return new SizeGroupResult(sizeLabel, optionsKey, totalQty, printedCount, missingCount, channelNumber, chName, layoutName, orderItems);
+        var firstOptionsJson = orderItems.FirstOrDefault()?.OptionsJson ?? "[]";
+        var displayOptions = OrderHelpers.BuildDisplayOptions(firstOptionsJson, _optionDefaults);
+        return new SizeGroupResult(sizeLabel, optionsKey, displayOptions, totalQty, printedCount, missingCount, channelNumber, chName, layoutName, orderItems);
     }
 
     private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
@@ -468,6 +475,7 @@ public class MainViewModel : ViewModelBase
                 if (existing.ChannelNumber != r.ChannelNumber) existing.ChannelNumber = r.ChannelNumber;
                 if (existing.ChannelName != r.ChannelName) existing.ChannelName = r.ChannelName;
                 if (existing.LayoutName != r.LayoutName) existing.LayoutName = r.LayoutName;
+                if (existing.DisplayOptions != r.DisplayOptions) existing.DisplayOptions = r.DisplayOptions;
                 existing.Items = r.Items;
 
                 int currentIndex = treeItem.Sizes.IndexOf(existing);
@@ -479,6 +487,7 @@ public class MainViewModel : ViewModelBase
                 var sizeItem = new SizeTreeItem
                 {
                     SizeLabel = r.SizeLabel, MediaType = r.MediaType,
+                    DisplayOptions = r.DisplayOptions,
                     ImageCount = r.ImageCount, PrintedCount = r.PrintedCount,
                     MissingFileCount = r.MissingCount, ChannelNumber = r.ChannelNumber,
                     ChannelName = r.ChannelName, LayoutName = r.LayoutName,
@@ -558,6 +567,7 @@ public class MainViewModel : ViewModelBase
             var sizeItem = new SizeTreeItem
             {
                 SizeLabel = r.SizeLabel, MediaType = r.MediaType,
+                DisplayOptions = r.DisplayOptions,
                 ImageCount = r.ImageCount, PrintedCount = r.PrintedCount,
                 MissingFileCount = r.MissingCount, ChannelNumber = r.ChannelNumber,
                 ChannelName = r.ChannelName, LayoutName = r.LayoutName,

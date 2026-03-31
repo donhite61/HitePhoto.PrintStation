@@ -20,6 +20,7 @@ public class SizeTreeItem : INotifyPropertyChanged
     private int? _channelNumber;
     private string _channelName = "";
     private string? _layoutName;
+    private string _displayOptions = "";
     private bool _isSelected;
 
     public OrderTreeItem? ParentOrder { get; set; }
@@ -30,10 +31,18 @@ public class SizeTreeItem : INotifyPropertyChanged
         set { _sizeLabel = value; OnPropertyChanged(); OnPropertyChanged(nameof(DisplayLabel)); }
     }
 
+    /// <summary>Options key — used for routing. NOT displayed directly.</summary>
     public string MediaType
     {
         get => _mediaType;
-        set { _mediaType = value; OnPropertyChanged(); OnPropertyChanged(nameof(DisplayLabel)); }
+        set { _mediaType = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>Non-default options for display only. Set during tree build.</summary>
+    public string DisplayOptions
+    {
+        get => _displayOptions;
+        set { _displayOptions = value; OnPropertyChanged(); OnPropertyChanged(nameof(DisplayLabel)); }
     }
 
     public int ImageCount
@@ -81,7 +90,7 @@ public class SizeTreeItem : INotifyPropertyChanged
     // ── Computed display properties ──
 
     public string DisplayLabel =>
-        string.IsNullOrEmpty(MediaType) ? SizeLabel : $"{SizeLabel} {MediaType}";
+        string.IsNullOrEmpty(DisplayOptions) ? SizeLabel : $"{SizeLabel}  {DisplayOptions}";
 
     public string CountLabel => $"{Items.Count} file{(Items.Count != 1 ? "s" : "")}, {ImageCount} print{(ImageCount != 1 ? "s" : "")}";
 

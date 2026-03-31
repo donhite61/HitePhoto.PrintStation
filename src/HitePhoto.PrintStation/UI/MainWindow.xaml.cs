@@ -66,6 +66,12 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // Apply font settings to tree templates
+        Resources["OrderFontSize"] = (double)settings.OrderFontSize;
+        Resources["SizeFontSize"] = (double)settings.SizeFontSize;
+        if (!string.IsNullOrWhiteSpace(settings.TreeFontFamily))
+            Resources["TreeFontFamily"] = new System.Windows.Media.FontFamily(settings.TreeFontFamily);
+
         Title = $"HitePhoto Print Station — build {BuildInfo.BuildTimestamp}";
 
         _vm = vm;
@@ -628,6 +634,8 @@ public partial class MainWindow : Window
         if (!_channelEntriesLoaded) LoadChannelEntries();
         PopulateChannelList(ChannelSearchBox.Text.Trim());
         ChannelPopup.IsOpen = true;
+        ChannelSearchPlaceholder.Visibility = string.IsNullOrEmpty(ChannelSearchBox.Text)
+            ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ChannelSearchBox_GotFocus(object sender, RoutedEventArgs e)

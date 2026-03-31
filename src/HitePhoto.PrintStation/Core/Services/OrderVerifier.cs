@@ -40,15 +40,27 @@ public class OrderVerifier : IOrderVerifier
 
     public VerifyResult VerifyRecentOrders(int days)
     {
-        var cutoff = days > 0 ? DateTime.Now.AddDays(-days) : DateTime.MinValue;
+        if (days <= 0) return new VerifyResult(0, 0, 0, 0);
 
-        var folderList = new Dictionary<string, (string Path, string Source)>(StringComparer.OrdinalIgnoreCase);
-        ScanFoldersIntoList(_settings.OrderOutputPath, "pixfizz", cutoff, folderList);
-        ScanFoldersIntoList(_settings.DakisWatchFolder, "dakis", cutoff, folderList);
+        // Suspend alert persistence during verify — parsers alert on every missing file
+        // and hundreds of SQLite writes lock up the UI thread.
+        AlertCollector.SuspendPersistence = true;
+        try
+        {
+            var cutoff = DateTime.Now.AddDays(-days);
 
-        var dbList = _orders.GetRecentOrders(_settings.StoreId, days);
+            var folderList = new Dictionary<string, (string Path, string Source)>(StringComparer.OrdinalIgnoreCase);
+            ScanFoldersIntoList(_settings.OrderOutputPath, "pixfizz", cutoff, folderList);
+            ScanFoldersIntoList(_settings.DakisWatchFolder, "dakis", cutoff, folderList);
 
-        return VerifyOrders(folderList, dbList);
+            var dbList = _orders.GetRecentOrders(_settings.StoreId, days);
+
+            return VerifyOrders(folderList, dbList);
+        }
+        finally
+        {
+            AlertCollector.SuspendPersistence = false;
+        }
     }
 
     public VerifyResult VerifyOrder(string externalOrderId, string folderPath,
@@ -70,79 +82,13 @@ public class OrderVerifier : IOrderVerifier
         Dictionary<string, (string Path, string Source)> folderList,
         Dictionary<string, (int Id, string FolderPath, string SourceCode)> dbList)
     {
-        int inserted = 0, repaired = 0, errors = 0;
+        int inserted = 0, errors = 0;
         int matchCount = 0;
 
-        // ── Reconcile: orders in BOTH lists ──
+        // ── Orders in BOTH lists: already in DB, just count them ──
         var matched = folderList.Keys.Intersect(dbList.Keys, StringComparer.OrdinalIgnoreCase).ToList();
         foreach (var orderId in matched)
         {
-            var folder = folderList[orderId];
-            var db = dbList[orderId];
-
-            // Order is on disk — ensure files_local = 1 (sync may have set it to 0)
-            _orders.SetFilesLocal(db.Id, true);
-
-            // Skip verify for fully printed orders or orders with no items
-            var dbItems = _orders.GetItems(db.Id);
-            if (dbItems.Count == 0 || dbItems.All(i => i.IsPrinted))
-            {
-                folderList.Remove(orderId);
-                dbList.Remove(orderId);
-                matchCount++;
-                continue;
-            }
-
-            OrderSource source;
-            try { source = OrderSourceExtensions.FromCode(db.SourceCode); }
-            catch { folderList.Remove(orderId); dbList.Remove(orderId); matchCount++; continue; }
-
-            bool filesRequired = _filesNeededDecision.AreFilesRequired(source, _settings.StoreId, _settings.StoreId);
-
-            if (filesRequired)
-            {
-                var itemIssues = new List<string>();
-                foreach (var item in dbItems)
-                {
-                    if (!item.IsLocalProduction) continue;
-                    if (string.IsNullOrWhiteSpace(item.ImageFilepath)) continue;
-                    var error = OrderHelpers.VerifyFile(item.ImageFilepath);
-                    if (error != null)
-                    {
-                        var filename = string.IsNullOrEmpty(item.ImageFilename)
-                            ? Path.GetFileName(item.ImageFilepath)
-                            : item.ImageFilename;
-                        itemIssues.Add($"{filename}: {error}");
-                    }
-                }
-
-                // Source-specific repair: reread source file and compare with DB
-                if (source == OrderSource.Pixfizz)
-                {
-                    var txtPath = Path.Combine(folder.Path, "darkroom_ticket.txt");
-                    if (File.Exists(txtPath))
-                    {
-                        var repairResult = RepairFromTxt(db.Id, folder.Path, txtPath);
-                        if (repairResult > 0) repaired += repairResult;
-                    }
-                }
-                else if (source == OrderSource.Dakis)
-                {
-                    var ymlPath = Path.Combine(folder.Path, "order.yml");
-                    if (File.Exists(ymlPath))
-                    {
-                        var repairResult = RepairFromYml(db.Id, folder.Path, ymlPath);
-                        if (repairResult > 0) repaired += repairResult;
-                    }
-                }
-
-                if (itemIssues.Count > 0)
-                {
-                    AppLog.Info($"Verify: order {orderId} has {itemIssues.Count} file issue(s) — {string.Join("; ", itemIssues.Take(5))}");
-                    errors += itemIssues.Count;
-                }
-            }
-
             folderList.Remove(orderId);
             dbList.Remove(orderId);
             matchCount++;
@@ -184,8 +130,8 @@ public class OrderVerifier : IOrderVerifier
         if (dbList.Count > 0)
             AppLog.Info($"Verify: {dbList.Count} DB orders not in folder scan (synced or outside date range)");
 
-        AppLog.Info($"Verify complete: {matchCount} matched, {inserted} inserted, {repaired} repaired, {errors} errors");
-        return new VerifyResult(matchCount, inserted, repaired, errors);
+        AppLog.Info($"Verify complete: {matchCount} matched, {inserted} inserted, {errors} errors");
+        return new VerifyResult(matchCount, inserted, 0, errors);
     }
 
     // ── TXT-vs-DB compare-and-repair (Pixfizz — TXT is source of truth) ──

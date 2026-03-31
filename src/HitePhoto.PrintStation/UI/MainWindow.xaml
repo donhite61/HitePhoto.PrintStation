@@ -15,6 +15,11 @@
 
         <local:StoreColorConverter x:Key="StoreColorConverter"/>
 
+        <!-- ── Font settings (overridden from AppSettings in code-behind) ── -->
+        <system:Double x:Key="OrderFontSize">14</system:Double>
+        <system:Double x:Key="SizeFontSize">13</system:Double>
+        <FontFamily x:Key="TreeFontFamily">Segoe UI</FontFamily>
+
         <!-- ── TreeView styles (ported from PrintRouter) ── -->
         <Style TargetType="TreeView">
             <Setter Property="Background"      Value="{DynamicResource TreeBg}"/>
@@ -110,7 +115,8 @@
                     <TextBlock x:Name="NameText"
                                Text="{Binding DisplayLabel}"
                                Foreground="{Binding StoreName, Converter={StaticResource StoreColorConverter}}"
-                               FontSize="14" FontWeight="Bold"
+                               FontSize="{DynamicResource OrderFontSize}" FontWeight="Bold"
+                               FontFamily="{DynamicResource TreeFontFamily}"
                                VerticalAlignment="Center"/>
                     <TextBlock x:Name="SrcTag"
                                Text="{Binding StoreName}"
@@ -142,7 +148,8 @@
                 <TextBlock x:Name="SzText"
                            Text="{Binding DisplayLabel}"
                            Foreground="{DynamicResource TextPrimary}"
-                           FontSize="13"/>
+                           FontSize="{DynamicResource SizeFontSize}"
+                           FontFamily="{DynamicResource TreeFontFamily}"/>
                 <TextBlock Text="{Binding CountLabel}"
                            Foreground="{DynamicResource TextSecondary}"
                            FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"/>
@@ -336,16 +343,16 @@
                     <StackPanel x:Name="DetailContent" Grid.Row="0" Visibility="Collapsed" Margin="10,8,10,0">
                         <!-- Line 1: Order ID, Customer Name, Phone -->
                         <WrapPanel Orientation="Horizontal">
-                            <TextBlock x:Name="DetailOrderId" FontSize="18"
+                            <TextBlock x:Name="DetailOrderId" FontSize="36"
                                        FontWeight="SemiBold" Foreground="{DynamicResource TextHeading}"
                                        VerticalAlignment="Center" Margin="0,0,20,0"/>
-                            <TextBlock x:Name="DetailCustomerName" FontSize="16"
+                            <TextBlock x:Name="DetailCustomerName" FontSize="32"
                                        Foreground="{DynamicResource TextPrimary}"
                                        VerticalAlignment="Center" Margin="0,0,20,0"/>
-                            <TextBlock x:Name="DetailPhone" FontSize="14"
+                            <TextBlock x:Name="DetailPhone" FontSize="28"
                                        Foreground="{DynamicResource TextSecondary}"
                                        VerticalAlignment="Center"/>
-                            <TextBlock x:Name="DetailEmail" FontSize="12"
+                            <TextBlock x:Name="DetailEmail" FontSize="24"
                                        Foreground="{DynamicResource TextMuted}"
                                        VerticalAlignment="Center" Margin="12,0,0,0"/>
                         </WrapPanel>
@@ -377,16 +384,22 @@
                     <!-- Size detail + channel assignment -->
                     <StackPanel x:Name="SizeDetailPanel" Grid.Row="1" Visibility="Collapsed" Margin="10,6,10,0">
                         <WrapPanel Orientation="Horizontal">
-                            <TextBlock x:Name="SizeDetailLabel" FontSize="14"
+                            <TextBlock x:Name="SizeDetailLabel" FontSize="28"
                                        FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"
                                        VerticalAlignment="Center" Margin="0,0,12,0"/>
-                            <TextBlock x:Name="SizeDetailChannel" FontSize="12"
+                            <TextBlock x:Name="SizeDetailChannel" FontSize="24"
                                        Foreground="{DynamicResource TextSecondary}"
                                        VerticalAlignment="Center" Margin="0,0,16,0"/>
-                            <TextBox x:Name="ChannelSearchBox" Width="200" Padding="4,3" FontSize="11"
-                                     VerticalAlignment="Center" Margin="0,0,6,0"
-                                     TextChanged="ChannelSearch_TextChanged"
-                                     GotFocus="ChannelSearchBox_GotFocus"/>
+                            <Grid Width="200" Margin="0,0,6,0" VerticalAlignment="Center">
+                                <TextBox x:Name="ChannelSearchBox" Padding="4,3" FontSize="11"
+                                         Background="Transparent"
+                                         TextChanged="ChannelSearch_TextChanged"
+                                         GotFocus="ChannelSearchBox_GotFocus"/>
+                                <TextBlock x:Name="ChannelSearchPlaceholder"
+                                           Text="Search channels..." FontSize="11" Padding="6,4"
+                                           Foreground="{DynamicResource TextMuted}"
+                                           IsHitTestVisible="False"/>
+                            </Grid>
                             <Button x:Name="AssignChannelBtn" Content="Assign" Width="70" FontSize="11"
                                     VerticalAlignment="Center"
                                     Click="AssignChannel_Click"/>

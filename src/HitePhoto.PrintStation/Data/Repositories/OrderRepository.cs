@@ -533,9 +533,9 @@ public class OrderRepository : IOrderRepository
         while (reader.Read())
         {
             var routingKey = reader.GetString(0);
-            var parts = routingKey.Split('|');
-            var sizeLabel = parts.Length > 0 ? parts[0] : "";
-            var mediaType = parts.Length > 1 ? parts[1] : "";
+            var pipeIndex = routingKey.IndexOf('|');
+            var sizeLabel = pipeIndex >= 0 ? routingKey[..pipeIndex] : routingKey;
+            var mediaType = pipeIndex >= 0 ? routingKey[(pipeIndex + 1)..] : "";
 
             channels.Add(new Core.Models.ChannelInfo
             {
