@@ -131,4 +131,14 @@ public class SyncingOrderRepository : IOrderRepository
     public void SetPickupStore(int orderId, int storeId) => _inner.SetPickupStore(orderId, storeId);
     public HashSet<int> FindOrderIdsBySizeLabel(string search) => _inner.FindOrderIdsBySizeLabel(search);
     public List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders() => _inner.GetDakisOrders();
+    public void SetSupersededBy(int orderId, string supersededByExternalId) => _inner.SetSupersededBy(orderId, supersededByExternalId);
+
+    public int CreateAlteration(int sourceOrderId, string alterationType, string reason, string alteredBy,
+        int? newPickupStoreId = null, string? newFolderPath = null)
+    {
+        var id = _inner.CreateAlteration(sourceOrderId, alterationType, reason, alteredBy, newPickupStoreId, newFolderPath);
+        var payload = JsonSerializer.Serialize(new { localOrderId = id, sourceOrderId, alterationType });
+        _ = Task.Run(() => _sync.PushAsync("orders", id, "create_alteration", payload));
+        return id;
+    }
 }

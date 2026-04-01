@@ -680,6 +680,16 @@ public class OrderDb
                 )
             )
             """);
+
+        // Migration 016: Alteration system — orders are frozen after ingest.
+        // All changes (customer edits, inter-store production, outlab, transfers)
+        // create a new superseding order. superseded_by is the only field
+        // MariaDB sync has authority to write on existing orders.
+        AddColumnIfMissing(conn, "orders", "superseded_by", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "supersedes", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "alteration_type", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "alteration_reason", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "orders", "altered_by", "TEXT DEFAULT NULL");
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)

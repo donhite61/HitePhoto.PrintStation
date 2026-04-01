@@ -132,6 +132,20 @@ public interface IOrderRepository
 
     /// <summary>Get all Dakis orders with their folder paths for repair scans.</summary>
     List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders();
+
+    /// <summary>
+    /// Create an alteration of an existing order. Copies the current active head
+    /// as a new order with "-A#" suffix, sets superseded_by on the head.
+    /// Returns the new alteration order's ID.
+    /// </summary>
+    int CreateAlteration(int sourceOrderId, string alterationType, string reason, string alteredBy,
+        int? newPickupStoreId = null, string? newFolderPath = null);
+
+    /// <summary>
+    /// Set the superseded_by field on an order. This is the only field
+    /// MariaDB sync has authority to write on existing orders.
+    /// </summary>
+    void SetSupersededBy(int orderId, string supersededByExternalId);
 }
 
 public record OrderRow(
@@ -141,7 +155,10 @@ public record OrderRow(
     string? OrderedAt, decimal TotalAmount,
     bool IsHeld, bool IsTransfer,
     string FolderPath, string SpecialInstructions, string DownloadStatus,
-    string StoreName);
+    string StoreName,
+    string? SupersededBy = null, string? Supersedes = null,
+    string? AlterationType = null, string? AlterationReason = null,
+    string? AlteredBy = null);
 
 public record ItemRow(
     int Id, string SizeLabel, string MediaType, int Quantity,
