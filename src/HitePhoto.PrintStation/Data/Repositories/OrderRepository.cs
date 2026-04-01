@@ -19,6 +19,7 @@ public class OrderRepository : IOrderRepository
                s.short_name AS store_name
         FROM orders o
         LEFT JOIN stores s ON s.id = o.pickup_store_id
+
         """;
 
     public OrderRepository(OrderDb db)
