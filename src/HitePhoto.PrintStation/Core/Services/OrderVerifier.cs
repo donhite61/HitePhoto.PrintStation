@@ -256,7 +256,7 @@ public class OrderVerifier : IOrderVerifier
         var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
         if (existingId != null)
         {
-            _orders.SetLocalOrder(existingId.Value, true);
+            _orders.SetHarvestedBy(existingId.Value, _settings.StoreId);
             return;
         }
 
@@ -280,7 +280,7 @@ public class OrderVerifier : IOrderVerifier
         var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
         if (existingId != null)
         {
-            _orders.SetLocalOrder(existingId.Value, true);
+            _orders.SetHarvestedBy(existingId.Value, _settings.StoreId);
             return;
         }
 

@@ -20,7 +20,7 @@ public interface IOrderRepository
     /// Insert a new order with items. Returns the new order ID.
     /// Used by both Pixfizz and Dakis ingest.
     /// </summary>
-    int InsertOrder(UnifiedOrder order, int storeId);
+    int InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0);
 
     /// <summary>
     /// Get all items for an order. Used by verify/repair to compare against source files.
@@ -91,20 +91,20 @@ public interface IOrderRepository
     /// <summary>Batch update file_status on order_items. 0=unchecked, 1=OK, -1=error.</summary>
     void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates);
 
-    /// <summary>Pending tab: is_printed=0 ONLY. Do not add is_local_order, status_code, or item subqueries. See feedback_tab_query_locked.md.</summary>
+    /// <summary>Pending tab: harvested here + not printed. See feedback_tab_query_locked.md.</summary>
     List<OrderRow> LoadPendingOrders(int storeId);
 
-    /// <summary>Printed tab: is_printed=1 ONLY. Do not add is_local_order, status_code, or item subqueries.</summary>
+    /// <summary>Printed tab: harvested here + printed. See feedback_tab_query_locked.md.</summary>
     List<OrderRow> LoadPrintedOrders(int storeId);
 
-    /// <summary>Other Store tab: is_local_order=0 (sync-pulled orders). Empty when sync disabled.</summary>
+    /// <summary>Other Store tab: harvested at another store. Empty when sync disabled.</summary>
     List<OrderRow> LoadOtherStoreOrders(int storeId);
 
     /// <summary>Batch-load items for multiple orders. Keyed by order ID.</summary>
     Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds);
 
-    /// <summary>Set is_local_order flag (1 = this machine ingested the order).</summary>
-    void SetLocalOrder(int orderId, bool local);
+    /// <summary>Set harvested_by_store_id flag (1 = this machine ingested the order).</summary>
+    void SetHarvestedBy(int orderId, int storeId);
 
     /// <summary>Set order-level is_printed flag (drives Pending vs Printed tab).</summary>
     void SetOrderPrinted(int orderId, bool printed);

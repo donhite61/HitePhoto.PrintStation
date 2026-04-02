@@ -25,9 +25,9 @@ public class SyncingOrderRepository : IOrderRepository
 
     // ── Decorated (push after write) ────────────────────────────────────
 
-    public int InsertOrder(UnifiedOrder order, int storeId)
+    public int InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0)
     {
-        var id = _inner.InsertOrder(order, storeId);
+        var id = _inner.InsertOrder(order, storeId, harvestedByStoreId);
         var payload = JsonSerializer.Serialize(new { localOrderId = id });
         _ = Task.Run(() => _sync.PushAsync("orders", id, "insert_order", payload));
         return id;
@@ -121,7 +121,7 @@ public class SyncingOrderRepository : IOrderRepository
     public Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds) => _inner.BatchLoadItems(orderIds);
     public void SetItemsUnprinted(int orderId) => _inner.SetItemsUnprinted(orderId);
     public void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates) => _inner.BatchUpdateFileStatus(updates);
-    public void SetLocalOrder(int orderId, bool local) => _inner.SetLocalOrder(orderId, local);
+    public void SetHarvestedBy(int orderId, int storeId) => _inner.SetHarvestedBy(orderId, storeId);
     public void SetOrderPrinted(int orderId, bool printed) => _inner.SetOrderPrinted(orderId, printed);
     public bool AreAllItemsPrinted(int orderId) => _inner.AreAllItemsPrinted(orderId);
     public void SetExternallyModified(int orderId, bool modified) => _inner.SetExternallyModified(orderId, modified);

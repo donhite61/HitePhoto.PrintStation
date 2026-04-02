@@ -454,7 +454,7 @@ public class OrderRepository : IOrderRepository
         return result;
     }
 
-    public int InsertOrder(UnifiedOrder order, int storeId)
+    public int InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0)
     {
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
@@ -473,7 +473,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, is_local_order
+                    is_test, harvested_by_store_id
                 ) VALUES (
                     @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
@@ -484,7 +484,7 @@ public class OrderRepository : IOrderRepository
                     @deliveryMethod, @shipFname, @shipLname,
                     @shipAddr1, @shipAddr2, @shipCity,
                     @shipState, @shipZip, @shipCountry, @shipMethod,
-                    @isTest, 1
+                    @isTest, @harvestStore
                 );
                 SELECT last_insert_rowid();
                 """;
@@ -519,6 +519,7 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@shipCountry", (object?)order.ShippingCountry ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@shipMethod", (object?)order.ShippingMethod ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@isTest", order.ExternalOrderId.StartsWith("TEST-", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
+            cmd.Parameters.AddWithValue("@harvestStore", harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
             orderId = Convert.ToInt32(cmd.ExecuteScalar()!);
         }
 
@@ -653,16 +654,18 @@ public class OrderRepository : IOrderRepository
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  TAB QUERIES — LOCKED CONTRACTS (Session 71-76)
+    //  TAB QUERIES — LOCKED CONTRACTS (Session 76)
     //
-    //  Pending  = is_printed = 0.  Nothing else.
-    //  Printed  = is_printed = 1.  Nothing else.
-    //  Other    = is_local_order = 0.  Orders ingested at other store.
+    //  Pending  = harvested here + not printed.
+    //  Printed  = harvested here + printed.
+    //  Other    = harvested at another store (from sync).
+    //
+    //  harvested_by_store_id = which store ingested this order.
+    //  is_printed = has the order been printed/completed.
     //
     //  DO NOT add status_code, is_local_production, is_transfer,
     //  pickup_store_id, or item subqueries to these filters.
-    //  See memory/feedback_field_purposes.md and
-    //  feedback_tab_query_locked.md for why.
+    //  See feedback_tab_query_locked.md for why.
     // ═══════════════════════════════════════════════════════════════
 
     public List<OrderRow> LoadPendingOrders(int storeId)
@@ -671,10 +674,12 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.is_printed = 0
+            WHERE o.harvested_by_store_id = @storeId
+              AND o.is_printed = 0
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
@@ -687,30 +692,32 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.is_printed = 1
+            WHERE o.harvested_by_store_id = @storeId
+              AND o.is_printed = 1
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
         return results;
     }
 
-    // Other Store = orders from sync (is_local_order=0). These are orders the other
-    // store ingested and pushed to MariaDB. We pulled them but don't have files.
-    // Empty when sync is disabled. This is NOT the same rule as Pending/Printed
-    // tabs — those use is_printed. Other Store is a sync concept.
+    // Other Store = orders harvested at another store (from sync).
+    // Empty when sync is disabled.
     public List<OrderRow> LoadOtherStoreOrders(int storeId)
     {
         var results = new List<OrderRow>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.is_local_order = 0
+            WHERE o.harvested_by_store_id != @storeId
+              AND o.harvested_by_store_id > 0
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
@@ -799,12 +806,12 @@ public class OrderRepository : IOrderRepository
         }
     }
 
-    public void SetLocalOrder(int orderId, bool local)
+    public void SetHarvestedBy(int orderId, int storeId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_local_order = @val, updated_at = datetime('now') WHERE id = @id AND is_local_order != @val";
-        cmd.Parameters.AddWithValue("@val", local ? 1 : 0);
+        cmd.CommandText = "UPDATE orders SET harvested_by_store_id = @val, updated_at = datetime('now') WHERE id = @id AND harvested_by_store_id != @val";
+        cmd.Parameters.AddWithValue("@val", storeId);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
     }
@@ -1060,7 +1067,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, is_local_order,
+                    is_test, harvested_by_store_id,
                     supersedes, alteration_type
                 )
                 SELECT
@@ -1073,7 +1080,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, {(newFolderPath != null ? "1" : "is_local_order")},
+                    is_test, {(newFolderPath != null ? "1" : "harvested_by_store_id")},
                     @supersedes, @altType
                 FROM orders WHERE id = @srcId;
                 SELECT last_insert_rowid();

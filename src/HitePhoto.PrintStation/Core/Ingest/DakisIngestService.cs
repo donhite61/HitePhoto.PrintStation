@@ -155,7 +155,7 @@ public class DakisIngestService : IDisposable
         var pickupStoreId = _orders.ResolveStoreId("dakis", order.BillingStoreId ?? "")
                             ?? _settings.StoreId;
 
-        _writer.WriteToSqlite(order, pickupStoreId, "dakis", order.FolderPath ?? "");
+        _writer.WriteToSqlite(order, pickupStoreId, "dakis", order.FolderPath ?? "", _settings.StoreId);
     }
 
     public void Dispose()
