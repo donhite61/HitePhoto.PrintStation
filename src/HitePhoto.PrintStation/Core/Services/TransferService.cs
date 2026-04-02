@@ -156,23 +156,31 @@ public class TransferService : ITransferService
         var targetStoreName = _orders.GetStoreName(targetStoreId);
         var fromStoreName = _orders.GetStoreName(_settings.StoreId);
 
-        // Upload item files
+        // All SFTP operations use one connection
         var filesToTransfer = CollectItemFiles(allItems, itemIds);
-        if (filesToTransfer.Count > 0)
-            UploadFiles(fullOrder.FolderPath, remoteFolderBase, filesToTransfer.ToArray());
-
-        // Upload selected folders
-        if (folderNames is { Count: > 0 })
+        using var client = CreateSftpClient();
+        client.Connect();
+        try
         {
-            using var client = CreateSftpClient();
-            client.Connect();
-            try
+            // Upload item files
+            if (filesToTransfer.Count > 0)
+            {
+                foreach (var localFile in filesToTransfer)
+                {
+                    var rel = Path.GetRelativePath(fullOrder.FolderPath, localFile);
+                    var remotePath = remoteFolderBase + "/" + rel.Replace('\\', '/');
+                    EnsureRemoteDirectory(client, Path.GetDirectoryName(remotePath)!.Replace('\\', '/'));
+                    UploadSingleFile(client, localFile, remotePath);
+                }
+            }
+
+            // Upload selected folders
+            if (folderNames is { Count: > 0 })
             {
                 foreach (var folder in folderNames)
                 {
                     var localSub = Path.Combine(fullOrder.FolderPath, folder);
                     if (!Directory.Exists(localSub)) continue;
-                    var remoteSub = remoteFolderBase + "/" + folder;
                     var files = Directory.GetFiles(localSub, "*", SearchOption.AllDirectories);
                     foreach (var file in files)
                     {
@@ -183,11 +191,33 @@ public class TransferService : ITransferService
                     }
                 }
             }
-            finally { client.Disconnect(); }
-        }
 
-        // Upload root-level metadata files (yml, txt, json)
-        UploadRootMetadata(fullOrder.FolderPath, remoteFolderBase);
+            // Upload root metadata files
+            foreach (var file in Directory.GetFiles(fullOrder.FolderPath))
+            {
+                var ext = Path.GetExtension(file).ToLowerInvariant();
+                if (ext is ".txt" or ".yml" or ".yaml" or ".json" or ".xml")
+                {
+                    var remotePath = remoteFolderBase + "/" + Path.GetFileName(file);
+                    EnsureRemoteDirectory(client, remoteFolderBase);
+                    UploadSingleFile(client, file, remotePath);
+                }
+            }
+
+            // Upload invoice if creating order
+            if (createOrder)
+            {
+                var invoiceItems = isPartial
+                    ? allItems.Where(i => itemIds!.Contains(i.Id)).ToList()
+                    : allItems;
+                var invoiceText = BuildTextInvoice(fullOrder, invoiceItems, fromStoreName, comment);
+                EnsureRemoteDirectory(client, remoteFolderBase);
+                var invoicePath = remoteFolderBase + "/invoice.txt";
+                using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(invoiceText));
+                client.UploadFile(stream, invoicePath, canOverride: true);
+            }
+        }
+        finally { client.Disconnect(); }
 
         if (!createOrder)
         {
@@ -199,18 +229,11 @@ public class TransferService : ITransferService
         var childId = _orders.CreateAlteration(orderId, "split", comment, operatorName,
             newPickupStoreId: targetStoreId, newFolderPath: childFolderPath, itemIds: itemIds);
 
-        // Insert Transfer service item if no real items selected
         if (filesToTransfer.Count == 0)
             _orders.InsertServiceItem(childId, "Transfer", childFolderPath);
 
         if (isPartial)
             _orders.SetItemsPrinted(itemIds!);
-
-        var invoiceItems = isPartial
-            ? allItems.Where(i => itemIds!.Contains(i.Id)).ToList()
-            : allItems;
-        var invoiceText = BuildTextInvoice(fullOrder, invoiceItems, fromStoreName, comment);
-        UploadInvoice(remoteFolderBase, invoiceText);
 
         WriteTransferMarker(fullOrder.FolderPath, targetStoreId, operatorName, comment, itemIds, targetStoreName);
 
@@ -225,26 +248,6 @@ public class TransferService : ITransferService
         return childId;
     }
 
-    private void UploadRootMetadata(string localFolder, string remoteFolder)
-    {
-        using var client = CreateSftpClient();
-        client.Connect();
-        try
-        {
-            foreach (var file in Directory.GetFiles(localFolder))
-            {
-                var ext = Path.GetExtension(file).ToLowerInvariant();
-                if (ext is ".txt" or ".yml" or ".yaml" or ".json" or ".xml")
-                {
-                    var remotePath = remoteFolder + "/" + Path.GetFileName(file);
-                    EnsureRemoteDirectory(client, remoteFolder);
-                    UploadSingleFile(client, file, remotePath);
-                }
-            }
-        }
-        finally { client.Disconnect(); }
-    }
-
     public int? GetFromProduction(int orderId, bool createOrder, string operatorName, string comment,
         List<int>? itemIds = null, List<string>? folderNames = null)
     {
@@ -253,6 +256,9 @@ public class TransferService : ITransferService
             throw new InvalidOperationException($"Order {orderId} not found.");
 
         ValidateSftpSettings();
+
+        if (string.IsNullOrWhiteSpace(_settings.OrderOutputPath))
+            throw new InvalidOperationException("OrderOutputPath is not configured. Set it in Settings.");
 
         // Build remote path from the order's folder_path (stored as S:\... from the sending machine)
         var remotePath = fullOrder.FolderPath?.Replace('\\', '/').Replace("S:", "") ?? "";
@@ -282,24 +288,24 @@ public class TransferService : ITransferService
             if (folderNames is { Count: > 0 })
             {
                 DownloadFolders(client, remotePath, localBase, folderNames);
+                // Partial download — also grab root-level files (metadata, invoice, etc.)
+                if (RemoteDirectoryExists(client, remotePath))
+                {
+                    foreach (var entry in client.ListDirectory(remotePath))
+                    {
+                        if (entry.IsRegularFile)
+                        {
+                            var localFile = Path.Combine(localBase, entry.Name);
+                            using var fs = File.Create(localFile);
+                            client.DownloadFile(entry.FullName, fs);
+                        }
+                    }
+                }
             }
             else
             {
+                // Full download — DownloadFolder already gets root files
                 DownloadFolder(client, remotePath, localBase);
-            }
-
-            // Also download root-level metadata files
-            if (RemoteDirectoryExists(client, remotePath))
-            {
-                foreach (var entry in client.ListDirectory(remotePath))
-                {
-                    if (entry.IsRegularFile)
-                    {
-                        var localFile = Path.Combine(localBase, entry.Name);
-                        using var fs = File.Create(localFile);
-                        client.DownloadFile(entry.FullName, fs);
-                    }
-                }
             }
         }
         finally { client.Disconnect(); }

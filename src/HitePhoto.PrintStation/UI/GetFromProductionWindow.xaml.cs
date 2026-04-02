@@ -50,12 +50,13 @@ public partial class GetFromProductionWindow : Window
         OrderHeader.Text = $"Order: {externalOrderId}";
         OrderDetail.Text = folderPath;
 
-        LoadRemoteFolders();
         LoadItems();
         UpdateSummary();
+
+        Loaded += async (_, _) => await LoadRemoteFoldersAsync();
     }
 
-    private void LoadRemoteFolders()
+    private async Task LoadRemoteFoldersAsync()
     {
         if (string.IsNullOrEmpty(_remotePath))
         {
@@ -66,7 +67,7 @@ public partial class GetFromProductionWindow : Window
         try
         {
             FolderStatus.Text = "Scanning remote folders...";
-            var folders = _transfer.ListRemoteFolders(_remotePath);
+            var folders = await Task.Run(() => _transfer.ListRemoteFolders(_remotePath));
 
             if (folders.Count == 0)
             {
