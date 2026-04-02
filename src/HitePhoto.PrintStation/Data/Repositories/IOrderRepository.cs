@@ -141,6 +141,9 @@ public interface IOrderRepository
     int CreateAlteration(int sourceOrderId, string alterationType, string reason, string alteredBy,
         int? newPickupStoreId = null, string? newFolderPath = null, List<int>? itemIds = null);
 
+    /// <summary>Insert a Transfer service item (for orders with no real printable items).</summary>
+    void InsertServiceItem(int orderId, string sizeLabel, string? filepath = null);
+
     /// <summary>Insert a link between parent and child orders.</summary>
     void InsertLink(int parentOrderId, int childOrderId, string linkType, string createdBy);
 

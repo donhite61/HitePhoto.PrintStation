@@ -932,6 +932,21 @@ public class OrderRepository : IOrderRepository
         return results;
     }
 
+    public void InsertServiceItem(int orderId, string sizeLabel, string? filepath = null)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO order_items (order_id, size_label, quantity, is_noritsu, is_local_production,
+                                     image_filepath, image_filename, media_type, options_json)
+            VALUES (@oid, @size, 1, 0, 0, @path, '', '', '[]')
+            """;
+        cmd.Parameters.AddWithValue("@oid", orderId);
+        cmd.Parameters.AddWithValue("@size", sizeLabel);
+        cmd.Parameters.AddWithValue("@path", (object?)filepath ?? DBNull.Value);
+        cmd.ExecuteNonQuery();
+    }
+
     public void InsertLink(int parentOrderId, int childOrderId, string linkType, string createdBy)
     {
         using var conn = _db.OpenConnection();
@@ -996,15 +1011,21 @@ public class OrderRepository : IOrderRepository
             if (sourceEid == null)
                 throw new InvalidOperationException($"CreateAlteration: source order {sourceOrderId} not found");
 
-            // Strip any -A# or -W# suffix to find root
+            // Strip any -A#, -W#, or -R# suffix to find root
             baseExternalId = sourceEid;
             var dash = baseExternalId.LastIndexOf("-A", StringComparison.Ordinal);
             if (dash < 0) dash = baseExternalId.LastIndexOf("-W", StringComparison.Ordinal);
+            if (dash < 0) dash = baseExternalId.LastIndexOf("-R", StringComparison.Ordinal);
             if (dash >= 0) baseExternalId = baseExternalId[..dash];
         }
 
         // Determine the next version number
-        var prefix = alterationType == "split" ? "W" : "A";
+        var prefix = alterationType switch
+        {
+            "split" => "W",
+            "receive" => "R",
+            _ => "A"
+        };
         int nextVersion;
         using (var countCmd = conn.CreateCommand())
         {

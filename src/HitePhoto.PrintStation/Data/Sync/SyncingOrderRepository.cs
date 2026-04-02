@@ -132,6 +132,8 @@ public class SyncingOrderRepository : IOrderRepository
     public HashSet<int> FindOrderIdsBySizeLabel(string search) => _inner.FindOrderIdsBySizeLabel(search);
     public List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders() => _inner.GetDakisOrders();
 
+    public void InsertServiceItem(int orderId, string sizeLabel, string? filepath = null) => _inner.InsertServiceItem(orderId, sizeLabel, filepath);
+
     // Link table — reads pass through, writes could push in future
     public void InsertLink(int parentOrderId, int childOrderId, string linkType, string createdBy) => _inner.InsertLink(parentOrderId, childOrderId, linkType, createdBy);
     public List<(int ChildOrderId, string LinkType, string CreatedBy, string CreatedAt)> GetChildOrders(int parentOrderId) => _inner.GetChildOrders(parentOrderId);

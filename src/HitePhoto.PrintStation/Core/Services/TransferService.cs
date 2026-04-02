@@ -139,7 +139,7 @@ public class TransferService : ITransferService
     }
 
     public int SendForProduction(int orderId, int targetStoreId, string operatorName, string comment,
-        List<int>? itemIds = null)
+        List<int>? itemIds = null, List<string>? folderNames = null, bool createOrder = true)
     {
         var fullOrder = _orders.GetFullOrder(orderId);
         if (fullOrder is null)
@@ -190,6 +190,99 @@ public class TransferService : ITransferService
 
         var fileCount = isPartial ? "partial" : "all";
         AppLog.Info($"SendForProduction: order {orderId} → {targetStoreName}, child order {childId} ({fileCount} files)");
+        return childId;
+    }
+
+    public int? GetFromProduction(int orderId, bool createOrder, string operatorName, string comment,
+        List<int>? itemIds = null, List<string>? folderNames = null)
+    {
+        var fullOrder = _orders.GetFullOrder(orderId);
+        if (fullOrder is null)
+            throw new InvalidOperationException($"Order {orderId} not found.");
+
+        ValidateSftpSettings();
+
+        // Build remote path from the order's folder_path (stored as S:\... from the sending machine)
+        var remotePath = fullOrder.FolderPath?.Replace('\\', '/').Replace("S:", "") ?? "";
+        if (string.IsNullOrEmpty(remotePath))
+            throw new InvalidOperationException($"Order {orderId} has no folder_path — cannot locate remote files.");
+
+        // Build local destination with date-time subfolder
+        var now = DateTime.Now;
+        var monthFolder = now.ToString("MM-yy MMM").ToUpper();
+        var dateTimeFolder = now.ToString("MM-dd-yy HHmm");
+        var lastName = fullOrder.CustomerLastName?.Trim() ?? "";
+        var firstName = fullOrder.CustomerFirstName?.Trim() ?? "";
+        var phone = FormatPhone(fullOrder.CustomerPhone?.Trim() ?? "");
+        var customerFolder = string.IsNullOrEmpty(phone)
+            ? $"{lastName} {firstName}".Trim()
+            : $"{lastName} {firstName} {phone}".Trim();
+        if (string.IsNullOrEmpty(customerFolder)) customerFolder = fullOrder.ExternalOrderId;
+
+        var localBase = Path.Combine(_settings.OrderOutputPath, monthFolder, customerFolder, dateTimeFolder);
+        Directory.CreateDirectory(localBase);
+
+        // Download files
+        using var client = CreateSftpClient();
+        client.Connect();
+        try
+        {
+            if (folderNames is { Count: > 0 })
+            {
+                DownloadFolders(client, remotePath, localBase, folderNames);
+            }
+            else
+            {
+                DownloadFolder(client, remotePath, localBase);
+            }
+
+            // Also download root-level metadata files
+            if (RemoteDirectoryExists(client, remotePath))
+            {
+                foreach (var entry in client.ListDirectory(remotePath))
+                {
+                    if (entry.IsRegularFile)
+                    {
+                        var localFile = Path.Combine(localBase, entry.Name);
+                        using var fs = File.Create(localFile);
+                        client.DownloadFile(entry.FullName, fs);
+                    }
+                }
+            }
+        }
+        finally { client.Disconnect(); }
+
+        AppLog.Info($"GetFromProduction: downloaded order {orderId} to {localBase}");
+
+        if (!createOrder) return null;
+
+        // Create receive alteration
+        var childId = _orders.CreateAlteration(orderId, "receive", comment, operatorName,
+            newPickupStoreId: _settings.StoreId, newFolderPath: localBase, itemIds: itemIds);
+
+        // If no real items were selected, insert a Transfer service item
+        var allItems = _orders.GetItems(orderId);
+        var selectedItems = itemIds is { Count: > 0 }
+            ? allItems.Where(i => itemIds.Contains(i.Id)).ToList()
+            : allItems;
+
+        if (selectedItems.Count == 0 || selectedItems.All(i => !i.IsNoritsu))
+        {
+            _orders.InsertServiceItem(childId, "Transfer", localBase);
+        }
+
+        // Print invoice
+        var fromStoreName = fullOrder.StoreName ?? "Other Store";
+        var invoiceItems = selectedItems.Count > 0 ? selectedItems : allItems;
+        var invoiceText = BuildTextInvoice(fullOrder, invoiceItems, fromStoreName, comment);
+        var invoicePath = Path.Combine(localBase, "invoice.txt");
+        File.WriteAllText(invoicePath, invoiceText);
+
+        _history.AddNote(orderId, $"Received by {operatorName}" +
+            (string.IsNullOrEmpty(comment) ? "" : $": {comment}"), operatorName);
+        _history.AddNote(childId, $"Received from {fromStoreName}", operatorName);
+
+        AppLog.Info($"GetFromProduction: order {orderId} → child {childId}, local folder {localBase}");
         return childId;
     }
 
@@ -327,6 +420,61 @@ public class TransferService : ITransferService
     {
         using var fs = File.OpenRead(localPath);
         client.UploadFile(fs, remotePath, canOverride: true);
+    }
+
+    /// <summary>Download all files from a remote folder recursively to a local folder.</summary>
+    private void DownloadFolder(SftpClient client, string remotePath, string localPath)
+    {
+        if (!RemoteDirectoryExists(client, remotePath)) return;
+
+        Directory.CreateDirectory(localPath);
+
+        foreach (var entry in client.ListDirectory(remotePath))
+        {
+            if (entry.Name is "." or "..") continue;
+
+            if (entry.IsDirectory)
+            {
+                DownloadFolder(client, entry.FullName, Path.Combine(localPath, entry.Name));
+            }
+            else if (entry.IsRegularFile)
+            {
+                var localFile = Path.Combine(localPath, entry.Name);
+                using var fs = File.Create(localFile);
+                client.DownloadFile(entry.FullName, fs);
+            }
+        }
+    }
+
+    /// <summary>Download specific subfolders from a remote order folder.</summary>
+    private void DownloadFolders(SftpClient client, string remoteBase, string localBase, List<string> folderNames)
+    {
+        foreach (var folder in folderNames)
+        {
+            var remoteSub = remoteBase + "/" + folder;
+            var localSub = Path.Combine(localBase, folder);
+            DownloadFolder(client, remoteSub, localSub);
+        }
+    }
+
+    /// <summary>List subfolder names in a remote directory (non-recursive).</summary>
+    public List<string> ListRemoteFolders(string remotePath)
+    {
+        var folders = new List<string>();
+        using var client = CreateSftpClient();
+        client.Connect();
+        try
+        {
+            if (!RemoteDirectoryExists(client, remotePath)) return folders;
+            foreach (var entry in client.ListDirectory(remotePath))
+            {
+                if (entry.Name is "." or ".." or "metadata") continue;
+                if (entry.IsDirectory)
+                    folders.Add(entry.Name);
+            }
+        }
+        finally { client.Disconnect(); }
+        return folders;
     }
 
     private static void EnsureRemoteDirectory(SftpClient client, string remotePath)
@@ -485,12 +633,14 @@ public class TransferService : ITransferService
     }
 
     /// <summary>
-    /// Build remote path for production sends: /AAPhoto/{MM-DD MMM}/{LastName} {FirstName} {Phone}/
+    /// Build remote path for production sends:
+    /// /AAPhoto/{MM-yy MMM}/{LastName} {FirstName} {Phone}/{MM-dd-yy HHmm}/
     /// </summary>
     private static string BuildProductionRemotePath(HitePhoto.Shared.Models.Order order)
     {
         var now = DateTime.Now;
         var monthFolder = now.ToString("MM-yy MMM").ToUpper();
+        var dateTimeFolder = now.ToString("MM-dd-yy HHmm");
 
         var lastName = order.CustomerLastName?.Trim() ?? "";
         var firstName = order.CustomerFirstName?.Trim() ?? "";
@@ -503,7 +653,7 @@ public class TransferService : ITransferService
         var customerFolder = string.IsNullOrEmpty(phone)
             ? $"{lastName} {firstName}".Trim()
             : $"{lastName} {firstName} {phone}".Trim();
-        return $"/AAPhoto/{monthFolder}/{customerFolder}";
+        return $"/AAPhoto/{monthFolder}/{customerFolder}/{dateTimeFolder}";
     }
 
     /// <summary>Format phone as 248-390-2515. Handles raw digits or already-formatted.</summary>
