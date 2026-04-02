@@ -59,7 +59,7 @@ public class IngestOrderWriter
         }
         else
         {
-            _orders.SetFilesLocal(existingId.Value, true);
+            _orders.SetLocalOrder(existingId.Value, true);
             _verifier.VerifyOrder(order.ExternalOrderId, folderPath, sourceCode, existingId.Value);
         }
     }

@@ -121,7 +121,7 @@ public class SyncingOrderRepository : IOrderRepository
     public Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds) => _inner.BatchLoadItems(orderIds);
     public void SetItemsUnprinted(int orderId) => _inner.SetItemsUnprinted(orderId);
     public void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates) => _inner.BatchUpdateFileStatus(updates);
-    public void SetFilesLocal(int orderId, bool local) => _inner.SetFilesLocal(orderId, local);
+    public void SetLocalOrder(int orderId, bool local) => _inner.SetLocalOrder(orderId, local);
     public void SetOrderPrinted(int orderId, bool printed) => _inner.SetOrderPrinted(orderId, printed);
     public bool AreAllItemsPrinted(int orderId) => _inner.AreAllItemsPrinted(orderId);
     public void SetExternallyModified(int orderId, bool modified) => _inner.SetExternallyModified(orderId, modified);

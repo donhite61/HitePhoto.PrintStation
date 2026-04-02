@@ -473,7 +473,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, files_local
+                    is_test, is_local_order
                 ) VALUES (
                     @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
@@ -657,7 +657,7 @@ public class OrderRepository : IOrderRepository
     //
     //  Pending  = is_printed = 0.  Nothing else.
     //  Printed  = is_printed = 1.  Nothing else.
-    //  Other    = files_local = 0.  Sync-pulled orders only.
+    //  Other    = is_local_order = 0.  Orders ingested at other store.
     //
     //  DO NOT add status_code, is_local_production, is_transfer,
     //  pickup_store_id, or item subqueries to these filters.
@@ -697,7 +697,7 @@ public class OrderRepository : IOrderRepository
         return results;
     }
 
-    // Other Store = orders from sync (files_local=0). These are orders the other
+    // Other Store = orders from sync (is_local_order=0). These are orders the other
     // store ingested and pushed to MariaDB. We pulled them but don't have files.
     // Empty when sync is disabled. This is NOT the same rule as Pending/Printed
     // tabs — those use is_printed. Other Store is a sync concept.
@@ -707,7 +707,7 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.files_local = 0
+            WHERE o.is_local_order = 0
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
@@ -799,11 +799,11 @@ public class OrderRepository : IOrderRepository
         }
     }
 
-    public void SetFilesLocal(int orderId, bool local)
+    public void SetLocalOrder(int orderId, bool local)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET files_local = @val, updated_at = datetime('now') WHERE id = @id AND files_local != @val";
+        cmd.CommandText = "UPDATE orders SET is_local_order = @val, updated_at = datetime('now') WHERE id = @id AND is_local_order != @val";
         cmd.Parameters.AddWithValue("@val", local ? 1 : 0);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
@@ -1060,7 +1060,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, files_local,
+                    is_test, is_local_order,
                     supersedes, alteration_type
                 )
                 SELECT
@@ -1073,7 +1073,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, {(newFolderPath != null ? "1" : "files_local")},
+                    is_test, {(newFolderPath != null ? "1" : "is_local_order")},
                     @supersedes, @altType
                 FROM orders WHERE id = @srcId;
                 SELECT last_insert_rowid();

@@ -91,20 +91,20 @@ public interface IOrderRepository
     /// <summary>Batch update file_status on order_items. 0=unchecked, 1=OK, -1=error.</summary>
     void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates);
 
-    /// <summary>Pending tab: is_printed=0 ONLY. Do not add files_local, status_code, or item subqueries.</summary>
+    /// <summary>Pending tab: is_printed=0 ONLY. Do not add is_local_order, status_code, or item subqueries. See feedback_tab_query_locked.md.</summary>
     List<OrderRow> LoadPendingOrders(int storeId);
 
-    /// <summary>Printed tab: is_printed=1 ONLY. Do not add files_local, status_code, or item subqueries.</summary>
+    /// <summary>Printed tab: is_printed=1 ONLY. Do not add is_local_order, status_code, or item subqueries.</summary>
     List<OrderRow> LoadPrintedOrders(int storeId);
 
-    /// <summary>Other Store tab: files_local=0 (sync-pulled orders). Empty when sync disabled.</summary>
+    /// <summary>Other Store tab: is_local_order=0 (sync-pulled orders). Empty when sync disabled.</summary>
     List<OrderRow> LoadOtherStoreOrders(int storeId);
 
     /// <summary>Batch-load items for multiple orders. Keyed by order ID.</summary>
     Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds);
 
-    /// <summary>Set files_local flag (1 = image files exist on this machine's disk).</summary>
-    void SetFilesLocal(int orderId, bool local);
+    /// <summary>Set is_local_order flag (1 = this machine ingested the order).</summary>
+    void SetLocalOrder(int orderId, bool local);
 
     /// <summary>Set order-level is_printed flag (drives Pending vs Printed tab).</summary>
     void SetOrderPrinted(int orderId, bool printed);

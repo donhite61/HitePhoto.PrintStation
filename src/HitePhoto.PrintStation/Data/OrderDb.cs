@@ -292,7 +292,7 @@ public class OrderDb
             hold_reason               TEXT DEFAULT NULL,
             pickup_store_id           INTEGER NOT NULL,
             current_location_store_id INTEGER,
-            files_local               INTEGER NOT NULL DEFAULT 0,
+            is_local_order               INTEGER NOT NULL DEFAULT 0,
             total_amount              REAL DEFAULT 0,
             payment_status            TEXT DEFAULT '',
             special_instructions      TEXT DEFAULT '',
@@ -649,9 +649,9 @@ public class OrderDb
         // When set, PrintService scans disk vs DB before printing and offers choice if mismatch.
         AddColumnIfMissing(conn, "orders", "is_externally_modified", "INTEGER NOT NULL DEFAULT 0");
 
-        // Migration 012: files_local — 1 = this machine has the image files on disk.
-        // Used by VERIFY ONLY. NOT for tab queries. Set on ingest, flipped by verify.
-        AddColumnIfMissing(conn, "orders", "files_local", "INTEGER NOT NULL DEFAULT 0");
+        // Migration 012: is_local_order — 1 = this machine ingested/harvested the order.
+        // 0 = came from sync (other store's order). Used by Other Store tab + verify.
+        AddColumnIfMissing(conn, "orders", "is_local_order", "INTEGER NOT NULL DEFAULT 0");
 
         // Migration 013: One-time purge of all pre-existing history.
         // Old ingest/verify code spammed junk notes. Wipe the slate —
@@ -706,6 +706,12 @@ public class OrderDb
                 created_at        TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """);
+
+        // Migration 018: Rename files_local → is_local_order.
+        // files_local was misleading — it means "this machine ingested the order", not "files exist on disk."
+        // is_local_order = 1: order was harvested/ingested on this machine.
+        // is_local_order = 0: order came from sync (other store's order).
+        RunOnce(conn, "018_rename_files_local", "ALTER TABLE orders RENAME COLUMN files_local TO is_local_order");
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)

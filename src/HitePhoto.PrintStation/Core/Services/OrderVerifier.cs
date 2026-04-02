@@ -126,7 +126,7 @@ public class OrderVerifier : IOrderVerifier
         }
 
         // Leftover in DB list = orders not found in folder scan.
-        // Expected for synced orders (files_local=0) and orders outside scan date range.
+        // Expected for synced orders (is_local_order=0) and orders outside scan date range.
         if (dbList.Count > 0)
             AppLog.Info($"Verify: {dbList.Count} DB orders not in folder scan (synced or outside date range)");
 
@@ -256,7 +256,7 @@ public class OrderVerifier : IOrderVerifier
         var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
         if (existingId != null)
         {
-            _orders.SetFilesLocal(existingId.Value, true);
+            _orders.SetLocalOrder(existingId.Value, true);
             return;
         }
 
@@ -280,7 +280,7 @@ public class OrderVerifier : IOrderVerifier
         var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
         if (existingId != null)
         {
-            _orders.SetFilesLocal(existingId.Value, true);
+            _orders.SetLocalOrder(existingId.Value, true);
             return;
         }
 
