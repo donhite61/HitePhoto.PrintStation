@@ -155,6 +155,44 @@ public class TransferService : ITransferService
         return mismatches;
     }
 
+    public int SendForProduction(int orderId, int targetStoreId, string operatorName, string comment)
+    {
+        var order = _orders.GetOrder(orderId);
+        if (order is null)
+            throw new InvalidOperationException($"Order {orderId} not found.");
+
+        if (string.IsNullOrEmpty(order.FolderPath) || !Directory.Exists(order.FolderPath))
+            throw new InvalidOperationException($"Order {orderId} folder not found: '{order.FolderPath}'");
+
+        ValidateSftpSettings();
+
+        // Create the work order (child) — copies order + items, marks parent is_printed=1, inserts link
+        var childId = _orders.CreateAlteration(orderId, "split", comment, operatorName,
+            newPickupStoreId: targetStoreId);
+
+        // SFTP all files to the other store
+        var allFiles = Directory.GetFiles(order.FolderPath, "*", SearchOption.AllDirectories);
+        if (allFiles.Length > 0)
+        {
+            var remoteFolderBase = BuildRemoteFolderPath(order.FolderPath);
+            UploadFolder(order.FolderPath, remoteFolderBase, allFiles);
+        }
+
+        // Write local marker
+        WriteTransferMarker(order.FolderPath, targetStoreId, operatorName, comment, itemIds: null);
+
+        // History notes on both parent and child
+        var storeName = _orders.GetStoreName(targetStoreId);
+        var parentNote = string.IsNullOrEmpty(comment)
+            ? $"Sent to {storeName} for production by {operatorName}"
+            : $"Sent to {storeName} for production by {operatorName}: {comment}";
+        _history.AddNote(orderId, parentNote, operatorName);
+        _history.AddNote(childId, $"Received from {_orders.GetStoreName(_settings.StoreId)} for production", operatorName);
+
+        AppLog.Info($"SendForProduction: order {orderId} → {storeName}, child order {childId} ({allFiles.Length} files)");
+        return childId;
+    }
+
     // ── SFTP operations ─────────────────────────────────────────────────
 
     private void UploadFolder(string localFolder, string remoteFolder, string[] allFiles)

@@ -17,6 +17,13 @@ public interface ITransferService
     /// Returns a list of mismatches. Empty list = all good.
     /// </summary>
     List<TransferMismatch> CheckTransferMismatches(int orderId);
+
+    /// <summary>
+    /// Send an order to another store for production. Creates a child work order
+    /// linked to the parent, SFTP's files, marks parent as dealt with.
+    /// Returns the new work order's ID.
+    /// </summary>
+    int SendForProduction(int orderId, int targetStoreId, string operatorName, string comment);
 }
 
 public record TransferMismatch(string ItemDescription, string Issue);

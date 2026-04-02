@@ -682,14 +682,30 @@ public class OrderDb
             """);
 
         // Migration 016: Alteration system — orders are frozen after ingest.
-        // All changes (customer edits, inter-store production, outlab, transfers)
-        // create a new superseding order. superseded_by is the only field
-        // MariaDB sync has authority to write on existing orders.
-        AddColumnIfMissing(conn, "orders", "superseded_by", "TEXT DEFAULT NULL");
+        // All changes (customer edits, splits, transfers, outlab) create new child orders.
+        // supersedes = child points back to parent's external_order_id (convenience field).
+        // alteration_type = display label: split, alteration, transfer (convenience field).
+        // Relationships tracked in order_links table. Reason goes in order_history.
         AddColumnIfMissing(conn, "orders", "supersedes", "TEXT DEFAULT NULL");
         AddColumnIfMissing(conn, "orders", "alteration_type", "TEXT DEFAULT NULL");
-        AddColumnIfMissing(conn, "orders", "alteration_reason", "TEXT DEFAULT NULL");
-        AddColumnIfMissing(conn, "orders", "altered_by", "TEXT DEFAULT NULL");
+
+        // Drop superseded_by, alteration_reason, altered_by — replaced by order_links + order_history
+        DropColumnIfExists(conn, "orders", "superseded_by");
+        DropColumnIfExists(conn, "orders", "alteration_reason");
+        DropColumnIfExists(conn, "orders", "altered_by");
+
+        // Migration 017: order_links — tracks parent→child relationships.
+        // Link types: split, alteration, transfer, outlab.
+        Execute(conn, """
+            CREATE TABLE IF NOT EXISTS order_links (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_order_id   INTEGER NOT NULL REFERENCES orders(id),
+                child_order_id    INTEGER NOT NULL REFERENCES orders(id),
+                link_type         TEXT NOT NULL,
+                created_by        TEXT NOT NULL DEFAULT '',
+                created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """);
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)

@@ -17,8 +17,7 @@ public class OrderRepository : IOrderRepository
                o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
                o.folder_path, o.special_instructions, o.download_status,
                s.short_name AS store_name,
-               o.superseded_by, o.supersedes,
-               o.alteration_type, o.alteration_reason, o.altered_by
+               o.supersedes, o.alteration_type
         FROM orders o
         LEFT JOIN stores s ON s.id = o.pickup_store_id
 
@@ -440,8 +439,6 @@ public class OrderRepository : IOrderRepository
             FROM orders o
             WHERE (@daysBack = 0 OR o.ordered_at >= @cutoff)
               AND o.is_test = 0
-              AND o.superseded_by IS NULL
-              AND o.supersedes IS NULL
             """;
         cmd.Parameters.AddWithValue("@daysBack", days);
         cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
@@ -675,7 +672,6 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = OrderSelectBase + """
             WHERE o.is_printed = 0
               AND o.is_test = 0
-              AND o.superseded_by IS NULL
             ORDER BY o.ordered_at DESC
             """;
         using var reader = cmd.ExecuteReader();
@@ -692,7 +688,6 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = OrderSelectBase + """
             WHERE o.is_printed = 1
               AND o.is_test = 0
-              AND o.superseded_by IS NULL
             ORDER BY o.ordered_at DESC
             """;
         using var reader = cmd.ExecuteReader();
@@ -709,7 +704,6 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = OrderSelectBase + """
             WHERE o.pickup_store_id != @storeId
               AND o.is_test = 0
-              AND o.superseded_by IS NULL
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -783,11 +777,8 @@ public class OrderRepository : IOrderRepository
             SpecialInstructions: reader.IsDBNull(reader.GetOrdinal("special_instructions")) ? "" : reader.GetString(reader.GetOrdinal("special_instructions")),
             DownloadStatus: reader.IsDBNull(reader.GetOrdinal("download_status")) ? "" : reader.GetString(reader.GetOrdinal("download_status")),
             StoreName: reader.IsDBNull(reader.GetOrdinal("store_name")) ? "" : reader.GetString(reader.GetOrdinal("store_name")),
-            SupersededBy: reader.IsDBNull(reader.GetOrdinal("superseded_by")) ? null : reader.GetString(reader.GetOrdinal("superseded_by")),
             Supersedes: reader.IsDBNull(reader.GetOrdinal("supersedes")) ? null : reader.GetString(reader.GetOrdinal("supersedes")),
-            AlterationType: reader.IsDBNull(reader.GetOrdinal("alteration_type")) ? null : reader.GetString(reader.GetOrdinal("alteration_type")),
-            AlterationReason: reader.IsDBNull(reader.GetOrdinal("alteration_reason")) ? null : reader.GetString(reader.GetOrdinal("alteration_reason")),
-            AlteredBy: reader.IsDBNull(reader.GetOrdinal("altered_by")) ? null : reader.GetString(reader.GetOrdinal("altered_by")));
+            AlterationType: reader.IsDBNull(reader.GetOrdinal("alteration_type")) ? null : reader.GetString(reader.GetOrdinal("alteration_type")));
     }
 
     public void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates)
@@ -941,23 +932,51 @@ public class OrderRepository : IOrderRepository
         return results;
     }
 
-    public void SetSupersededBy(int orderId, string supersededByExternalId)
+    public void InsertLink(int parentOrderId, int childOrderId, string linkType, string createdBy)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            UPDATE orders SET superseded_by = @sby, updated_at = datetime('now')
-            WHERE id = @id
+            INSERT INTO order_links (parent_order_id, child_order_id, link_type, created_by)
+            VALUES (@parent, @child, @type, @by)
             """;
-        cmd.Parameters.AddWithValue("@sby", supersededByExternalId);
-        cmd.Parameters.AddWithValue("@id", orderId);
-        var rows = cmd.ExecuteNonQuery();
-        if (rows == 0)
-            AlertCollector.Error(AlertCategory.Database,
-                $"SetSupersededBy: order {orderId} not found",
-                orderId: orderId.ToString(),
-                detail: $"Attempted: UPDATE orders SET superseded_by='{supersededByExternalId}' WHERE id={orderId}. " +
-                        $"Expected: 1 row updated. Found: 0 rows.");
+        cmd.Parameters.AddWithValue("@parent", parentOrderId);
+        cmd.Parameters.AddWithValue("@child", childOrderId);
+        cmd.Parameters.AddWithValue("@type", linkType);
+        cmd.Parameters.AddWithValue("@by", createdBy);
+        cmd.ExecuteNonQuery();
+    }
+
+    public List<(int ChildOrderId, string LinkType, string CreatedBy, string CreatedAt)> GetChildOrders(int parentOrderId)
+    {
+        var results = new List<(int, string, string, string)>();
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT child_order_id, link_type, created_by, created_at
+            FROM order_links WHERE parent_order_id = @id
+            """;
+        cmd.Parameters.AddWithValue("@id", parentOrderId);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add((reader.GetInt32(0), reader.GetString(1),
+                reader.IsDBNull(2) ? "" : reader.GetString(2),
+                reader.IsDBNull(3) ? "" : reader.GetString(3)));
+        return results;
+    }
+
+    public (int ParentOrderId, string LinkType)? GetParentOrder(int childOrderId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT parent_order_id, link_type
+            FROM order_links WHERE child_order_id = @id
+            """;
+        cmd.Parameters.AddWithValue("@id", childOrderId);
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return null;
+        return (reader.GetInt32(0), reader.GetString(1));
     }
 
     public int CreateAlteration(int sourceOrderId, string alterationType, string reason, string alteredBy,
@@ -966,44 +985,26 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
 
-        // Find the current active head in the chain (superseded_by IS NULL).
-        // The sourceOrderId is what the operator is looking at — may not be the head.
+        // Get the source order's external ID to find the base
         string baseExternalId;
-        int headOrderId;
-        using (var findHead = conn.CreateCommand())
+        using (var getEid = conn.CreateCommand())
         {
-            findHead.Transaction = transaction;
-            // Get the base external ID (strip any -A# suffix to find root)
-            findHead.CommandText = "SELECT external_order_id FROM orders WHERE id = @id";
-            findHead.Parameters.AddWithValue("@id", sourceOrderId);
-            var sourceEid = findHead.ExecuteScalar()?.ToString();
+            getEid.Transaction = transaction;
+            getEid.CommandText = "SELECT external_order_id FROM orders WHERE id = @id";
+            getEid.Parameters.AddWithValue("@id", sourceOrderId);
+            var sourceEid = getEid.ExecuteScalar()?.ToString();
             if (sourceEid == null)
                 throw new InvalidOperationException($"CreateAlteration: source order {sourceOrderId} not found");
 
-            // Find root external_order_id (strip -A# suffixes)
+            // Strip any -A# or -W# suffix to find root
             baseExternalId = sourceEid;
-            var dashA = baseExternalId.LastIndexOf("-A", StringComparison.Ordinal);
-            if (dashA >= 0)
-                baseExternalId = baseExternalId[..dashA];
-
-            // Find the current head (superseded_by IS NULL) in this chain
-            using var findHeadCmd = conn.CreateCommand();
-            findHeadCmd.Transaction = transaction;
-            findHeadCmd.CommandText = """
-                SELECT id, external_order_id FROM orders
-                WHERE (external_order_id = @base OR external_order_id LIKE @pattern)
-                  AND superseded_by IS NULL
-                LIMIT 1
-                """;
-            findHeadCmd.Parameters.AddWithValue("@base", baseExternalId);
-            findHeadCmd.Parameters.AddWithValue("@pattern", baseExternalId + "-A%");
-            using var headReader = findHeadCmd.ExecuteReader();
-            if (!headReader.Read())
-                throw new InvalidOperationException($"CreateAlteration: no active head found for chain '{baseExternalId}'");
-            headOrderId = headReader.GetInt32(0);
+            var dash = baseExternalId.LastIndexOf("-A", StringComparison.Ordinal);
+            if (dash < 0) dash = baseExternalId.LastIndexOf("-W", StringComparison.Ordinal);
+            if (dash >= 0) baseExternalId = baseExternalId[..dash];
         }
 
         // Determine the next version number
+        var prefix = alterationType == "split" ? "W" : "A";
         int nextVersion;
         using (var countCmd = conn.CreateCommand())
         {
@@ -1012,14 +1013,13 @@ public class OrderRepository : IOrderRepository
                 SELECT COUNT(*) FROM orders
                 WHERE external_order_id LIKE @pattern
                 """;
-            countCmd.Parameters.AddWithValue("@pattern", baseExternalId + "-A%");
+            countCmd.Parameters.AddWithValue("@pattern", baseExternalId + $"-{prefix}%");
             nextVersion = Convert.ToInt32(countCmd.ExecuteScalar()!) + 1;
         }
 
-        var newExternalId = $"{baseExternalId}-A{nextVersion}";
+        var newExternalId = $"{baseExternalId}-{prefix}{nextVersion}";
 
-        // Copy order from the SOURCE order (what operator is looking at),
-        // then supersede the HEAD order
+        // Copy order from the source
         int newOrderId;
         using (var copyCmd = conn.CreateCommand())
         {
@@ -1036,7 +1036,7 @@ public class OrderRepository : IOrderRepository
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
                     is_test, files_local,
-                    supersedes, alteration_type, alteration_reason, altered_by
+                    supersedes, alteration_type
                 )
                 SELECT
                     @newEid, order_source_id, source_code,
@@ -1049,7 +1049,7 @@ public class OrderRepository : IOrderRepository
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
                     is_test, {(newFolderPath != null ? "1" : "files_local")},
-                    @supersedes, @altType, @altReason, @altBy
+                    @supersedes, @altType
                 FROM orders WHERE id = @srcId;
                 SELECT last_insert_rowid();
                 """;
@@ -1057,8 +1057,6 @@ public class OrderRepository : IOrderRepository
             copyCmd.Parameters.AddWithValue("@srcId", sourceOrderId);
             copyCmd.Parameters.AddWithValue("@supersedes", baseExternalId);
             copyCmd.Parameters.AddWithValue("@altType", alterationType);
-            copyCmd.Parameters.AddWithValue("@altReason", reason);
-            copyCmd.Parameters.AddWithValue("@altBy", alteredBy);
             if (newPickupStoreId.HasValue)
                 copyCmd.Parameters.AddWithValue("@newStore", newPickupStoreId.Value);
             if (newFolderPath != null)
@@ -1087,17 +1085,28 @@ public class OrderRepository : IOrderRepository
             copyItems.ExecuteNonQuery();
         }
 
-        // Supersede the head order
-        using (var supersedeCmd = conn.CreateCommand())
+        // Mark parent as "dealt with" — moves to Printed tab
+        using (var markDone = conn.CreateCommand())
         {
-            supersedeCmd.Transaction = transaction;
-            supersedeCmd.CommandText = """
-                UPDATE orders SET superseded_by = @sby, updated_at = datetime('now')
-                WHERE id = @id
+            markDone.Transaction = transaction;
+            markDone.CommandText = "UPDATE orders SET is_printed = 1, updated_at = datetime('now') WHERE id = @id";
+            markDone.Parameters.AddWithValue("@id", sourceOrderId);
+            markDone.ExecuteNonQuery();
+        }
+
+        // Insert link
+        using (var linkCmd = conn.CreateCommand())
+        {
+            linkCmd.Transaction = transaction;
+            linkCmd.CommandText = """
+                INSERT INTO order_links (parent_order_id, child_order_id, link_type, created_by)
+                VALUES (@parent, @child, @type, @by)
                 """;
-            supersedeCmd.Parameters.AddWithValue("@sby", newExternalId);
-            supersedeCmd.Parameters.AddWithValue("@id", headOrderId);
-            supersedeCmd.ExecuteNonQuery();
+            linkCmd.Parameters.AddWithValue("@parent", sourceOrderId);
+            linkCmd.Parameters.AddWithValue("@child", newOrderId);
+            linkCmd.Parameters.AddWithValue("@type", alterationType);
+            linkCmd.Parameters.AddWithValue("@by", alteredBy);
+            linkCmd.ExecuteNonQuery();
         }
 
         transaction.Commit();
