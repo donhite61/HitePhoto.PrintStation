@@ -228,8 +228,8 @@
                 <Button Content="Transfer" Width="80" Margin="0,0,6,0"
                         Click="TransferButton_Click"
                         Visibility="Collapsed"/>
-                <Button Content="Send for Production" Width="140" Margin="0,0,6,0"
-                        Click="SendForProductionButton_Click"/>
+                <Button x:Name="ProductionBtn" Content="Send" Width="100" Margin="0,0,6,0"
+                        Click="ProductionButton_Click"/>
                 <Button Content="Refresh" Width="80" Margin="0,0,6,0"
                         Click="RefreshButton_Click"/>
                 <Button Content="Color Correct" Width="110" Margin="0,0,6,0"

@@ -956,11 +956,14 @@ public partial class MainWindow : Window
 
     private bool IsPrintedTabActive => MainTabs.SelectedIndex == 1;
 
+    private bool IsOtherStoreTabActive => MainTabs.SelectedIndex == 2;
+
     private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (e.Source != MainTabs) return;
         ShowOrderDetail(null);
         DoneBtn.Content = IsPrintedTabActive ? "Mark Unprinted" : "Mark Printed";
+        ProductionBtn.Content = IsOtherStoreTabActive ? "Get" : "Send";
     }
 
     private void ExpandAll_Changed(object sender, RoutedEventArgs e)
@@ -1237,7 +1240,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SendForProductionButton_Click(object sender, RoutedEventArgs e)
+    private void ProductionButton_Click(object sender, RoutedEventArgs e)
     {
         if (_selectedOrderItem == null) return;
 
@@ -1246,26 +1249,40 @@ public partial class MainWindow : Window
         {
             AlertCollector.Error(AlertCategory.Transfer,
                 "TransferService not registered",
-                detail: "Attempted: open SendForProduction. Expected: ITransferService in DI. Found: null.");
+                detail: "Attempted: open production dialog. Expected: ITransferService in DI. Found: null.");
             return;
         }
 
-        // If a size is selected, pre-select only those items; otherwise all items
-        List<int>? preSelectedItemIds = null;
-        if (_selectedSizeItem?.Items is { Count: > 0 })
-            preSelectedItemIds = _selectedSizeItem.Items.Select(i => i.Id).ToList();
+        Window dialog;
+        if (IsOtherStoreTabActive)
+        {
+            dialog = new GetFromProductionWindow(
+                _selectedOrderItem.DbId,
+                _selectedOrderItem.ExternalOrderId,
+                _selectedOrderItem.FolderPath,
+                transfer,
+                _orders,
+                _settings)
+            { Owner = this };
+        }
+        else
+        {
+            List<int>? preSelectedItemIds = null;
+            if (_selectedSizeItem?.Items is { Count: > 0 })
+                preSelectedItemIds = _selectedSizeItem.Items.Select(i => i.Id).ToList();
 
-        var win = new SendForProductionWindow(
-            _selectedOrderItem.DbId,
-            _selectedOrderItem.ExternalOrderId,
-            _selectedOrderItem.FolderPath,
-            transfer,
-            _orders,
-            _settings,
-            preSelectedItemIds)
-        { Owner = this };
+            dialog = new SendForProductionWindow(
+                _selectedOrderItem.DbId,
+                _selectedOrderItem.ExternalOrderId,
+                _selectedOrderItem.FolderPath,
+                transfer,
+                _orders,
+                _settings,
+                preSelectedItemIds)
+            { Owner = this };
+        }
 
-        if (win.ShowDialog() == true)
+        if (dialog.ShowDialog() == true)
         {
             _vm.LoadOrders();
             UpdateStatusBar();
