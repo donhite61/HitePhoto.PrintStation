@@ -138,9 +138,9 @@ public class SyncingOrderRepository : IOrderRepository
     public (int ParentOrderId, string LinkType)? GetParentOrder(int childOrderId) => _inner.GetParentOrder(childOrderId);
 
     public int CreateAlteration(int sourceOrderId, string alterationType, string reason, string alteredBy,
-        int? newPickupStoreId = null, string? newFolderPath = null)
+        int? newPickupStoreId = null, string? newFolderPath = null, List<int>? itemIds = null)
     {
-        var id = _inner.CreateAlteration(sourceOrderId, alterationType, reason, alteredBy, newPickupStoreId, newFolderPath);
+        var id = _inner.CreateAlteration(sourceOrderId, alterationType, reason, alteredBy, newPickupStoreId, newFolderPath, itemIds);
         var payload = JsonSerializer.Serialize(new { localOrderId = id, sourceOrderId, alterationType });
         _ = Task.Run(() => _sync.PushAsync("orders", id, "create_alteration", payload));
         return id;

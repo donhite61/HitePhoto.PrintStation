@@ -387,6 +387,7 @@ public partial class MainWindow : Window
             }
 
             _selectedOrderItem = orderItem;
+            _selectedSizeItem = null;
             _vm.SelectedOrder = orderItem;
 
             var selectedOrders = GetSelectedOrders();
@@ -1227,6 +1228,41 @@ public partial class MainWindow : Window
             transfer,
             _orders,
             _settings)
+        { Owner = this };
+
+        if (win.ShowDialog() == true)
+        {
+            _vm.LoadOrders();
+            UpdateStatusBar();
+        }
+    }
+
+    private void SendForProductionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedOrderItem == null) return;
+
+        var transfer = App.Services.GetService<Core.Services.ITransferService>();
+        if (transfer == null)
+        {
+            AlertCollector.Error(AlertCategory.Transfer,
+                "TransferService not registered",
+                detail: "Attempted: open SendForProduction. Expected: ITransferService in DI. Found: null.");
+            return;
+        }
+
+        // If a size is selected, pre-select only those items; otherwise all items
+        List<int>? preSelectedItemIds = null;
+        if (_selectedSizeItem?.Items is { Count: > 0 })
+            preSelectedItemIds = _selectedSizeItem.Items.Select(i => i.Id).ToList();
+
+        var win = new SendForProductionWindow(
+            _selectedOrderItem.DbId,
+            _selectedOrderItem.ExternalOrderId,
+            _selectedOrderItem.FolderPath,
+            transfer,
+            _orders,
+            _settings,
+            preSelectedItemIds)
         { Owner = this };
 
         if (win.ShowDialog() == true)

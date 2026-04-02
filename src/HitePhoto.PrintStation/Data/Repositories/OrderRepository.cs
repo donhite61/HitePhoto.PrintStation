@@ -980,7 +980,7 @@ public class OrderRepository : IOrderRepository
     }
 
     public int CreateAlteration(int sourceOrderId, string alterationType, string reason, string alteredBy,
-        int? newPickupStoreId = null, string? newFolderPath = null)
+        int? newPickupStoreId = null, string? newFolderPath = null, List<int>? itemIds = null)
     {
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
@@ -1064,11 +1064,17 @@ public class OrderRepository : IOrderRepository
             newOrderId = Convert.ToInt32(copyCmd.ExecuteScalar()!);
         }
 
-        // Copy items from the source order
+        // Copy items from the source order (all items, or only selected if itemIds provided)
         using (var copyItems = conn.CreateCommand())
         {
             copyItems.Transaction = transaction;
-            copyItems.CommandText = """
+            var itemFilter = "WHERE order_id = @srcOid";
+            if (itemIds is { Count: > 0 })
+            {
+                var placeholders = string.Join(", ", itemIds.Select((_, i) => $"@itemId{i}"));
+                itemFilter += $" AND id IN ({placeholders})";
+            }
+            copyItems.CommandText = $"""
                 INSERT INTO order_items (
                     order_id, size_label, media_type, category, sub_category,
                     quantity, image_filename, image_filepath, original_image_filepath,
@@ -1078,16 +1084,22 @@ public class OrderRepository : IOrderRepository
                     @newOid, size_label, media_type, category, sub_category,
                     quantity, image_filename, image_filepath, original_image_filepath,
                     is_noritsu, is_local_production, 0, options_json
-                FROM order_items WHERE order_id = @srcOid
+                FROM order_items {itemFilter}
                 """;
             copyItems.Parameters.AddWithValue("@newOid", newOrderId);
             copyItems.Parameters.AddWithValue("@srcOid", sourceOrderId);
+            if (itemIds is { Count: > 0 })
+            {
+                for (int i = 0; i < itemIds.Count; i++)
+                    copyItems.Parameters.AddWithValue($"@itemId{i}", itemIds[i]);
+            }
             copyItems.ExecuteNonQuery();
         }
 
-        // Mark parent as "dealt with" — moves to Printed tab
-        using (var markDone = conn.CreateCommand())
+        // Mark parent as "dealt with" — only when ALL items sent (no itemIds filter)
+        if (itemIds is null or { Count: 0 })
         {
+            using var markDone = conn.CreateCommand();
             markDone.Transaction = transaction;
             markDone.CommandText = "UPDATE orders SET is_printed = 1, updated_at = datetime('now') WHERE id = @id";
             markDone.Parameters.AddWithValue("@id", sourceOrderId);

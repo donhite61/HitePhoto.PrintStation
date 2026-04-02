@@ -71,36 +71,19 @@ public class TransferService : ITransferService
 
         ValidateSftpSettings();
 
-        // Get the specific item records to find their files
         var allItems = _orders.GetItems(orderId);
-        var selectedItems = allItems.Where(i => itemIds.Contains(i.Id)).ToList();
+        var filesToTransfer = CollectItemFiles(allItems, itemIds);
 
-        if (selectedItems.Count == 0)
-            throw new InvalidOperationException($"None of the {itemIds.Count} item IDs found on order {orderId}.");
-
-        // Collect files to transfer: each item's image + any metadata files
-        var filesToTransfer = new List<string>();
-        foreach (var item in selectedItems)
-        {
-            if (!string.IsNullOrEmpty(item.ImageFilepath) && File.Exists(item.ImageFilepath))
-                filesToTransfer.Add(item.ImageFilepath);
-        }
-
-        // Always include metadata files (darkroom_ticket.txt, order.yml, etc.)
+        // Also include metadata + root-level text files for plain transfers
         var metadataDir = Path.Combine(order.FolderPath, "metadata");
         if (Directory.Exists(metadataDir))
-        {
             filesToTransfer.AddRange(Directory.GetFiles(metadataDir, "*", SearchOption.AllDirectories));
-        }
-
-        // Include any root-level non-image files (TXT, YML, JSON)
         foreach (var file in Directory.GetFiles(order.FolderPath))
         {
             var ext = Path.GetExtension(file).ToLowerInvariant();
             if (ext is ".txt" or ".yml" or ".yaml" or ".json" or ".xml")
                 filesToTransfer.Add(file);
         }
-
         filesToTransfer = filesToTransfer.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         if (filesToTransfer.Count == 0)
@@ -155,45 +138,79 @@ public class TransferService : ITransferService
         return mismatches;
     }
 
-    public int SendForProduction(int orderId, int targetStoreId, string operatorName, string comment)
+    public int SendForProduction(int orderId, int targetStoreId, string operatorName, string comment,
+        List<int>? itemIds = null)
     {
-        var order = _orders.GetOrder(orderId);
-        if (order is null)
+        var fullOrder = _orders.GetFullOrder(orderId);
+        if (fullOrder is null)
             throw new InvalidOperationException($"Order {orderId} not found.");
 
-        if (string.IsNullOrEmpty(order.FolderPath) || !Directory.Exists(order.FolderPath))
-            throw new InvalidOperationException($"Order {orderId} folder not found: '{order.FolderPath}'");
+        if (string.IsNullOrEmpty(fullOrder.FolderPath) || !Directory.Exists(fullOrder.FolderPath))
+            throw new InvalidOperationException($"Order {orderId} folder not found: '{fullOrder.FolderPath}'");
 
         ValidateSftpSettings();
 
-        // Create the work order (child) — copies order + items, marks parent is_printed=1, inserts link
+        bool isPartial = itemIds is { Count: > 0 };
+
+        var remoteFolderBase = BuildProductionRemotePath(fullOrder);
+        // Convert SFTP path to Windows local path for the child order's folder_path
+        var childFolderPath = "S:" + remoteFolderBase.Replace('/', '\\');
+
+        // Cache DB lookups used multiple times
+        var allItems = _orders.GetItems(orderId);
+        var targetStoreName = _orders.GetStoreName(targetStoreId);
+        var fromStoreName = _orders.GetStoreName(_settings.StoreId);
+
+        // When all items (itemIds=null): also marks parent is_printed=1
         var childId = _orders.CreateAlteration(orderId, "split", comment, operatorName,
-            newPickupStoreId: targetStoreId);
+            newPickupStoreId: targetStoreId, newFolderPath: childFolderPath, itemIds: itemIds);
 
-        // SFTP all files to the other store
-        var allFiles = Directory.GetFiles(order.FolderPath, "*", SearchOption.AllDirectories);
-        if (allFiles.Length > 0)
-        {
-            var remoteFolderBase = BuildRemoteFolderPath(order.FolderPath);
-            UploadFolder(order.FolderPath, remoteFolderBase, allFiles);
-        }
+        var filesToTransfer = CollectItemFiles(allItems, itemIds);
 
-        // Write local marker
-        WriteTransferMarker(order.FolderPath, targetStoreId, operatorName, comment, itemIds: null);
+        if (filesToTransfer.Count > 0)
+            UploadFiles(fullOrder.FolderPath, remoteFolderBase, filesToTransfer.ToArray());
 
-        // History notes on both parent and child
-        var storeName = _orders.GetStoreName(targetStoreId);
+        if (isPartial)
+            _orders.SetItemsPrinted(itemIds!);
+
+        var invoiceItems = isPartial
+            ? allItems.Where(i => itemIds!.Contains(i.Id)).ToList()
+            : allItems;
+        var invoiceText = BuildTextInvoice(fullOrder, invoiceItems, fromStoreName, comment);
+        UploadInvoice(remoteFolderBase, invoiceText);
+
+        WriteTransferMarker(fullOrder.FolderPath, targetStoreId, operatorName, comment, itemIds, targetStoreName);
+
+        var itemCountNote = isPartial ? $" ({itemIds!.Count} item(s))" : "";
         var parentNote = string.IsNullOrEmpty(comment)
-            ? $"Sent to {storeName} for production by {operatorName}"
-            : $"Sent to {storeName} for production by {operatorName}: {comment}";
+            ? $"Sent to {targetStoreName} for production by {operatorName}{itemCountNote}"
+            : $"Sent to {targetStoreName} for production by {operatorName}{itemCountNote}: {comment}";
         _history.AddNote(orderId, parentNote, operatorName);
-        _history.AddNote(childId, $"Received from {_orders.GetStoreName(_settings.StoreId)} for production", operatorName);
+        _history.AddNote(childId, $"Received from {fromStoreName} for production", operatorName);
 
-        AppLog.Info($"SendForProduction: order {orderId} → {storeName}, child order {childId} ({allFiles.Length} files)");
+        var fileCount = isPartial ? "partial" : "all";
+        AppLog.Info($"SendForProduction: order {orderId} → {targetStoreName}, child order {childId} ({fileCount} files)");
         return childId;
     }
 
     // ── SFTP operations ─────────────────────────────────────────────────
+
+    private void UploadInvoice(string remoteFolder, string invoiceText)
+    {
+        using var client = CreateSftpClient();
+        client.Connect();
+        try
+        {
+            EnsureRemoteDirectory(client, remoteFolder);
+            var remotePath = remoteFolder + "/invoice.txt";
+            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(invoiceText));
+            client.UploadFile(stream, remotePath, canOverride: true);
+        }
+        finally
+        {
+            client.Disconnect();
+        }
+    }
 
     private void UploadFolder(string localFolder, string remoteFolder, string[] allFiles)
     {
@@ -373,7 +390,7 @@ public class TransferService : ITransferService
     // ── Local marker ────────────────────────────────────────────────────
 
     private void WriteTransferMarker(string folderPath, int targetStoreId,
-        string operatorName, string comment, List<int>? itemIds)
+        string operatorName, string comment, List<int>? itemIds, string? storeName = null)
     {
         if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
             return;
@@ -381,7 +398,7 @@ public class TransferService : ITransferService
         var metadataDir = Path.Combine(folderPath, "metadata");
         Directory.CreateDirectory(metadataDir);
 
-        var storeName = _orders.GetStoreName(targetStoreId);
+        storeName ??= _orders.GetStoreName(targetStoreId);
         var lines = new List<string>
         {
             $"transferred_at: {DateTime.UtcNow:O}",
@@ -398,5 +415,106 @@ public class TransferService : ITransferService
             lines.Add("items: all");
 
         File.WriteAllLines(Path.Combine(metadataDir, "transfer.txt"), lines);
+    }
+
+    /// <summary>
+    /// Collect image files from items. When itemIds is provided, only those items; otherwise all.
+    /// </summary>
+    private static List<string> CollectItemFiles(List<OrderItemRecord> allItems, List<int>? itemIds = null)
+    {
+        var items = itemIds is { Count: > 0 }
+            ? allItems.Where(i => itemIds.Contains(i.Id)).ToList()
+            : allItems;
+
+        var files = new List<string>();
+        foreach (var item in items)
+        {
+            if (!string.IsNullOrEmpty(item.ImageFilepath) && File.Exists(item.ImageFilepath))
+                files.Add(item.ImageFilepath);
+        }
+
+        return files.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// Build a plain text invoice for the production send.
+    /// </summary>
+    private string BuildTextInvoice(HitePhoto.Shared.Models.Order order, List<OrderItemRecord> items,
+        string fromStoreName, string comment)
+    {
+        var lines = new List<string>();
+
+        var name = $"{order.CustomerFirstName} {order.CustomerLastName}".Trim();
+        if (!string.IsNullOrEmpty(name)) lines.Add(name);
+        if (!string.IsNullOrEmpty(order.CustomerPhone)) lines.Add(order.CustomerPhone);
+        if (!string.IsNullOrEmpty(order.CustomerEmail)) lines.Add(order.CustomerEmail);
+        lines.Add("");
+        lines.Add("TRANSFER ORDER INVOICE");
+        lines.Add($"From {fromStoreName}  —  {DateTime.Now:MMM d, yyyy  h:mm tt}");
+        if (!string.IsNullOrEmpty(order.StoreName))
+            lines.Add($"Pickup: {order.StoreName}");
+        lines.Add($"Order #: {order.ExternalOrderId}");
+        if (order.OrderedAt.HasValue)
+            lines.Add($"Date: {order.OrderedAt.Value:MMM d, yyyy  h:mm tt}");
+        lines.Add("─────────────────────────────────────────");
+        lines.Add("ITEMS");
+
+        int totalPrints = 0;
+        int totalFiles = 0;
+        var groups = items.GroupBy(i => i.SizeLabel ?? "")
+            .OrderBy(g => g.Key);
+        foreach (var group in groups)
+        {
+            var qty = group.Sum(i => i.Quantity);
+            var files = group.Count();
+            totalPrints += qty;
+            totalFiles += files;
+            lines.Add($"  {group.Key,-24}  {qty} print{(qty != 1 ? "s" : "")}  ({files} file{(files != 1 ? "s" : "")})");
+        }
+
+        lines.Add("─────────────────────────────────────────");
+        lines.Add($"Total: {totalPrints} prints  ({totalFiles} files)");
+
+        if (!string.IsNullOrEmpty(comment))
+        {
+            lines.Add("");
+            lines.Add($"Notes: {comment}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>
+    /// Build remote path for production sends: /AAPhoto/{MM-DD MMM}/{LastName} {FirstName} {Phone}/
+    /// </summary>
+    private static string BuildProductionRemotePath(HitePhoto.Shared.Models.Order order)
+    {
+        var now = DateTime.Now;
+        var monthFolder = now.ToString("MM-yy MMM").ToUpper();
+
+        var lastName = order.CustomerLastName?.Trim() ?? "";
+        var firstName = order.CustomerFirstName?.Trim() ?? "";
+        var phone = FormatPhone(order.CustomerPhone?.Trim() ?? "");
+
+        if (string.IsNullOrEmpty(lastName) && string.IsNullOrEmpty(firstName))
+            throw new InvalidOperationException(
+                $"Order {order.ExternalOrderId} has no customer name — cannot build production path.");
+
+        var customerFolder = string.IsNullOrEmpty(phone)
+            ? $"{lastName} {firstName}".Trim()
+            : $"{lastName} {firstName} {phone}".Trim();
+        return $"/AAPhoto/{monthFolder}/{customerFolder}";
+    }
+
+    /// <summary>Format phone as 248-390-2515. Handles raw digits or already-formatted.</summary>
+    private static string FormatPhone(string phone)
+    {
+        if (string.IsNullOrEmpty(phone)) return "";
+        var digits = new string(phone.Where(char.IsDigit).ToArray());
+        if (digits.Length == 11 && digits[0] == '1')
+            digits = digits[1..];
+        if (digits.Length == 10)
+            return $"{digits[..3]}-{digits[3..6]}-{digits[6..]}";
+        return phone; // return as-is if not a standard 10-digit number
     }
 }

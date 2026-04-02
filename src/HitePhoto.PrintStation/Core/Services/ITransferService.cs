@@ -23,7 +23,8 @@ public interface ITransferService
     /// linked to the parent, SFTP's files, marks parent as dealt with.
     /// Returns the new work order's ID.
     /// </summary>
-    int SendForProduction(int orderId, int targetStoreId, string operatorName, string comment);
+    int SendForProduction(int orderId, int targetStoreId, string operatorName, string comment,
+        List<int>? itemIds = null);
 }
 
 public record TransferMismatch(string ItemDescription, string Issue);

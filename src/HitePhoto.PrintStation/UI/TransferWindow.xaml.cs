@@ -20,8 +20,6 @@ public partial class TransferWindow : Window
     private string _remoteFolderPath = "";
     private bool _connected;
 
-    public record StoreItem(int Id, string Name);
-
     public TransferWindow(
         int orderId,
         string externalOrderId,
