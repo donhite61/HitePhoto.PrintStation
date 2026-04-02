@@ -151,24 +151,57 @@ public class TransferService : ITransferService
         ValidateSftpSettings();
 
         bool isPartial = itemIds is { Count: > 0 };
-
         var remoteFolderBase = BuildProductionRemotePath(fullOrder);
-        // Convert SFTP path to Windows local path for the child order's folder_path
-        var childFolderPath = "S:" + remoteFolderBase.Replace('/', '\\');
-
-        // Cache DB lookups used multiple times
         var allItems = _orders.GetItems(orderId);
         var targetStoreName = _orders.GetStoreName(targetStoreId);
         var fromStoreName = _orders.GetStoreName(_settings.StoreId);
 
-        // When all items (itemIds=null): also marks parent is_printed=1
+        // Upload item files
+        var filesToTransfer = CollectItemFiles(allItems, itemIds);
+        if (filesToTransfer.Count > 0)
+            UploadFiles(fullOrder.FolderPath, remoteFolderBase, filesToTransfer.ToArray());
+
+        // Upload selected folders
+        if (folderNames is { Count: > 0 })
+        {
+            using var client = CreateSftpClient();
+            client.Connect();
+            try
+            {
+                foreach (var folder in folderNames)
+                {
+                    var localSub = Path.Combine(fullOrder.FolderPath, folder);
+                    if (!Directory.Exists(localSub)) continue;
+                    var remoteSub = remoteFolderBase + "/" + folder;
+                    var files = Directory.GetFiles(localSub, "*", SearchOption.AllDirectories);
+                    foreach (var file in files)
+                    {
+                        var rel = Path.GetRelativePath(fullOrder.FolderPath, file);
+                        var remotePath = remoteFolderBase + "/" + rel.Replace('\\', '/');
+                        EnsureRemoteDirectory(client, Path.GetDirectoryName(remotePath)!.Replace('\\', '/'));
+                        UploadSingleFile(client, file, remotePath);
+                    }
+                }
+            }
+            finally { client.Disconnect(); }
+        }
+
+        // Upload root-level metadata files (yml, txt, json)
+        UploadRootMetadata(fullOrder.FolderPath, remoteFolderBase);
+
+        if (!createOrder)
+        {
+            AppLog.Info($"SendForProduction (no order): uploaded files from {orderId} → {targetStoreName}");
+            return -1;
+        }
+
+        var childFolderPath = "S:" + remoteFolderBase.Replace('/', '\\');
         var childId = _orders.CreateAlteration(orderId, "split", comment, operatorName,
             newPickupStoreId: targetStoreId, newFolderPath: childFolderPath, itemIds: itemIds);
 
-        var filesToTransfer = CollectItemFiles(allItems, itemIds);
-
-        if (filesToTransfer.Count > 0)
-            UploadFiles(fullOrder.FolderPath, remoteFolderBase, filesToTransfer.ToArray());
+        // Insert Transfer service item if no real items selected
+        if (filesToTransfer.Count == 0)
+            _orders.InsertServiceItem(childId, "Transfer", childFolderPath);
 
         if (isPartial)
             _orders.SetItemsPrinted(itemIds!);
@@ -188,9 +221,28 @@ public class TransferService : ITransferService
         _history.AddNote(orderId, parentNote, operatorName);
         _history.AddNote(childId, $"Received from {fromStoreName} for production", operatorName);
 
-        var fileCount = isPartial ? "partial" : "all";
-        AppLog.Info($"SendForProduction: order {orderId} → {targetStoreName}, child order {childId} ({fileCount} files)");
+        AppLog.Info($"SendForProduction: order {orderId} → {targetStoreName}, child order {childId}");
         return childId;
+    }
+
+    private void UploadRootMetadata(string localFolder, string remoteFolder)
+    {
+        using var client = CreateSftpClient();
+        client.Connect();
+        try
+        {
+            foreach (var file in Directory.GetFiles(localFolder))
+            {
+                var ext = Path.GetExtension(file).ToLowerInvariant();
+                if (ext is ".txt" or ".yml" or ".yaml" or ".json" or ".xml")
+                {
+                    var remotePath = remoteFolder + "/" + Path.GetFileName(file);
+                    EnsureRemoteDirectory(client, remoteFolder);
+                    UploadSingleFile(client, file, remotePath);
+                }
+            }
+        }
+        finally { client.Disconnect(); }
     }
 
     public int? GetFromProduction(int orderId, bool createOrder, string operatorName, string comment,
@@ -414,6 +466,19 @@ public class TransferService : ITransferService
 
         if (backupCreated)
             AppLog.Info($"Transfer: backed up overwritten remote files to {backupFolder}");
+    }
+
+    public List<string> ListLocalFolders(string localPath)
+    {
+        var folders = new List<string>();
+        if (string.IsNullOrEmpty(localPath) || !Directory.Exists(localPath)) return folders;
+        foreach (var dir in Directory.GetDirectories(localPath))
+        {
+            var name = Path.GetFileName(dir);
+            if (name is "metadata") continue;
+            folders.Add(name);
+        }
+        return folders;
     }
 
     private static void UploadSingleFile(SftpClient client, string localPath, string remotePath)

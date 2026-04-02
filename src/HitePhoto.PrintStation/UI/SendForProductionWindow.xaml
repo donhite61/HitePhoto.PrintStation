@@ -12,6 +12,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Header -->
@@ -40,15 +41,27 @@
             </ScrollViewer>
         </Border>
 
-        <!-- Target store -->
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
-            <Label Content="Send to:" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
-            <ComboBox x:Name="StoreCombo" Width="200" Margin="4,0,0,0"
-                      DisplayMemberPath="Name" SelectedValuePath="Id"/>
+        <!-- Folders section -->
+        <StackPanel Grid.Row="3" Margin="0,8,0,0">
+            <TextBlock Text="Folders to send:" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimary}" FontSize="12"/>
+            <StackPanel x:Name="FolderPanel" Margin="8,4,0,0"/>
+        </StackPanel>
+
+        <!-- Target store + create order -->
+        <StackPanel Grid.Row="4" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal">
+                <Label Content="Send to:" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
+                <ComboBox x:Name="StoreCombo" Width="200" Margin="4,0,0,0"
+                          DisplayMemberPath="Name" SelectedValuePath="Id"/>
+            </StackPanel>
+            <CheckBox x:Name="CreateOrderCheck" Content="Create work order (-W#)"
+                      IsChecked="True" Margin="0,6,0,0" FontSize="12"
+                      Foreground="{DynamicResource TextPrimary}"/>
         </StackPanel>
 
         <!-- Comment -->
-        <Grid Grid.Row="4" Margin="0,8,0,0">
+        <Grid Grid.Row="5" Margin="0,8,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -59,7 +72,7 @@
         </Grid>
 
         <!-- Action buttons -->
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <TextBlock x:Name="SummaryText" VerticalAlignment="Center" Margin="0,0,12,0"
                        FontSize="11" Foreground="{DynamicResource TextMuted}"/>
             <Button x:Name="SendBtn" Content="Send" Width="100" Height="32"

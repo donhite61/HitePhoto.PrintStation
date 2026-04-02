@@ -36,6 +36,9 @@ public interface ITransferService
 
     /// <summary>List subfolder names in a remote order folder (for folder checkbox UI).</summary>
     List<string> ListRemoteFolders(string remotePath);
+
+    /// <summary>List subfolder names in a local order folder (for folder checkbox UI).</summary>
+    List<string> ListLocalFolders(string localPath);
 }
 
 public record TransferMismatch(string ItemDescription, string Issue);

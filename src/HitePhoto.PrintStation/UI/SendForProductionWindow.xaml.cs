@@ -15,6 +15,7 @@ public partial class SendForProductionWindow : Window
     private readonly AppSettings _settings;
 
     private readonly List<SizeGroup> _sizeGroups = new();
+    private readonly List<(string Name, CheckBox CheckBox)> _folderCheckboxes = new();
     private int _totalItemCount;
     private bool _updatingCheckboxes;
 
@@ -48,6 +49,7 @@ public partial class SendForProductionWindow : Window
 
         LoadStores();
         LoadItems(preSelectedItemIds);
+        LoadLocalFolders(folderPath);
         UpdateSummary();
     }
 
@@ -169,9 +171,13 @@ public partial class SendForProductionWindow : Window
 
     private void UpdateSummary()
     {
-        int selected = GetSelectedItemIds().Count;
-        SummaryText.Text = $"Sending {selected} of {_totalItemCount} item{(_totalItemCount != 1 ? "s" : "")}";
-        SendBtn.IsEnabled = selected > 0 && StoreCombo.SelectedItem != null;
+        int selectedItems = GetSelectedItemIds().Count;
+        int selectedFolders = GetSelectedFolderNames().Count;
+        var parts = new List<string>();
+        if (selectedItems > 0) parts.Add($"{selectedItems} item{(selectedItems != 1 ? "s" : "")}");
+        if (selectedFolders > 0) parts.Add($"{selectedFolders} folder{(selectedFolders != 1 ? "s" : "")}");
+        SummaryText.Text = parts.Count > 0 ? $"Sending {string.Join(", ", parts)}" : "Nothing selected";
+        SendBtn.IsEnabled = (selectedItems > 0 || selectedFolders > 0) && StoreCombo.SelectedItem != null;
     }
 
     private List<int> GetSelectedItemIds()
@@ -182,6 +188,34 @@ public partial class SendForProductionWindow : Window
                 if (cb.IsChecked == true)
                     ids.Add(item.Id);
         return ids;
+    }
+
+    private void LoadLocalFolders(string folderPath)
+    {
+        var folders = _transfer.ListLocalFolders(folderPath);
+        foreach (var folder in folders)
+        {
+            var cb = new CheckBox
+            {
+                Content = folder,
+                IsChecked = false,
+                Margin = new Thickness(0, 1, 0, 1),
+                FontSize = 12,
+                Foreground = (System.Windows.Media.Brush)FindResource("TextPrimary")
+            };
+            cb.Checked += (_, _) => UpdateSummary();
+            cb.Unchecked += (_, _) => UpdateSummary();
+            _folderCheckboxes.Add((folder, cb));
+            FolderPanel.Children.Add(cb);
+        }
+    }
+
+    private List<string> GetSelectedFolderNames()
+    {
+        return _folderCheckboxes
+            .Where(f => f.CheckBox.IsChecked == true)
+            .Select(f => f.Name)
+            .ToList();
     }
 
     private void SelectAll_Click(object sender, RoutedEventArgs e)
@@ -222,13 +256,15 @@ public partial class SendForProductionWindow : Window
         var comment = CommentBox.Text.Trim();
         var operatorName = Environment.UserName;
 
-        // Pass null for full send, list for partial
         List<int>? itemIds = isPartial ? selectedIds : null;
+        var selectedFolders = GetSelectedFolderNames();
+        List<string>? folderNames = selectedFolders.Count > 0 ? selectedFolders : null;
+        bool createOrder = CreateOrderCheck.IsChecked == true;
 
         try
         {
             await Task.Run(() =>
-                _transfer.SendForProduction(_orderId, target.Id, operatorName, comment, itemIds));
+                _transfer.SendForProduction(_orderId, target.Id, operatorName, comment, itemIds, folderNames, createOrder));
 
             SummaryText.Text = "Sent successfully";
             MessageBox.Show($"Order sent to {target.Name} for production.",
