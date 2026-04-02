@@ -97,7 +97,7 @@ public interface IOrderRepository
     /// <summary>Printed tab: is_printed=1 ONLY. Do not add files_local, status_code, or item subqueries.</summary>
     List<OrderRow> LoadPrintedOrders(int storeId);
 
-    /// <summary>Other Store tab: pickup_store_id != storeId ONLY. Do not add files_local or status_code.</summary>
+    /// <summary>Other Store tab: files_local=0 (sync-pulled orders). Empty when sync disabled.</summary>
     List<OrderRow> LoadOtherStoreOrders(int storeId);
 
     /// <summary>Batch-load items for multiple orders. Keyed by order ID.</summary>

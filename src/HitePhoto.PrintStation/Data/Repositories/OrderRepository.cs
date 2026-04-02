@@ -653,15 +653,16 @@ public class OrderRepository : IOrderRepository
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  TAB QUERIES — LOCKED CONTRACTS (Session 71-72)
+    //  TAB QUERIES — LOCKED CONTRACTS (Session 71-76)
     //
     //  Pending  = is_printed = 0.  Nothing else.
     //  Printed  = is_printed = 1.  Nothing else.
-    //  Other    = pickup_store_id != this store.  Nothing else.
+    //  Other    = files_local = 0.  Sync-pulled orders only.
     //
-    //  DO NOT add files_local, status_code, is_local_production,
-    //  is_transfer, or item subqueries to these filters.
-    //  See memory/feedback_field_purposes.md for why.
+    //  DO NOT add status_code, is_local_production, is_transfer,
+    //  pickup_store_id, or item subqueries to these filters.
+    //  See memory/feedback_field_purposes.md and
+    //  feedback_tab_query_locked.md for why.
     // ═══════════════════════════════════════════════════════════════
 
     public List<OrderRow> LoadPendingOrders(int storeId)
@@ -696,17 +697,20 @@ public class OrderRepository : IOrderRepository
         return results;
     }
 
+    // Other Store = orders from sync (files_local=0). These are orders the other
+    // store ingested and pushed to MariaDB. We pulled them but don't have files.
+    // Empty when sync is disabled. This is NOT the same rule as Pending/Printed
+    // tabs — those use is_printed. Other Store is a sync concept.
     public List<OrderRow> LoadOtherStoreOrders(int storeId)
     {
         var results = new List<OrderRow>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.pickup_store_id != @storeId
+            WHERE o.files_local = 0
               AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
-        cmd.Parameters.AddWithValue("@storeId", storeId);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
