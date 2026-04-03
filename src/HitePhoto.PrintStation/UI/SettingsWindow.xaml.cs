@@ -95,6 +95,8 @@ public partial class SettingsWindow : Window
         TransferSftpPortBox.Text = _settings.TransferSftpPort.ToString();
         TransferSftpUserBox.Text = _settings.TransferSftpUsername;
         TransferSftpPassBox.Password = _settings.TransferSftpPassword;
+        TransferNasPrefixBox.Text = _settings.TransferNasPrefix;
+        TransferRemoteRootBox.Text = _settings.TransferRemoteRoot;
 
         // Appearance
         var theme = _settings.Theme ?? "Light";
@@ -210,6 +212,8 @@ public partial class SettingsWindow : Window
         _settings.TransferSftpPort = int.TryParse(TransferSftpPortBox.Text.Trim(), out int tp) ? tp : 22;
         _settings.TransferSftpUsername = TransferSftpUserBox.Text.Trim();
         _settings.TransferSftpPassword = TransferSftpPassBox.Password;
+        _settings.TransferNasPrefix = TransferNasPrefixBox.Text.Trim();
+        _settings.TransferRemoteRoot = TransferRemoteRootBox.Text.Trim();
 
         // Appearance
         if (ThemeCombo.SelectedItem is ComboBoxItem themeItem && themeItem.Tag is string themeName)

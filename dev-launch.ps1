@@ -46,7 +46,7 @@ foreach ($store in $Stores) {
             DbName             = "hitephoto"
             DbUser             = "labapi"
             DbPassword         = "SlantedPeanuts2026"
-            SyncEnabled        = $false
+            SyncEnabled        = $true
             SyncIntervalSeconds = 30
             DakisEnabled       = $true
             PixfizzEnabled     = $false

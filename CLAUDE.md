@@ -30,6 +30,17 @@ Dapper `MatchNamesWithUnderscores = true` maps snake_case columns to PascalCase 
 
 Store IDs: BH=1, WB=2. Status IDs: new=1, in_progress=2, on_hold=3, ready=4, notified=5, picked_up=6, cancelled=7, sent_to_store=8, shipped=9.
 
+## Sync Field Ownership — CRITICAL
+The ingesting machine OWNS its orders in SQLite. MariaDB is a relay between stores, not an authority.
+
+**Sync pull INSERT** (new order from another store): Set all fields — we don't own this order.
+**Sync pull UPDATE** (existing local order): Only update shared fields (status, customer info, hold state). NEVER overwrite: `folder_path`, `harvested_by_store_id`, `is_printed`, `supersedes`, `alteration_type`, `is_test`.
+**Sync push** (local → MariaDB): Send everything — MariaDB needs the full picture for other stores.
+
+This is enforced in `SyncService.cs` via split bind methods: `BindPullUpdateParams` (whitelist of safe fields) and `BindPullInsertParams` (all fields). Do not merge these methods or add locally-owned fields to the UPDATE path.
+
+See: `project_alteration_system.md`, `project_sync_authority.md` in memory.
+
 ## Build & Run
 ```bash
 dotnet build

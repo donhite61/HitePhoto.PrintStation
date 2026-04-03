@@ -45,7 +45,7 @@ public partial class GetFromProductionWindow : Window
         _settings = settings;
 
         // Remote path is derived from the order's folder_path (stored as S:\... from the sending store)
-        _remotePath = folderPath?.Replace('\\', '/').Replace("S:", "") ?? "";
+        _remotePath = folderPath?.Replace('\\', '/').Replace(settings.TransferNasPrefix, "") ?? "";
 
         OrderHeader.Text = $"Order: {externalOrderId}";
         OrderDetail.Text = folderPath;

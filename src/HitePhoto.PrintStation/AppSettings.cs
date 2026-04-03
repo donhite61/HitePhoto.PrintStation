@@ -118,9 +118,11 @@ public class AppSettings
     public int    TransferSftpPort     { get; set; } = 22;
     public string TransferSftpUsername { get; set; } = "";
     public string TransferSftpPassword { get; set; } = "";
+    public string TransferNasPrefix    { get; set; } = "S:";
+    public string TransferRemoteRoot   { get; set; } = "/AAPhoto";
 
     // ── MariaDB sync ──
-    public bool SyncEnabled          { get; set; } = false;
+    public bool SyncEnabled          { get; set; } = true;
     public int  SyncIntervalSeconds  { get; set; } = 30;
 
     // ── Developer mode ──

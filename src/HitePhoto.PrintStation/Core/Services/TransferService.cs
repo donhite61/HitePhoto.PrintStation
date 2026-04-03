@@ -225,7 +225,7 @@ public class TransferService : ITransferService
             return -1;
         }
 
-        var childFolderPath = "S:" + remoteFolderBase.Replace('/', '\\');
+        var childFolderPath = _settings.TransferNasPrefix + remoteFolderBase.Replace('/', '\\');
         var childId = _orders.CreateAlteration(orderId, "split", comment, operatorName,
             newPickupStoreId: targetStoreId, newFolderPath: childFolderPath, itemIds: itemIds);
 
@@ -261,7 +261,7 @@ public class TransferService : ITransferService
             throw new InvalidOperationException("OrderOutputPath is not configured. Set it in Settings.");
 
         // Build remote path from the order's folder_path (stored as S:\... from the sending machine)
-        var remotePath = fullOrder.FolderPath?.Replace('\\', '/').Replace("S:", "") ?? "";
+        var remotePath = fullOrder.FolderPath?.Replace('\\', '/').Replace(_settings.TransferNasPrefix, "") ?? "";
         if (string.IsNullOrEmpty(remotePath))
             throw new InvalidOperationException($"Order {orderId} has no folder_path — cannot locate remote files.");
 
@@ -707,7 +707,7 @@ public class TransferService : ITransferService
     /// Build remote path for production sends:
     /// /AAPhoto/{MM-yy MMM}/{LastName} {FirstName} {Phone}/{MM-dd-yy HHmm}/
     /// </summary>
-    private static string BuildProductionRemotePath(HitePhoto.Shared.Models.Order order)
+    private string BuildProductionRemotePath(HitePhoto.Shared.Models.Order order)
     {
         var now = DateTime.Now;
         var monthFolder = now.ToString("MM-yy MMM").ToUpper();
@@ -724,7 +724,7 @@ public class TransferService : ITransferService
         var customerFolder = string.IsNullOrEmpty(phone)
             ? $"{lastName} {firstName}".Trim()
             : $"{lastName} {firstName} {phone}".Trim();
-        return $"/AAPhoto/{monthFolder}/{customerFolder}/{dateTimeFolder}";
+        return $"{_settings.TransferRemoteRoot}/{monthFolder}/{customerFolder}/{dateTimeFolder}";
     }
 
     /// <summary>Format phone as 248-390-2515. Handles raw digits or already-formatted.</summary>

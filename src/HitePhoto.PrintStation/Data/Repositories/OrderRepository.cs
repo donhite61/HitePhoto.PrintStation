@@ -9,7 +9,6 @@ namespace HitePhoto.PrintStation.Data.Repositories;
 public class OrderRepository : IOrderRepository
 {
     private readonly OrderDb _db;
-
     private const string OrderSelectBase = """
         SELECT o.id, o.external_order_id, o.source_code, o.status_code,
                o.customer_first_name, o.customer_last_name,
@@ -438,7 +437,6 @@ public class OrderRepository : IOrderRepository
             SELECT o.id, o.external_order_id, o.folder_path, o.source_code
             FROM orders o
             WHERE (@daysBack = 0 OR o.ordered_at >= @cutoff)
-              AND o.is_test = 0
             """;
         cmd.Parameters.AddWithValue("@daysBack", days);
         cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
@@ -676,7 +674,6 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = OrderSelectBase + """
             WHERE o.harvested_by_store_id = @storeId
               AND o.is_printed = 0
-              AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -694,7 +691,6 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = OrderSelectBase + """
             WHERE o.harvested_by_store_id = @storeId
               AND o.is_printed = 1
-              AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -714,7 +710,6 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = OrderSelectBase + """
             WHERE o.harvested_by_store_id != @storeId
               AND o.harvested_by_store_id > 0
-              AND o.is_test = 0
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -1080,7 +1075,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, {(newFolderPath != null ? "1" : "harvested_by_store_id")},
+                    is_test, {(newPickupStoreId.HasValue ? "@newStore" : "harvested_by_store_id")},
                     @supersedes, @altType
                 FROM orders WHERE id = @srcId;
                 SELECT last_insert_rowid();

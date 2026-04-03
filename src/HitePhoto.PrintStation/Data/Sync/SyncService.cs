@@ -127,6 +127,9 @@ public class SyncService : ISyncService
                 return await _remoteDb.AddNoteAsync(remoteId.Value, null, note);
             }
 
+            case "create_alteration":
+                return await PushCreateAlterationAsync(payload);
+
             default:
                 AppLog.Warn($"SyncService: unknown push operation '{operation}'");
                 return true; // don't re-queue unknown ops
@@ -145,7 +148,9 @@ public class SyncService : ISyncService
                    customer_first_name, customer_last_name, customer_email, customer_phone,
                    total_amount, is_held, is_transfer, transfer_store_id,
                    special_instructions, folder_path, delivery_method_id,
-                   ordered_at, pixfizz_job_id, download_status, source_code
+                   ordered_at, pixfizz_job_id, download_status, source_code,
+                   harvested_by_store_id, is_printed,
+                   supersedes, alteration_type
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", localOrderId);
@@ -174,7 +179,11 @@ public class SyncService : ISyncService
             folderPath: reader.IsDBNull(13) ? null : reader.GetString(13),
             deliveryMethodId: reader.GetInt32(14),
             orderedAt: reader.IsDBNull(15) ? null : reader.GetString(15),
-            pixfizzJobId: reader.IsDBNull(16) ? null : reader.GetString(16));
+            pixfizzJobId: reader.IsDBNull(16) ? null : reader.GetString(16),
+            harvestedByStoreId: reader.GetInt32(19),
+            isPrinted: reader.GetInt32(20) == 1,
+            supersedes: reader.IsDBNull(21) ? null : reader.GetString(21),
+            alterationType: reader.IsDBNull(22) ? null : reader.GetString(22));
         reader.Close();
 
         if (remoteId <= 0) return false;
@@ -191,6 +200,45 @@ public class SyncService : ISyncService
             AppLog.Info($"SyncPush: items push result={itemResult} for order {externalOrderId}");
         }
 
+        return true;
+    }
+
+    private async Task<bool> PushCreateAlterationAsync(Dictionary<string, JsonElement> payload)
+    {
+        var localChildId = payload["localOrderId"].GetInt32();
+        var localParentId = payload["sourceOrderId"].GetInt32();
+        var alterationType = payload["alterationType"].GetString() ?? "split";
+
+        // 1. Push child order (same pattern as PushInsertOrderAsync)
+        var childPayload = new Dictionary<string, JsonElement>
+        {
+            ["localOrderId"] = JsonSerializer.SerializeToElement(localChildId)
+        };
+        var childPushed = await PushInsertOrderAsync(childPayload);
+        if (!childPushed)
+        {
+            AppLog.Info($"SyncPush: create_alteration failed — could not push child order {localChildId}");
+            return false;
+        }
+
+        // 2. Sync parent's is_printed state to MariaDB (only true if all items sent)
+        var parentRemoteId = await ResolveRemoteOrderIdAsync(localParentId);
+        if (parentRemoteId.HasValue)
+        {
+            using var pConn = _localDb.OpenConnection();
+            using var pCmd = pConn.CreateCommand();
+            pCmd.CommandText = "SELECT is_printed FROM orders WHERE id = @id";
+            pCmd.Parameters.AddWithValue("@id", localParentId);
+            var parentPrinted = Convert.ToInt32(pCmd.ExecuteScalar()) == 1;
+            await _remoteDb.SetOrderPrintedAsync(parentRemoteId.Value, parentPrinted);
+        }
+
+        // 3. Insert order_links row in MariaDB
+        var childRemoteId = await ResolveRemoteOrderIdAsync(localChildId);
+        if (parentRemoteId.HasValue && childRemoteId.HasValue)
+            await _remoteDb.InsertOrderLinkAsync(parentRemoteId.Value, childRemoteId.Value, alterationType, "");
+
+        AppLog.Info($"SyncPush: create_alteration complete — child {localChildId} (remote={childRemoteId}), parent {localParentId} (remote={parentRemoteId})");
         return true;
     }
 
@@ -395,6 +443,26 @@ public class SyncService : ISyncService
         return result != null ? Convert.ToInt32(result) : null;
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  SYNC PULL — FIELD OWNERSHIP RULES
+    //
+    //  The ingesting machine OWNS these fields in SQLite. The pull
+    //  UPDATE must NEVER overwrite them from MariaDB:
+    //
+    //    folder_path, harvested_by_store_id, is_printed,
+    //    supersedes, alteration_type, is_test
+    //
+    //  These fields are set on INSERT (new orders from another store)
+    //  but never touched on UPDATE (existing local orders).
+    //
+    //  BindPullUpdateParams binds ONLY the update-safe fields.
+    //  BindPullInsertParams adds the locally-owned fields on top.
+    //  This split makes it physically impossible to accidentally
+    //  overwrite owned fields in the UPDATE path.
+    //
+    //  See: project_alteration_system.md, project_sync_authority.md
+    // ═══════════════════════════════════════════════════════════════
+
     private void UpsertLocalOrder(dynamic row, int? existingLocalId)
     {
         using var conn = _localDb.OpenConnection();
@@ -435,7 +503,7 @@ public class SyncService : ISyncService
                     updated_at = @updatedAt
                 WHERE id = @id
                 """;
-            BindOrderParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
+            BindPullUpdateParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
             cmd.Parameters.AddWithValue("@updatedAt", ((DateTime)row.updated_at).ToString("o"));
             cmd.Parameters.AddWithValue("@id", existingLocalId.Value);
             cmd.ExecuteNonQuery();
@@ -451,6 +519,8 @@ public class SyncService : ISyncService
                     customer_first_name, customer_last_name, customer_email, customer_phone,
                     total_amount, is_held, is_transfer, transfer_store_id,
                     special_instructions, folder_path, delivery_method_id, ordered_at,
+                    harvested_by_store_id, is_printed,
+                    supersedes, alteration_type,
                     created_at, updated_at
                 ) VALUES (
                     @eid, @store, @srcId, @srcCode,
@@ -458,19 +528,22 @@ public class SyncService : ISyncService
                     @fname, @lname, @email, @phone,
                     @total, @held, @transfer, @transferStore,
                     @instructions, @folder, @delivery, @orderedAt,
+                    @harvestedBy, @isPrinted,
+                    @supersedes, @altType,
                     @createdAt, @updatedAt
                 )
                 """;
             cmd.Parameters.AddWithValue("@eid", externalOrderId);
             cmd.Parameters.AddWithValue("@store", pickupStoreId);
-            BindOrderParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
+            BindPullInsertParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
             cmd.Parameters.AddWithValue("@createdAt", ((DateTime)row.created_at).ToString("o"));
             cmd.Parameters.AddWithValue("@updatedAt", ((DateTime)row.updated_at).ToString("o"));
             cmd.ExecuteNonQuery();
         }
     }
 
-    private static void BindOrderParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
+    /// <summary>Bind ONLY the fields that sync pull is allowed to UPDATE on existing local orders.</summary>
+    private static void BindPullUpdateParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
     {
         cmd.Parameters.AddWithValue("@srcId", orderSourceId);
         cmd.Parameters.AddWithValue("@srcCode", sourceCode);
@@ -485,9 +558,19 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@transfer", Convert.ToBoolean(row.is_transfer) ? 1 : 0);
         cmd.Parameters.AddWithValue("@transferStore", row.transfer_store_id != null ? (object)(int)row.transfer_store_id : DBNull.Value);
         cmd.Parameters.AddWithValue("@instructions", (string?)row.special_instructions ?? "");
-        cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
         cmd.Parameters.AddWithValue("@delivery", row.delivery_method_id != null ? (int)row.delivery_method_id : 1);
         cmd.Parameters.AddWithValue("@orderedAt", row.ordered_at != null ? ((DateTime)row.ordered_at).ToString("o") : DateTime.Now.ToString("o"));
+    }
+
+    /// <summary>Bind ALL fields for INSERT (new orders from another store). Includes locally-owned fields.</summary>
+    private static void BindPullInsertParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
+    {
+        BindPullUpdateParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
+        cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
+        cmd.Parameters.AddWithValue("@harvestedBy", row.harvested_by_store_id != null ? (int)row.harvested_by_store_id : 0);
+        cmd.Parameters.AddWithValue("@isPrinted", Convert.ToBoolean(row.is_printed) ? 1 : 0);
+        cmd.Parameters.AddWithValue("@supersedes", (string?)row.supersedes ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@altType", (string?)row.alteration_type ?? (object)DBNull.Value);
     }
 
     private void UpsertLocalItem(dynamic item)

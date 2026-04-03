@@ -683,7 +683,9 @@ public class PrintStationDb
         string? shippingAddress1 = null, string? shippingAddress2 = null,
         string? shippingCity = null, string? shippingState = null,
         string? shippingZip = null, string? shippingCountry = null,
-        string? shippingMethod = null)
+        string? shippingMethod = null,
+        int harvestedByStoreId = 0, bool isPrinted = false,
+        string? supersedes = null, string? alterationType = null)
     {
         const string sql = """
             INSERT INTO orders
@@ -698,6 +700,8 @@ public class PrintStationDb
                  shipping_first_name, shipping_last_name,
                  shipping_address1, shipping_address2, shipping_city,
                  shipping_state, shipping_zip, shipping_country, shipping_method,
+                 harvested_by_store_id, is_printed,
+                 supersedes, alteration_type,
                  sync_status)
             VALUES
                 (@Eid, @Store, @Store,
@@ -711,6 +715,8 @@ public class PrintStationDb
                  @ShipFname, @ShipLname,
                  @ShipAddr1, @ShipAddr2, @ShipCity,
                  @ShipState, @ShipZip, @ShipCountry, @ShipMethod,
+                 @HarvestedBy, @Printed,
+                 @Supersedes, @AltType,
                  'synced')
             ON DUPLICATE KEY UPDATE
                 order_status_id = VALUES(order_status_id),
@@ -740,6 +746,10 @@ public class PrintStationDb
                 shipping_zip = COALESCE(VALUES(shipping_zip), shipping_zip),
                 shipping_country = COALESCE(VALUES(shipping_country), shipping_country),
                 shipping_method = COALESCE(VALUES(shipping_method), shipping_method),
+                harvested_by_store_id = VALUES(harvested_by_store_id),
+                is_printed = VALUES(is_printed),
+                supersedes = COALESCE(VALUES(supersedes), supersedes),
+                alteration_type = COALESCE(VALUES(alteration_type), alteration_type),
                 sync_status = 'synced';
             SELECT LAST_INSERT_ID();
             """;
@@ -779,6 +789,10 @@ public class PrintStationDb
                 ShipZip = shippingZip,
                 ShipCountry = shippingCountry,
                 ShipMethod = shippingMethod,
+                HarvestedBy = harvestedByStoreId,
+                Printed = isPrinted ? 1 : 0,
+                Supersedes = supersedes,
+                AltType = alterationType,
             });
 
             // LAST_INSERT_ID returns 0 on update — need to query by natural key
@@ -804,57 +818,117 @@ public class PrintStationDb
         }
     }
 
-    /// <summary>Upsert order items to MariaDB. Deletes existing items and re-inserts.</summary>
+    /// <summary>Upsert order items to MariaDB. Deletes existing items and re-inserts. Retries on deadlock.</summary>
     public async Task<bool> UpsertOrderItemsAsync(int mariaDbOrderId, List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> items)
     {
+        const int maxRetries = 3;
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                await using var conn = CreateConnection();
+                await conn.OpenAsync();
+                await using var tx = await conn.BeginTransactionAsync();
+
+                await conn.ExecuteAsync(
+                    "DELETE FROM order_items WHERE order_id = @OrderId",
+                    new { OrderId = mariaDbOrderId }, tx);
+
+                foreach (var item in items)
+                {
+                    await conn.ExecuteAsync("""
+                        INSERT INTO order_items
+                            (order_id, size_label, media_type, quantity,
+                             image_filename, image_filepath, original_image_filepath,
+                             options_json, is_printed)
+                        VALUES
+                            (@OrderId, @Size, @Media, @Qty,
+                             @Filename, @Filepath, @OrigFilepath,
+                             @Options, @Printed)
+                        """,
+                        new
+                        {
+                            OrderId = mariaDbOrderId,
+                            Size = item.SizeLabel,
+                            Media = item.MediaType,
+                            Qty = item.Quantity,
+                            Filename = item.ImageFilename,
+                            Filepath = item.ImageFilepath,
+                            OrigFilepath = item.OriginalImageFilepath,
+                            Options = item.OptionsJson,
+                            Printed = item.IsPrinted ? 1 : 0,
+                        }, tx);
+                }
+
+                await tx.CommitAsync();
+                return true;
+            }
+            catch (MySqlConnector.MySqlException ex) when (ex.Number == 1213 && attempt < maxRetries)
+            {
+                // Deadlock — wait briefly and retry
+                AppLog.Info($"UpsertOrderItems: deadlock on order {mariaDbOrderId}, retry {attempt}/{maxRetries}");
+                await Task.Delay(100 * attempt);
+            }
+            catch (Exception ex)
+            {
+                AlertCollector.Error(AlertCategory.Database,
+                    "Failed to upsert order items to MariaDB",
+                    detail: $"Attempted: upsert {items.Count} items for MariaDB order {mariaDbOrderId}. " +
+                            $"Expected: items replaced. " +
+                            $"Found: {ex.GetType().Name}. " +
+                            $"Context: sync push (attempt {attempt}/{maxRetries}). " +
+                            $"State: queued in outbox for retry.",
+                    ex: ex);
+                return false;
+            }
+        }
+        return false;
+    }
+
+    public async Task<bool> SetOrderPrintedAsync(int mariaDbOrderId, bool printed)
+    {
+        const string sql = "UPDATE orders SET is_printed = @Val WHERE id = @Id";
         try
         {
             await using var conn = CreateConnection();
-            await conn.OpenAsync();
-            await using var tx = await conn.BeginTransactionAsync();
+            var rows = await conn.ExecuteAsync(sql, new { Val = printed ? 1 : 0, Id = mariaDbOrderId });
+            return rows > 0;
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                $"Failed to set is_printed on MariaDB order {mariaDbOrderId}",
+                detail: $"Attempted: UPDATE orders SET is_printed={printed} WHERE id={mariaDbOrderId}. " +
+                        $"Expected: 1 row updated. " +
+                        $"Found: {ex.GetType().Name}: {ex.Message}. " +
+                        $"Context: sync push create_alteration. " +
+                        $"State: parent order is_printed not updated in MariaDB.",
+                ex: ex);
+            return false;
+        }
+    }
 
-            await conn.ExecuteAsync(
-                "DELETE FROM order_items WHERE order_id = @OrderId",
-                new { OrderId = mariaDbOrderId }, tx);
-
-            foreach (var item in items)
-            {
-                await conn.ExecuteAsync("""
-                    INSERT INTO order_items
-                        (order_id, size_label, media_type, quantity,
-                         image_filename, image_filepath, original_image_filepath,
-                         options_json, is_printed)
-                    VALUES
-                        (@OrderId, @Size, @Media, @Qty,
-                         @Filename, @Filepath, @OrigFilepath,
-                         @Options, @Printed)
-                    """,
-                    new
-                    {
-                        OrderId = mariaDbOrderId,
-                        Size = item.SizeLabel,
-                        Media = item.MediaType,
-                        Qty = item.Quantity,
-                        Filename = item.ImageFilename,
-                        Filepath = item.ImageFilepath,
-                        OrigFilepath = item.OriginalImageFilepath,
-                        Options = item.OptionsJson,
-                        Printed = item.IsPrinted ? 1 : 0,
-                    }, tx);
-            }
-
-            await tx.CommitAsync();
+    public async Task<bool> InsertOrderLinkAsync(int parentId, int childId, string linkType, string createdBy)
+    {
+        const string sql = """
+            INSERT INTO order_links (parent_order_id, child_order_id, link_type, created_by)
+            VALUES (@Parent, @Child, @Type, @By)
+            """;
+        try
+        {
+            await using var conn = CreateConnection();
+            await conn.ExecuteAsync(sql, new { Parent = parentId, Child = childId, Type = linkType, By = createdBy });
             return true;
         }
         catch (Exception ex)
         {
             AlertCollector.Error(AlertCategory.Database,
-                "Failed to upsert order items to MariaDB",
-                detail: $"Attempted: upsert {items.Count} items for MariaDB order {mariaDbOrderId}. " +
-                        $"Expected: items replaced. " +
-                        $"Found: {ex.GetType().Name}. " +
-                        $"Context: sync push. " +
-                        $"State: queued in outbox for retry.",
+                $"Failed to insert order_link in MariaDB ({linkType}: {parentId} → {childId})",
+                detail: $"Attempted: INSERT order_links parent={parentId} child={childId} type={linkType}. " +
+                        $"Expected: row inserted. " +
+                        $"Found: {ex.GetType().Name}: {ex.Message}. " +
+                        $"Context: sync push create_alteration. " +
+                        $"State: order_links row missing in MariaDB.",
                 ex: ex);
             return false;
         }
