@@ -102,13 +102,13 @@ public class SyncService : ISyncService
             case "set_items_printed":
             {
                 var orderId = payload["orderId"].GetInt32();
-                var itemIds = payload["itemIds"].Deserialize<List<int>>()!;
                 var remoteId = await ResolveRemoteOrderIdAsync(orderId);
                 if (remoteId == null) return false;
-                // Mark each item as printed — need to push full item state
-                foreach (var localItemId in itemIds)
-                    await _remoteDb.UpdateItemPrintedAsync(localItemId, DateTime.Now);
-                return true;
+                // Re-push all items for this order with current is_printed state
+                using var conn = _localDb.OpenConnection();
+                var items = ReadLocalItems(conn, orderId);
+                if (items.Count == 0) return true;
+                return await _remoteDb.UpsertOrderItemsAsync(remoteId.Value, items);
             }
 
             case "set_current_location":
@@ -121,10 +121,36 @@ public class SyncService : ISyncService
             {
                 var orderId = payload["orderId"].GetInt32();
                 var note = payload["note"].GetString()!;
-                var createdBy = payload.TryGetValue("createdBy", out var cb) ? cb.GetString() : "";
                 var remoteId = await ResolveRemoteOrderIdAsync(orderId);
                 if (remoteId == null) return false;
-                return await _remoteDb.AddNoteAsync(remoteId.Value, null, note);
+                var mariaDbNoteId = await _remoteDb.AddNoteAsync(remoteId.Value, null, note);
+                if (mariaDbNoteId <= 0) return false;
+
+                // Set remote_id on the local note so sync pull won't duplicate it.
+                // This is best-effort — if it fails, the note is already in MariaDB
+                // and we must return true to prevent re-pushing.
+                try
+                {
+                    using var conn = _localDb.OpenConnection();
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = """
+                        UPDATE order_history SET remote_id = @rid
+                        WHERE id = (
+                            SELECT id FROM order_history
+                            WHERE order_id = @oid AND note = @note AND remote_id IS NULL
+                            ORDER BY id DESC LIMIT 1
+                        )
+                        """;
+                    cmd.Parameters.AddWithValue("@rid", mariaDbNoteId);
+                    cmd.Parameters.AddWithValue("@oid", orderId);
+                    cmd.Parameters.AddWithValue("@note", note);
+                    cmd.ExecuteNonQuery();
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Info($"SyncPush: failed to set remote_id on local note: {ex.Message}");
+                }
+                return true;
             }
 
             case "create_alteration":
@@ -198,6 +224,7 @@ public class SyncService : ISyncService
         {
             var itemResult = await _remoteDb.UpsertOrderItemsAsync(remoteId, items);
             AppLog.Info($"SyncPush: items push result={itemResult} for order {externalOrderId}");
+            if (!itemResult) return false;
         }
 
         return true;
@@ -230,13 +257,17 @@ public class SyncService : ISyncService
             pCmd.CommandText = "SELECT is_printed FROM orders WHERE id = @id";
             pCmd.Parameters.AddWithValue("@id", localParentId);
             var parentPrinted = Convert.ToInt32(pCmd.ExecuteScalar()) == 1;
-            await _remoteDb.SetOrderPrintedAsync(parentRemoteId.Value, parentPrinted);
+            if (!await _remoteDb.SetOrderPrintedAsync(parentRemoteId.Value, parentPrinted))
+                return false;
         }
 
         // 3. Insert order_links row in MariaDB
         var childRemoteId = await ResolveRemoteOrderIdAsync(localChildId);
         if (parentRemoteId.HasValue && childRemoteId.HasValue)
-            await _remoteDb.InsertOrderLinkAsync(parentRemoteId.Value, childRemoteId.Value, alterationType, "");
+        {
+            if (!await _remoteDb.InsertOrderLinkAsync(parentRemoteId.Value, childRemoteId.Value, alterationType, ""))
+                return false;
+        }
 
         AppLog.Info($"SyncPush: create_alteration complete — child {localChildId} (remote={childRemoteId}), parent {localParentId} (remote={parentRemoteId})");
         return true;

@@ -372,18 +372,19 @@ public class PrintStationDb
     }
 
     /// <summary>Add a note to an order.</summary>
-    public async Task<bool> AddNoteAsync(int orderId, int? employeeId, string noteText, string noteType = "general")
+    public async Task<int> AddNoteAsync(int orderId, int? employeeId, string noteText, string noteType = "general")
     {
         const string sql = """
             INSERT INTO order_notes (order_id, employee_id, note_text, note_type)
-            VALUES (@OrderId, @EmployeeId, @NoteText, @NoteType)
+            VALUES (@OrderId, @EmployeeId, @NoteText, @NoteType);
+            SELECT LAST_INSERT_ID();
             """;
 
         try
         {
             await using var conn = CreateConnection();
-            await conn.ExecuteAsync(sql, new { OrderId = orderId, EmployeeId = employeeId, NoteText = noteText, NoteType = noteType });
-            return true;
+            var id = await conn.ExecuteScalarAsync<int>(sql, new { OrderId = orderId, EmployeeId = employeeId, NoteText = noteText, NoteType = noteType });
+            return id;
         }
         catch (Exception ex)
         {
@@ -391,7 +392,7 @@ public class PrintStationDb
                 "Failed to add order note",
                 detail: $"Attempted: INSERT note on order {orderId}. Found: exception.",
                 ex: ex);
-            return false;
+            return 0;
         }
     }
 

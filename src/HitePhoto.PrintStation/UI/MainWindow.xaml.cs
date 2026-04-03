@@ -210,8 +210,9 @@ public partial class MainWindow : Window
         Application.Current.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = themeUri });
 
         DevModeText.Visibility = _settings.DeveloperMode ? Visibility.Visible : Visibility.Collapsed;
-        var devTag = _settings.DeveloperMode ? " [DEV MODE]" : "";
-        Title = $"HitePhoto Print Station — build {BuildInfo.BuildTimestamp}{devTag}";
+        var storeName = _vm.GetLocalStoreName();
+        var devTag = _settings.DeveloperMode ? " [DEV]" : "";
+        Title = $"HitePhoto Print Station — {storeName}{devTag}";
     }
 
     // ══════════════════════════════════════════════════════════════════════

@@ -481,7 +481,7 @@ public class TransferService : ITransferService
         foreach (var dir in Directory.GetDirectories(localPath))
         {
             var name = Path.GetFileName(dir);
-            if (name is "metadata") continue;
+            if (name is "metadata" or "prints") continue;
             folders.Add(name);
         }
         return folders;
