@@ -1,11 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using HitePhoto.PrintStation.Core;
-using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Data.Sync;
 
@@ -214,15 +212,12 @@ public class SyncService : ISyncService
 
         if (string.IsNullOrEmpty(remoteId)) return false;
 
-        // Cache the id mapping
-        _outbox.SetIdMapping("orders", localOrderId, remoteId);
-
-        // Push items
+        // Push items — with GUIDs, localOrderId == remoteId
         var items = ReadLocalItems(conn, localOrderId);
-        AppLog.Info($"SyncPush: order {externalOrderId} (local={localOrderId}, remote={remoteId}), {items.Count} items to push");
+        AppLog.Info($"SyncPush: order {externalOrderId} ({localOrderId}), {items.Count} items to push");
         if (items.Count > 0)
         {
-            var itemResult = await _remoteDb.UpsertOrderItemsAsync(remoteId, items);
+            var itemResult = await _remoteDb.UpsertOrderItemsAsync(localOrderId, items);
             AppLog.Info($"SyncPush: items push result={itemResult} for order {externalOrderId}");
             if (!itemResult) return false;
         }
@@ -269,7 +264,7 @@ public class SyncService : ISyncService
                 return false;
         }
 
-        AppLog.Info($"SyncPush: create_alteration complete — child {localChildId} (remote={childRemoteId}), parent {localParentId} (remote={parentRemoteId})");
+        AppLog.Info($"SyncPush: create_alteration complete — child {localChildId}, parent {localParentId}");
         return true;
     }
 
@@ -327,20 +322,14 @@ public class SyncService : ISyncService
                     var pickupStoreId = (int)row.pickup_store_id;
                     var mariaDbOrderId = Convert.ToString(row.id)!;
 
-                    // Check if this order has pending outbox entries — skip if so
-                    var localId = FindLocalOrderId(externalOrderId, pickupStoreId);
-                    if (localId != null && pendingOrderIds.Contains(localId))
+                    // With GUIDs, mariaDbOrderId == local order ID
+                    if (pendingOrderIds.Contains(mariaDbOrderId))
                         continue;
 
-                    UpsertLocalOrder(row, localId);
-
-                    // Update id_map
-                    var newLocalId = FindLocalOrderId(externalOrderId, pickupStoreId);
-                    if (newLocalId != null)
-                    {
-                        _outbox.SetIdMapping("orders", newLocalId, mariaDbOrderId);
-                        pulledMariaDbOrderIds.Add(mariaDbOrderId);
-                    }
+                    // Check if order already exists locally
+                    var existingLocalId = FindLocalOrderId(externalOrderId, pickupStoreId);
+                    UpsertLocalOrder(row, existingLocalId);
+                    pulledMariaDbOrderIds.Add(mariaDbOrderId);
                 }
                 catch (Exception ex)
                 {
@@ -606,9 +595,8 @@ public class SyncService : ISyncService
 
     private void UpsertLocalItem(dynamic item)
     {
-        string mariaDbOrderId = Convert.ToString(item.order_id)!;
-        var localOrderId = _outbox.GetLocalId("orders", mariaDbOrderId);
-        if (localOrderId == null) return; // can't map this item
+        // With GUIDs, MariaDB order_id == local order_id
+        string localOrderId = Convert.ToString(item.order_id)!;
 
         string sizeLabel = (string?)item.size_label ?? "";
         string mediaType = (string?)item.media_type ?? "";
@@ -700,13 +688,12 @@ public class SyncService : ISyncService
     private void InsertRemoteNote(dynamic note)
     {
         string mariaDbNoteId = Convert.ToString(note.id)!;
-        string mariaDbOrderId = Convert.ToString(note.order_id)!;
-        var localOrderId = _outbox.GetLocalId("orders", mariaDbOrderId);
-        if (localOrderId == null) return;
+        // With GUIDs, MariaDB order_id == local order_id
+        string localOrderId = Convert.ToString(note.order_id)!;
 
         using var conn = _localDb.OpenConnection();
 
-        // Verify the local order still exists (id_map can outlive deleted orders)
+        // Verify the local order still exists
         using var existsCmd = conn.CreateCommand();
         existsCmd.CommandText = "SELECT COUNT(*) FROM orders WHERE id = @id";
         existsCmd.Parameters.AddWithValue("@id", localOrderId);
@@ -806,49 +793,36 @@ public class SyncService : ISyncService
         return Convert.ToInt32(result) == _settings.StoreId;
     }
 
-    private async Task<string?> ResolveRemoteOrderIdAsync(string localOrderId)
+    /// <summary>With GUIDs, local ID == remote ID. Just verify the order exists locally.</summary>
+    private Task<string?> ResolveRemoteOrderIdAsync(string localOrderId)
     {
-        // Check cache first
-        var cached = _outbox.GetRemoteId("orders", localOrderId);
-        if (cached != null) return cached;
-
-        // Look up by natural key
         using var conn = _localDb.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT external_order_id, pickup_store_id FROM orders WHERE id = @id";
+        cmd.CommandText = "SELECT COUNT(*) FROM orders WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", localOrderId);
-        using var reader = cmd.ExecuteReader();
-        if (!reader.Read()) return null;
-        var eid = reader.GetString(0);
-        var store = reader.GetInt32(1);
-        reader.Close();
-
-        var remoteId = await _remoteDb.FindOrderIdByNaturalKeyAsync(eid, store);
-        if (remoteId != null)
-            _outbox.SetIdMapping("orders", localOrderId, remoteId);
-
-        return remoteId;
+        var exists = Convert.ToInt32(cmd.ExecuteScalar()) > 0;
+        return Task.FromResult(exists ? (string?)localOrderId : null);
     }
 
     private void AddOrdersMissingItems(List<string> mariaDbOrderIds)
     {
         using var conn = _localDb.OpenConnection();
         using var cmd = conn.CreateCommand();
-        // Find orders that have an id_map entry but 0 local items
+        // Find orders with 0 local items (missed on prior pull).
+        // With GUIDs, local order ID == MariaDB order ID.
         cmd.CommandText = """
-            SELECT m.remote_id FROM id_map m
-            WHERE m.table_name = 'orders'
-              AND NOT EXISTS (
-                  SELECT 1 FROM order_items i WHERE i.order_id = m.local_id
-              )
+            SELECT o.id FROM orders o
+            WHERE NOT EXISTS (
+                SELECT 1 FROM order_items i WHERE i.order_id = o.id
+            )
             LIMIT 100
             """;
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var remoteId = reader.GetString(0);
-            if (!mariaDbOrderIds.Contains(remoteId))
-                mariaDbOrderIds.Add(remoteId);
+            var orderId = reader.GetString(0);
+            if (!mariaDbOrderIds.Contains(orderId))
+                mariaDbOrderIds.Add(orderId);
         }
     }
 

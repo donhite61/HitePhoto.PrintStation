@@ -948,27 +948,4 @@ public class PrintStationDb
         }
     }
 
-    /// <summary>Find MariaDB order ID by natural key.</summary>
-    public async Task<string?> FindOrderIdByNaturalKeyAsync(string externalOrderId, int pickupStoreId)
-    {
-        const string sql = "SELECT id FROM orders WHERE external_order_id = @Eid AND pickup_store_id = @Store";
-
-        try
-        {
-            await using var conn = CreateConnection();
-            return await conn.ExecuteScalarAsync<string?>(sql, new { Eid = externalOrderId, Store = pickupStoreId });
-        }
-        catch (Exception ex)
-        {
-            AlertCollector.Error(AlertCategory.Database,
-                "Failed to lookup MariaDB order ID",
-                detail: $"Attempted: find order '{externalOrderId}' store {pickupStoreId}. " +
-                        $"Expected: MariaDB order id. " +
-                        $"Found: {ex.GetType().Name}. " +
-                        $"Context: id_map population. " +
-                        $"State: push will be queued in outbox.",
-                ex: ex);
-            return null;
-        }
-    }
 }

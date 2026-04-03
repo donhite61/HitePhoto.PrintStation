@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Microsoft.Data.Sqlite;
 using HitePhoto.PrintStation.Core;
 
 namespace HitePhoto.PrintStation.Data.Sync;
@@ -130,52 +129,4 @@ public class OutboxRepository
         cmd.ExecuteNonQuery();
     }
 
-    // ── ID map ──────────────────────────────────────────────────────────
-
-    public string? GetRemoteId(string tableName, string localId)
-    {
-        using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT remote_id FROM id_map
-            WHERE table_name = @table AND local_id = @local
-            """;
-        cmd.Parameters.AddWithValue("@table", tableName);
-        cmd.Parameters.AddWithValue("@local", localId);
-        var result = cmd.ExecuteScalar();
-        if (result is string s)
-            return s;
-        return null;
-    }
-
-    public string? GetLocalId(string tableName, string remoteId)
-    {
-        using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT local_id FROM id_map
-            WHERE table_name = @table AND remote_id = @remote
-            """;
-        cmd.Parameters.AddWithValue("@table", tableName);
-        cmd.Parameters.AddWithValue("@remote", remoteId);
-        var result = cmd.ExecuteScalar();
-        if (result is string s)
-            return s;
-        return null;
-    }
-
-    public void SetIdMapping(string tableName, string localId, string remoteId)
-    {
-        using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO id_map (table_name, local_id, remote_id)
-            VALUES (@table, @local, @remote)
-            ON CONFLICT(table_name, local_id) DO UPDATE SET remote_id = @remote
-            """;
-        cmd.Parameters.AddWithValue("@table", tableName);
-        cmd.Parameters.AddWithValue("@local", localId);
-        cmd.Parameters.AddWithValue("@remote", remoteId);
-        cmd.ExecuteNonQuery();
-    }
 }

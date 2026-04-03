@@ -614,16 +614,10 @@ public class OrderDb
             );
             """);
 
-        // Migration 007: Sync infrastructure — remote_id on order_history + id_map table
+        // Migration 007: Sync infrastructure — remote_id on order_history
         AddColumnIfMissing(conn, "order_history", "remote_id", "INTEGER DEFAULT NULL");
-        Execute(conn, """
-            CREATE TABLE IF NOT EXISTS id_map (
-                table_name TEXT NOT NULL,
-                local_id   TEXT NOT NULL,
-                remote_id  TEXT NOT NULL,
-                PRIMARY KEY (table_name, local_id)
-            );
-            """);
+        // id_map table removed — GUIDs make local_id == remote_id
+        Execute(conn, "DROP TABLE IF EXISTS id_map;");
 
         // Migration 008: delivery_method_id + shipping fields on orders
         AddColumnIfMissing(conn, "orders", "delivery_method_id", "INTEGER NOT NULL DEFAULT 1");
