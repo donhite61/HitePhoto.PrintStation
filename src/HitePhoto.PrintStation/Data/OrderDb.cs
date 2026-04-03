@@ -615,7 +615,7 @@ public class OrderDb
             """);
 
         // Migration 007: Sync infrastructure — remote_id on order_history
-        AddColumnIfMissing(conn, "order_history", "remote_id", "INTEGER DEFAULT NULL");
+        AddColumnIfMissing(conn, "order_history", "remote_id", "TEXT DEFAULT NULL");
         // id_map table removed — GUIDs make local_id == remote_id
         Execute(conn, "DROP TABLE IF EXISTS id_map;");
 
@@ -706,6 +706,21 @@ public class OrderDb
         // Wipe DB to apply cleanly — verify re-ingests with correct store ID.
         DropColumnIfExists(conn, "orders", "files_local");
         DropColumnIfExists(conn, "orders", "is_local_order");
+
+        // Migration 019: remote_id on order_history changed from INTEGER to TEXT (GUIDs).
+        RunOnce(conn, "019_fix_history_remote_id_type", """
+            CREATE TABLE order_history_new (
+                id         TEXT PRIMARY KEY,
+                order_id   TEXT NOT NULL REFERENCES orders(id),
+                note       TEXT NOT NULL,
+                created_by TEXT DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                remote_id  TEXT DEFAULT NULL
+            );
+            INSERT INTO order_history_new SELECT id, order_id, note, created_by, created_at, remote_id FROM order_history;
+            DROP TABLE order_history;
+            ALTER TABLE order_history_new RENAME TO order_history;
+            """);
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)
