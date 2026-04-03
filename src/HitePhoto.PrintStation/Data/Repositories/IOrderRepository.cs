@@ -14,6 +14,7 @@ public interface IOrderRepository
     void SetNotified(string orderId);
     void SetCurrentLocation(string orderId, int storeId);
     void SetItemsPrinted(List<string> itemIds);
+    string? GetOrderIdForItem(string itemId);
     string GetStoreName(int storeId);
 
     /// <summary>

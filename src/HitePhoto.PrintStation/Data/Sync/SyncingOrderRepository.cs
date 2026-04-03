@@ -54,13 +54,17 @@ public class SyncingOrderRepository : IOrderRepository
         _ = Task.Run(() => _sync.PushAsync("orders", orderId, "set_current_location", payload));
     }
 
+    public string? GetOrderIdForItem(string itemId) => _inner.GetOrderIdForItem(itemId);
+
     public void SetItemsPrinted(List<string> itemIds)
     {
         _inner.SetItemsPrinted(itemIds);
         if (itemIds.Count == 0) return;
-        // Need the order ID for the push — get it from the first item
-        var payload = JsonSerializer.Serialize(new { orderId = (string?)null, itemIds });
-        _ = Task.Run(() => _sync.PushAsync("order_items", "", "set_items_printed", payload));
+        // Look up the order ID from the first item
+        var orderId = _inner.GetOrderIdForItem(itemIds[0]);
+        if (string.IsNullOrEmpty(orderId)) return; // orphan items — nothing to push
+        var payload = JsonSerializer.Serialize(new { orderId, itemIds });
+        _ = Task.Run(() => _sync.PushAsync("order_items", orderId, "set_items_printed", payload));
     }
 
     public void UpdateOrderStatus(string orderId, string statusCode)

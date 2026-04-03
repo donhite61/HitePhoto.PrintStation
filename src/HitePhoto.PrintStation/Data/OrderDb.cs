@@ -149,6 +149,10 @@ public class OrderDb
             transaction.Commit();
 
             AppLog.Info($"OrderDb initialized at {_dbPath}");
+
+            // Migration 020 must run outside the transaction — it disables FK checks
+            // and recreates tables, which SQLite can't do inside a transaction with FKs on.
+            MigrateToGuidPrimaryKeys(conn);
         }
         catch (Exception ex)
         {
@@ -721,6 +725,248 @@ public class OrderDb
             DROP TABLE order_history;
             ALTER TABLE order_history_new RENAME TO order_history;
             """);
+
+    }
+
+    private static void MigrateToGuidPrimaryKeys(SqliteConnection conn)
+    {
+        // Check if migration already applied
+        Execute(conn, "CREATE TABLE IF NOT EXISTS migrations_applied (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))");
+        using (var check = conn.CreateCommand())
+        {
+            check.CommandText = "SELECT 1 FROM migrations_applied WHERE id = '020_guid_primary_keys'";
+            if (check.ExecuteScalar() != null) return;
+        }
+
+        // Check if orders.id is already TEXT — skip if so (fresh database)
+        bool alreadyText = false;
+        using (var pragma = conn.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA table_info(orders)";
+            using var reader = pragma.ExecuteReader();
+            while (reader.Read())
+            {
+                if (reader.GetString(1) == "id" && reader.GetString(2).Equals("TEXT", StringComparison.OrdinalIgnoreCase))
+                { alreadyText = true; break; }
+            }
+        }
+
+        if (alreadyText)
+        {
+            Execute(conn, "INSERT INTO migrations_applied (id) VALUES ('020_guid_primary_keys')");
+            return;
+        }
+
+        // Disable FK checks — we're recreating tables with new PKs
+        Execute(conn, "PRAGMA foreign_keys = OFF");
+        AppLog.Info("Migration 020: Converting INTEGER PKs to TEXT GUIDs...");
+
+        // Build old→new ID maps for orders and items
+        var orderIdMap = new Dictionary<string, string>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id FROM orders";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+                orderIdMap[reader.GetValue(0).ToString()!] = Guid.NewGuid().ToString();
+        }
+
+        var itemIdMap = new Dictionary<string, string>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id FROM order_items";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+                itemIdMap[reader.GetValue(0).ToString()!] = Guid.NewGuid().ToString();
+        }
+
+        var historyIdMap = new Dictionary<string, string>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id FROM order_history";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+                historyIdMap[reader.GetValue(0).ToString()!] = Guid.NewGuid().ToString();
+        }
+
+        // ── Recreate order_item_options (depends on order_items) ──
+        Execute(conn, "DROP TABLE IF EXISTS order_item_options");
+
+        // ── Recreate order_items ──
+        Execute(conn, """
+            CREATE TABLE order_items_new (
+                id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id),
+                size_label TEXT NOT NULL, media_type TEXT DEFAULT '', category TEXT DEFAULT '', sub_category TEXT DEFAULT '',
+                quantity INTEGER NOT NULL DEFAULT 1, image_filename TEXT DEFAULT '', image_filepath TEXT DEFAULT '',
+                original_image_filepath TEXT DEFAULT '', options_json TEXT DEFAULT '[]',
+                is_noritsu INTEGER NOT NULL DEFAULT 1, is_printed INTEGER NOT NULL DEFAULT 0, is_test INTEGER NOT NULL DEFAULT 0,
+                service_id INTEGER DEFAULT NULL, fulfillment_vendor_id INTEGER DEFAULT NULL,
+                fulfillment_status TEXT DEFAULT 'pending', sent_at TEXT DEFAULT NULL, sent_by TEXT DEFAULT NULL,
+                due_at TEXT DEFAULT NULL, received_at TEXT DEFAULT NULL, match_key TEXT DEFAULT NULL,
+                files_expected INTEGER DEFAULT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """);
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT * FROM order_items";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var oldId = reader.GetValue(reader.GetOrdinal("id")).ToString()!;
+                var oldOrderId = reader.GetValue(reader.GetOrdinal("order_id")).ToString()!;
+                if (!itemIdMap.TryGetValue(oldId, out var newId)) continue;
+                if (!orderIdMap.TryGetValue(oldOrderId, out var newOrderId)) continue;
+
+                using var ins = conn.CreateCommand();
+                ins.CommandText = """
+                    INSERT INTO order_items_new (id, order_id, size_label, media_type, category, sub_category,
+                        quantity, image_filename, image_filepath, original_image_filepath, options_json,
+                        is_noritsu, is_printed, is_test, service_id, fulfillment_vendor_id,
+                        fulfillment_status, sent_at, sent_by, due_at, received_at, match_key, files_expected,
+                        created_at, updated_at)
+                    SELECT @newId, @newOrderId, size_label, media_type, category, sub_category,
+                        quantity, image_filename, image_filepath, original_image_filepath, options_json,
+                        is_noritsu, is_printed, is_test, service_id, fulfillment_vendor_id,
+                        fulfillment_status, sent_at, sent_by, due_at, received_at, match_key, files_expected,
+                        created_at, updated_at
+                    FROM order_items WHERE id = @oldId
+                    """;
+                ins.Parameters.AddWithValue("@newId", newId);
+                ins.Parameters.AddWithValue("@newOrderId", newOrderId);
+                ins.Parameters.AddWithValue("@oldId", oldId);
+                ins.ExecuteNonQuery();
+            }
+        }
+
+        Execute(conn, "DROP TABLE order_items");
+        Execute(conn, "ALTER TABLE order_items_new RENAME TO order_items");
+
+        // ── Recreate order_history ──
+        Execute(conn, """
+            CREATE TABLE order_history_new2 (
+                id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id),
+                note TEXT NOT NULL, created_by TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                remote_id TEXT DEFAULT NULL
+            )
+            """);
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT * FROM order_history";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var oldId = reader.GetValue(reader.GetOrdinal("id")).ToString()!;
+                var oldOrderId = reader.GetValue(reader.GetOrdinal("order_id")).ToString()!;
+                if (!historyIdMap.TryGetValue(oldId, out var newId)) newId = Guid.NewGuid().ToString();
+                if (!orderIdMap.TryGetValue(oldOrderId, out var newOrderId)) continue;
+
+                using var ins = conn.CreateCommand();
+                ins.CommandText = """
+                    INSERT INTO order_history_new2 (id, order_id, note, created_by, created_at, remote_id)
+                    SELECT @newId, @newOrderId, note, created_by, created_at, remote_id
+                    FROM order_history WHERE id = @oldId
+                    """;
+                ins.Parameters.AddWithValue("@newId", newId);
+                ins.Parameters.AddWithValue("@newOrderId", newOrderId);
+                ins.Parameters.AddWithValue("@oldId", oldId);
+                ins.ExecuteNonQuery();
+            }
+        }
+
+        Execute(conn, "DROP TABLE order_history");
+        Execute(conn, "ALTER TABLE order_history_new2 RENAME TO order_history");
+
+        // ── Recreate orders (last — items/history already migrated) ──
+        Execute(conn, """
+            CREATE TABLE orders_new (
+                id TEXT PRIMARY KEY, external_order_id TEXT NOT NULL, order_source_id INTEGER NOT NULL DEFAULT 1,
+                source_code TEXT NOT NULL DEFAULT '', customer_first_name TEXT DEFAULT '', customer_last_name TEXT DEFAULT '',
+                customer_email TEXT DEFAULT '', customer_phone TEXT DEFAULT '', order_status_id INTEGER NOT NULL DEFAULT 1,
+                status_code TEXT NOT NULL DEFAULT 'new', is_held INTEGER NOT NULL DEFAULT 0, hold_reason TEXT DEFAULT NULL,
+                pickup_store_id INTEGER NOT NULL, current_location_store_id INTEGER, harvested_by_store_id INTEGER NOT NULL DEFAULT 0,
+                total_amount REAL DEFAULT 0, payment_status TEXT DEFAULT '', special_instructions TEXT DEFAULT '',
+                order_type TEXT DEFAULT '', is_rush INTEGER NOT NULL DEFAULT 0, is_test INTEGER NOT NULL DEFAULT 0,
+                ordered_at TEXT NOT NULL, folder_path TEXT DEFAULT '', download_status TEXT DEFAULT 'pending',
+                delivery_method_id INTEGER NOT NULL DEFAULT 1,
+                shipping_first_name TEXT NOT NULL DEFAULT '', shipping_last_name TEXT NOT NULL DEFAULT '',
+                shipping_address1 TEXT DEFAULT NULL, shipping_address2 TEXT DEFAULT NULL,
+                shipping_city TEXT DEFAULT NULL, shipping_state TEXT DEFAULT NULL, shipping_zip TEXT DEFAULT NULL,
+                shipping_country TEXT DEFAULT NULL, shipping_method TEXT DEFAULT NULL,
+                is_transfer INTEGER NOT NULL DEFAULT 0, transfer_store_id INTEGER DEFAULT NULL,
+                pixfizz_job_id TEXT DEFAULT NULL, is_received_pushed INTEGER NOT NULL DEFAULT 0,
+                is_notified INTEGER NOT NULL DEFAULT 0, notified_at TEXT DEFAULT NULL,
+                is_printed INTEGER NOT NULL DEFAULT 0,
+                supersedes TEXT DEFAULT NULL, alteration_type TEXT DEFAULT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(external_order_id, pickup_store_id)
+            )
+            """);
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT * FROM orders";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var oldId = reader.GetValue(reader.GetOrdinal("id")).ToString()!;
+                if (!orderIdMap.TryGetValue(oldId, out var newId)) continue;
+
+                using var ins = conn.CreateCommand();
+                ins.CommandText = """
+                    INSERT INTO orders_new (id, external_order_id, order_source_id, source_code,
+                        customer_first_name, customer_last_name, customer_email, customer_phone,
+                        order_status_id, status_code, is_held, hold_reason,
+                        pickup_store_id, current_location_store_id, harvested_by_store_id,
+                        total_amount, payment_status, special_instructions,
+                        order_type, is_rush, is_test, ordered_at, folder_path, download_status,
+                        delivery_method_id, shipping_first_name, shipping_last_name,
+                        shipping_address1, shipping_address2, shipping_city,
+                        shipping_state, shipping_zip, shipping_country, shipping_method,
+                        is_transfer, transfer_store_id, pixfizz_job_id, is_received_pushed,
+                        is_notified, notified_at, is_printed,
+                        supersedes, alteration_type,
+                        created_at, updated_at)
+                    SELECT @newId, external_order_id, order_source_id, source_code,
+                        customer_first_name, customer_last_name, customer_email, customer_phone,
+                        order_status_id, status_code, is_held, hold_reason,
+                        pickup_store_id, current_location_store_id, harvested_by_store_id,
+                        total_amount, payment_status, special_instructions,
+                        order_type, is_rush, is_test, ordered_at, folder_path, download_status,
+                        delivery_method_id, shipping_first_name, shipping_last_name,
+                        shipping_address1, shipping_address2, shipping_city,
+                        shipping_state, shipping_zip, shipping_country, shipping_method,
+                        is_transfer, transfer_store_id, pixfizz_job_id, is_received_pushed,
+                        is_notified, notified_at, is_printed,
+                        supersedes, alteration_type,
+                        created_at, updated_at
+                    FROM orders WHERE id = @oldId
+                    """;
+                ins.Parameters.AddWithValue("@newId", newId);
+                ins.Parameters.AddWithValue("@oldId", oldId);
+                ins.ExecuteNonQuery();
+            }
+        }
+
+        Execute(conn, "DROP TABLE orders");
+        Execute(conn, "ALTER TABLE orders_new RENAME TO orders");
+
+        // Recreate empty order_item_options
+        Execute(conn, """
+            CREATE TABLE IF NOT EXISTS order_item_options (
+                id TEXT PRIMARY KEY, order_item_id TEXT NOT NULL REFERENCES order_items(id),
+                option_key TEXT NOT NULL, option_value TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """);
+
+        Execute(conn, "INSERT INTO migrations_applied (id) VALUES ('020_guid_primary_keys')");
+
+        // Re-enable FK checks
+        Execute(conn, "PRAGMA foreign_keys = ON");
+        AppLog.Info($"Migration 020 complete: migrated {orderIdMap.Count} orders, {itemIdMap.Count} items, {historyIdMap.Count} history records to TEXT GUIDs");
     }
 
     private static void DropColumnIfExists(SqliteConnection conn, string table, string column)

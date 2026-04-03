@@ -629,6 +629,8 @@
                         <Label Content="From email address" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
                         <TextBox x:Name="EmailFromBox" Margin="0,0,0,16"/>
 
+                        <Button Content="Load Defaults" Width="110" HorizontalAlignment="Left" Margin="0,0,0,16" Click="LoadEmailDefaults_Click"/>
+
                         <!-- Test -->
                         <TextBlock Text="Test" Foreground="{DynamicResource TextHeading}"
                                    FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>

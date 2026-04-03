@@ -457,6 +457,15 @@ public partial class SettingsWindow : Window
             ?? _editableTemplates.FirstOrDefault();
     }
 
+    private void LoadEmailDefaults_Click(object sender, RoutedEventArgs e)
+    {
+        SmtpHostBox.Text = "mail.hitephoto.com";
+        SmtpPortBox.Text = "465";
+        SmtpUserBox.Text = "noreply@hitephoto.com";
+        SmtpPassBox.Password = "Hite1985?";
+        EmailFromBox.Text = "noreply@hitephoto.com";
+    }
+
     private async void SendTestEmail_Click(object sender, RoutedEventArgs e)
     {
         var testAddress = TestEmailBox.Text.Trim();

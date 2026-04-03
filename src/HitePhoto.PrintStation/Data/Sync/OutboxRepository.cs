@@ -83,6 +83,16 @@ public class OutboxRepository
         cmd.ExecuteNonQuery();
     }
 
+    public void PurgeBrokenEntries()
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM sync_outbox WHERE pushed_at IS NULL AND (record_id IS NULL OR record_id = '')";
+        var deleted = cmd.ExecuteNonQuery();
+        if (deleted > 0)
+            AppLog.Info($"Purged {deleted} broken outbox entries (empty record_id)");
+    }
+
     public void PurgePushed(int daysOld = 7)
     {
         using var conn = _db.OpenConnection();

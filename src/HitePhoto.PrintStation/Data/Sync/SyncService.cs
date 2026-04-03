@@ -733,6 +733,9 @@ public class SyncService : ISyncService
     {
         try
         {
+            // Purge broken entries (empty record_id) that would retry forever
+            _outbox.PurgeBrokenEntries();
+
             var pending = _outbox.GetPending();
             foreach (var entry in pending)
             {

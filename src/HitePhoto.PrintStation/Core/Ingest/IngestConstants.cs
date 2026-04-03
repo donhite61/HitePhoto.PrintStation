@@ -36,7 +36,6 @@ public static class IngestConstants
     /// <summary>Resolves the order folder path from an external order ID and output root.</summary>
     public static string GetOrderFolderPath(string outputRoot, string externalOrderId)
     {
-        var shortId = OrderHelpers.GetShortId(externalOrderId);
-        return Path.Combine(outputRoot, SanitizeFolderName(shortId));
+        return Path.Combine(outputRoot, SanitizeFolderName(externalOrderId));
     }
 }

@@ -103,7 +103,7 @@ public class AppSettings
 
     // ── NAS / Auto-update ──
     public string NasRootFolder       { get; set; } = "";
-    public string NasLogFolder        { get; set; } = "";
+    public string NasLogFolder        { get; set; } = @"S:\EMPLOYEES SAVE!!!\Don\StoreManagementSoftware\logs\PrintStation\WB";
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string UpdateLocalFolder => NasRootFolder;

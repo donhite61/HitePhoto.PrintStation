@@ -202,6 +202,15 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
+    public string? GetOrderIdForItem(string itemId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT order_id FROM order_items WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", itemId);
+        return cmd.ExecuteScalar() as string;
+    }
+
     public string GetStoreName(int storeId)
     {
         using var conn = _db.OpenConnection();

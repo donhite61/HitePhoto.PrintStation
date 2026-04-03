@@ -7,8 +7,8 @@ namespace HitePhoto.PrintStation.Core.Processing;
 /// <summary>
 /// Writes AUTPRINT.MRK files in the exact Noritsu AUTOPRINT format.
 ///
-/// Output folder naming: o{shortId}_{sizeLabel}
-///   e.g. order HITEPHOTO-6UWRZk, size 4x6 → folder "o6UWRZk_4x6"
+/// Output folder naming: o{externalOrderId}_{sizeLabel}
+///   e.g. order 6UWRZk, size 4x6 → folder "o6UWRZk_4x6"
 ///
 /// Staging: folder is created with "p" prefix during file writes,
 /// then renamed to "o" prefix atomically when complete.
@@ -40,8 +40,7 @@ public class NoritsuMrkWriter
             throw new InvalidOperationException(
                 $"Channel not assigned for {sizeLabel} in order {order.ExternalOrderId}");
 
-        string shortId = OrderHelpers.GetShortId(order.ExternalOrderId);
-        string baseName = $"{shortId}_{SanitizeFolderName(sizeLabel)}";
+        string baseName = $"{order.ExternalOrderId}_{SanitizeFolderName(sizeLabel)}";
         var (stagingDir, finalDir) = ResolveFolderPair(baseName);
         string miscDir = Path.Combine(stagingDir, "MISC");
 
@@ -92,7 +91,7 @@ public class NoritsuMrkWriter
         }
 
         string mrkPath = Path.Combine(miscDir, "AUTPRINT.MRK");
-        WriteMrkFile(mrkPath, shortId, sizeLabel, channelNumber, imageEntries);
+        WriteMrkFile(mrkPath, order.ExternalOrderId, sizeLabel, channelNumber, imageEntries);
 
         // Atomic rename: p → o signals the Noritsu that the folder is complete
         Directory.Move(stagingDir, finalDir);

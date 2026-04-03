@@ -152,7 +152,7 @@ public class OrderTreeItem : INotifyPropertyChanged
     public string ExternalOrderId
     {
         get => _externalOrderId;
-        set { _externalOrderId = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShortId)); OnPropertyChanged(nameof(DisplayLabel)); }
+        set { _externalOrderId = value; OnPropertyChanged(); OnPropertyChanged(nameof(DisplayLabel)); }
     }
 
     public string CustomerName
@@ -247,12 +247,10 @@ public class OrderTreeItem : INotifyPropertyChanged
 
     // ── Computed display properties ──
 
-    public string ShortId => OrderHelpers.GetShortId(ExternalOrderId);
-
     public string DisplayLabel =>
         string.IsNullOrWhiteSpace(CustomerName)
-            ? ShortId
-            : $"{ShortId}  ({CustomerName})";
+            ? ExternalOrderId
+            : $"{ExternalOrderId}  ({CustomerName})";
 
     public string SourceLabel => SourceCode?.ToUpperInvariant() ?? "";
 

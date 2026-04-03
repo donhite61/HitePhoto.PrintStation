@@ -90,12 +90,10 @@ public class EmailService : IEmailSender
 
     public static string ReplacePlaceholders(string template, Order order)
     {
-        var shortId = OrderHelpers.GetShortId(order.ExternalOrderId);
-
         return template
             .Replace("{CustomerName}", $"{order.CustomerFirstName} {order.CustomerLastName}".Trim())
             .Replace("{StoreName}", order.StoreName ?? "")
-            .Replace("{OrderId}", shortId)
+            .Replace("{OrderId}", order.ExternalOrderId)
             .Replace("{OrderDate}", order.OrderedAt?.ToString("MM/dd/yyyy") ?? "")
             .Replace("{Email}", order.CustomerEmail ?? "")
             .Replace("{Phone}", order.CustomerPhone ?? "");

@@ -212,7 +212,7 @@ public partial class MainWindow : Window
         DevModeText.Visibility = _settings.DeveloperMode ? Visibility.Visible : Visibility.Collapsed;
         var storeName = _vm.GetLocalStoreName();
         var devTag = _settings.DeveloperMode ? " [DEV]" : "";
-        Title = $"HitePhoto Print Station — {storeName}{devTag}";
+        Title = $"HitePhoto Print Station — {storeName}{devTag} — build {BuildInfo.BuildTimestamp}";
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -533,7 +533,7 @@ public partial class MainWindow : Window
         DetailEmpty.Visibility = Visibility.Collapsed;
         DetailContent.Visibility = Visibility.Visible;
 
-        DetailOrderId.Text = treeItem.ShortId;
+        DetailOrderId.Text = treeItem.ExternalOrderId;
         DetailCustomerName.Text = treeItem.CustomerName;
         DetailPhone.Text = Core.OrderHelpers.FormatPhone(treeItem.CustomerPhone);
         DetailEmail.Text = treeItem.CustomerEmail;
@@ -718,7 +718,7 @@ public partial class MainWindow : Window
         {
             AlertCollector.Error(AlertCategory.Database,
                 "Failed to load order options",
-                detail: $"Attempted: deserialize options JSON for order {treeItem.ShortId}. " +
+                detail: $"Attempted: deserialize options JSON for order {treeItem.ExternalOrderId}. " +
                         $"Expected: list of OrderItemOption. Found: {ex.GetType().Name}: {ex.Message}. " +
                         $"Context: LoadOrderOptions. State: OptionsJson='{firstItem.OptionsJson}'.",
                 ex: ex);
@@ -1015,7 +1015,7 @@ public partial class MainWindow : Window
             selected = new List<OrderTreeItem> { _selectedOrderItem };
         if (selected.Count == 0) return;
 
-        var names = string.Join(", ", selected.Take(5).Select(o => o.ShortId));
+        var names = string.Join(", ", selected.Take(5).Select(o => o.ExternalOrderId));
         if (selected.Count > 5) names += $" +{selected.Count - 5} more";
 
         var result = MessageBox.Show(
@@ -1046,7 +1046,7 @@ public partial class MainWindow : Window
         {
             var order = selected[0];
             var win = new DoneConfirmWindow(
-                order.CustomerName, order.ShortId,
+                order.CustomerName, order.ExternalOrderId,
                 alreadyDone: order.StatusCode == OrderStatusCode.PickedUp,
                 alreadyEmailed: false,
                 cursorOverEmail: cursorOverEmail)
@@ -1058,7 +1058,7 @@ public partial class MainWindow : Window
         else
         {
             // Batch: one confirm for all
-            var names = string.Join(", ", selected.Take(5).Select(o => o.ShortId));
+            var names = string.Join(", ", selected.Take(5).Select(o => o.ExternalOrderId));
             if (selected.Count > 5) names += $" +{selected.Count - 5} more";
 
             var action = cursorOverEmail ? "mark printed + email" : "mark printed";
@@ -1092,7 +1092,7 @@ public partial class MainWindow : Window
                 catch (Exception ex)
                 {
                     AlertCollector.Error(AlertCategory.Network,
-                        $"Failed to notify customer for order {order.ShortId}",
+                        $"Failed to notify customer for order {order.ExternalOrderId}",
                         orderId: order.ExternalOrderId,
                         detail: $"Attempted: send notification via NotificationService. " +
                                 $"Expected: customer notified. " +
@@ -1133,7 +1133,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             AlertCollector.Error(AlertCategory.Network,
-                $"Failed to notify customer for order {order.ShortId}",
+                $"Failed to notify customer for order {order.ExternalOrderId}",
                 orderId: order.ExternalOrderId,
                 detail: $"Attempted: send default email via NotificationService. " +
                         $"Expected: customer notified. " +
@@ -1161,7 +1161,7 @@ public partial class MainWindow : Window
         if (fullOrder == null)
         {
             AlertCollector.Error(AlertCategory.Database,
-                $"Cannot load order {order.ShortId} for email preview",
+                $"Cannot load order {order.ExternalOrderId} for email preview",
                 orderId: order.ExternalOrderId);
             return;
         }
@@ -1189,7 +1189,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             AlertCollector.Error(AlertCategory.Network,
-                $"Failed to notify customer for order {order.ShortId}",
+                $"Failed to notify customer for order {order.ExternalOrderId}",
                 orderId: order.ExternalOrderId,
                 detail: $"Attempted: send email with template '{template.Name}'. " +
                         $"Expected: customer notified. " +
@@ -1322,7 +1322,7 @@ public partial class MainWindow : Window
                     {
                         var details = string.Join("\n", mismatches.Select(m => $"  {m.ItemDescription}: {m.Issue}"));
                         var proceed = MessageBox.Show(
-                            $"Order {order.ShortId} was transferred and has {mismatches.Count} mismatch(es):\n\n{details}\n\nPrint anyway?",
+                            $"Order {order.ExternalOrderId} was transferred and has {mismatches.Count} mismatch(es):\n\n{details}\n\nPrint anyway?",
                             "Transfer Mismatch", MessageBoxButton.YesNo, MessageBoxImage.Warning);
                         if (proceed != MessageBoxResult.Yes)
                             continue;
@@ -1336,7 +1336,7 @@ public partial class MainWindow : Window
                 totalSkipped += result.Skipped.Count;
 
                 foreach (var s in result.Skipped)
-                    allSkipReasons.Add($"{order.ShortId} — {s.SizeLabel}: {s.Reason}");
+                    allSkipReasons.Add($"{order.ExternalOrderId} — {s.SizeLabel}: {s.Reason}");
             }
 
             if (totalSent > 0)
