@@ -132,5 +132,5 @@ public class AppSettings
     [JsonIgnore]
     public string ConnectionString =>
         $"Server={DbHost};Port={DbPort};Database={DbName};User={DbUser};Password={DbPassword};" +
-        "SslMode=None;AllowPublicKeyRetrieval=true;ConnectionTimeout=5";
+        "SslMode=None;AllowPublicKeyRetrieval=true;ConnectionTimeout=5;GuidFormat=None";
 }

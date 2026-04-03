@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$TestRoot = "C:\Users\dhite\HitePhotoTest"
+$TestRoot = "S:\HitePhotoTest"
 $SampleDir = Join-Path $PSScriptRoot "dev\sample-orders"
 
 $BhSqlite = Join-Path $TestRoot "BH\sqlite\orders.db"

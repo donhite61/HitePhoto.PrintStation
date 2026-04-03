@@ -2,11 +2,11 @@
 # MariaDB Sync Test Suite
 # Run while both BH and WB PrintStation instances are running
 
-BH_DB="/c/Users/dhite/HitePhotoTest/BH/sqlite/orders.db"
-WB_DB="/c/Users/dhite/HitePhotoTest/WB/sqlite/orders.db"
-SAMPLE="/c/Users/dhite/source/repos/HitePhoto.PrintStation/dev/sample-orders"
-BH_WATCH="/c/Users/dhite/HitePhotoTest/BH/dakis-watch"
-WB_WATCH="/c/Users/dhite/HitePhotoTest/WB/dakis-watch"
+BH_DB="/s/HitePhotoTest/BH/sqlite/orders.db"
+WB_DB="/s/HitePhotoTest/WB/sqlite/orders.db"
+SAMPLE="$(dirname "$0")/dev/sample-orders"
+BH_WATCH="/s/HitePhotoTest/BH/dakis-watch"
+WB_WATCH="/s/HitePhotoTest/WB/dakis-watch"
 
 PASS=0
 FAIL=0
@@ -199,11 +199,11 @@ echo "============================================================"
 echo " TEST 10: No unexpected errors in logs"
 echo "============================================================"
 
-bh_sync_errors=$(grep -ci "MariaDB sync.*failed\|SyncService.*exception" /c/Users/dhite/HitePhotoTest/BH/logs/printstation.log 2>/dev/null; echo $?)
+bh_sync_errors=$(grep -ci "MariaDB sync.*failed\|SyncService.*exception" /s/HitePhotoTest/BH/logs/printstation.log 2>/dev/null; echo $?)
 if [ "$bh_sync_errors" = "1" ]; then bh_sync_errors="0"; else bh_sync_errors="1"; fi
 check "No BH sync errors in log" "$bh_sync_errors" "0"
 
-wb_sync_errors=$(grep -ci "MariaDB sync.*failed\|SyncService.*exception" /c/Users/dhite/HitePhotoTest/WB/logs/printstation.log 2>/dev/null; echo $?)
+wb_sync_errors=$(grep -ci "MariaDB sync.*failed\|SyncService.*exception" /s/HitePhotoTest/WB/logs/printstation.log 2>/dev/null; echo $?)
 if [ "$wb_sync_errors" = "1" ]; then wb_sync_errors="0"; else wb_sync_errors="1"; fi
 check "No WB sync errors in log" "$wb_sync_errors" "0"
 

@@ -676,6 +676,7 @@ public class PrintStationDb
     /// on (external_order_id, pickup_store_id). Returns the MariaDB order id.
     /// </summary>
     public async Task<string> UpsertOrderAsync(
+        string orderId,
         string externalOrderId, int pickupStoreId, int orderSourceId, int orderStatusId,
         string? customerFirstName, string? customerLastName, string? customerEmail, string? customerPhone,
         decimal? totalAmount, bool isHeld, bool isTransfer, int? transferStoreId,
@@ -691,7 +692,6 @@ public class PrintStationDb
         int harvestedByStoreId = 0, bool isPrinted = false,
         string? supersedes = null, string? alterationType = null)
     {
-        var orderId = Guid.NewGuid().ToString();
         const string sql = """
             INSERT INTO orders
                 (id, external_order_id, pickup_store_id, current_location_store_id,
