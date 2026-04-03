@@ -1268,7 +1268,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            List<int>? preSelectedItemIds = null;
+            List<string>? preSelectedItemIds = null;
             if (_selectedSizeItem?.Items is { Count: > 0 })
                 preSelectedItemIds = _selectedSizeItem.Items.Select(i => i.Id).ToList();
 

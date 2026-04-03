@@ -20,13 +20,13 @@ public interface IOrderVerifier
     /// </summary>
     VerifyResult VerifyOrders(
         Dictionary<string, (string Path, string Source)> folderList,
-        Dictionary<string, (int Id, string FolderPath, string SourceCode)> dbList);
+        Dictionary<string, (string Id, string FolderPath, string SourceCode)> dbList);
 
     /// <summary>
     /// Verify/repair a single order. Called on operator click, ingest re-encounter, print-time.
     /// </summary>
     VerifyResult VerifyOrder(string externalOrderId, string folderPath,
-        string sourceCode, int dbOrderId);
+        string sourceCode, string dbOrderId);
 }
 
 public record VerifyResult(int Matched, int Inserted, int Repaired, int Errors);

@@ -64,13 +64,13 @@ public class OrderVerifier : IOrderVerifier
     }
 
     public VerifyResult VerifyOrder(string externalOrderId, string folderPath,
-        string sourceCode, int dbOrderId)
+        string sourceCode, string dbOrderId)
     {
         var folderList = new Dictionary<string, (string Path, string Source)>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(folderPath))
             folderList[externalOrderId] = (folderPath, sourceCode);
 
-        var dbList = new Dictionary<string, (int Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase)
+        var dbList = new Dictionary<string, (string Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase)
         {
             [externalOrderId] = (dbOrderId, folderPath, sourceCode)
         };
@@ -80,7 +80,7 @@ public class OrderVerifier : IOrderVerifier
 
     public VerifyResult VerifyOrders(
         Dictionary<string, (string Path, string Source)> folderList,
-        Dictionary<string, (int Id, string FolderPath, string SourceCode)> dbList)
+        Dictionary<string, (string Id, string FolderPath, string SourceCode)> dbList)
     {
         int inserted = 0, errors = 0;
         int matchCount = 0;
@@ -136,7 +136,7 @@ public class OrderVerifier : IOrderVerifier
 
     // ── TXT-vs-DB compare-and-repair (Pixfizz — TXT is source of truth) ──
 
-    private int RepairFromTxt(int dbOrderId, string folderPath, string txtPath)
+    private int RepairFromTxt(string dbOrderId, string folderPath, string txtPath)
     {
         try
         {
@@ -162,7 +162,7 @@ public class OrderVerifier : IOrderVerifier
 
     // ── YML-vs-DB compare-and-repair (Dakis — order.yml is source of truth) ──
 
-    private int RepairFromYml(int dbOrderId, string folderPath, string ymlPath)
+    private int RepairFromYml(string dbOrderId, string folderPath, string ymlPath)
     {
         try
         {
@@ -188,7 +188,7 @@ public class OrderVerifier : IOrderVerifier
 
     // ── Shared compare-and-repair: source items vs DB items ──
 
-    private int CompareAndRepair(int dbOrderId, List<UnifiedOrderItem> sourceItems, string sourceFileName)
+    private int CompareAndRepair(string dbOrderId, List<UnifiedOrderItem> sourceItems, string sourceFileName)
     {
         var dbItems = _orders.GetItems(dbOrderId);
 
@@ -256,7 +256,7 @@ public class OrderVerifier : IOrderVerifier
         var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
         if (existingId != null)
         {
-            _orders.SetHarvestedBy(existingId.Value, _settings.StoreId);
+            _orders.SetHarvestedBy(existingId, _settings.StoreId);
             return;
         }
 
@@ -280,7 +280,7 @@ public class OrderVerifier : IOrderVerifier
         var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
         if (existingId != null)
         {
-            _orders.SetHarvestedBy(existingId.Value, _settings.StoreId);
+            _orders.SetHarvestedBy(existingId, _settings.StoreId);
             return;
         }
 

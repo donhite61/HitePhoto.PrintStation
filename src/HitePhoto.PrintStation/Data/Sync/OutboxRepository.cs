@@ -5,7 +5,7 @@ using HitePhoto.PrintStation.Core;
 
 namespace HitePhoto.PrintStation.Data.Sync;
 
-public record OutboxEntry(int Id, string TableName, int RecordId, string Operation, string PayloadJson, string CreatedAt);
+public record OutboxEntry(int Id, string TableName, string RecordId, string Operation, string PayloadJson, string CreatedAt);
 
 public class OutboxRepository
 {
@@ -18,7 +18,7 @@ public class OutboxRepository
 
     // ── Sync outbox ─────────────────────────────────────────────────────
 
-    public void Enqueue(string tableName, int recordId, string operation, string payloadJson)
+    public void Enqueue(string tableName, string recordId, string operation, string payloadJson)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -52,7 +52,7 @@ public class OutboxRepository
             entries.Add(new OutboxEntry(
                 reader.GetInt32(0),
                 reader.GetString(1),
-                reader.GetInt32(2),
+                reader.GetString(2),
                 reader.GetString(3),
                 reader.GetString(4),
                 reader.GetString(5)));
@@ -60,9 +60,9 @@ public class OutboxRepository
         return entries;
     }
 
-    public HashSet<int> GetPendingOrderIds()
+    public HashSet<string> GetPendingOrderIds()
     {
-        var ids = new HashSet<int>();
+        var ids = new HashSet<string>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -71,7 +71,7 @@ public class OutboxRepository
             """;
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
-            ids.Add(reader.GetInt32(0));
+            ids.Add(reader.GetString(0));
         return ids;
     }
 
@@ -132,7 +132,7 @@ public class OutboxRepository
 
     // ── ID map ──────────────────────────────────────────────────────────
 
-    public int? GetRemoteId(string tableName, int localId)
+    public string? GetRemoteId(string tableName, string localId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -143,12 +143,12 @@ public class OutboxRepository
         cmd.Parameters.AddWithValue("@table", tableName);
         cmd.Parameters.AddWithValue("@local", localId);
         var result = cmd.ExecuteScalar();
-        if (result is long l)
-            return (int)l;
+        if (result is string s)
+            return s;
         return null;
     }
 
-    public int? GetLocalId(string tableName, int remoteId)
+    public string? GetLocalId(string tableName, string remoteId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -159,12 +159,12 @@ public class OutboxRepository
         cmd.Parameters.AddWithValue("@table", tableName);
         cmd.Parameters.AddWithValue("@remote", remoteId);
         var result = cmd.ExecuteScalar();
-        if (result is long l)
-            return (int)l;
+        if (result is string s)
+            return s;
         return null;
     }
 
-    public void SetIdMapping(string tableName, int localId, int remoteId)
+    public void SetIdMapping(string tableName, string localId, string remoteId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();

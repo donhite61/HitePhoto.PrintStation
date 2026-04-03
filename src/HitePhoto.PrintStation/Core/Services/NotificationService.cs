@@ -26,7 +26,7 @@ public class NotificationService : INotificationService
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
-    public void NotifyCustomer(int orderId, string operatorName, EmailTemplate? templateOverride = null)
+    public void NotifyCustomer(string orderId, string operatorName, EmailTemplate? templateOverride = null)
     {
         var order = _orders.GetOrder(orderId);
         if (order is null)

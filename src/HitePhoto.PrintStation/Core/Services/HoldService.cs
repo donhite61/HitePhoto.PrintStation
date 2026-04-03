@@ -16,7 +16,7 @@ public class HoldService : IHoldService
         _holdDecision = holdDecision ?? throw new ArgumentNullException(nameof(holdDecision));
     }
 
-    public bool ToggleHold(int orderId, string operatorName)
+    public bool ToggleHold(string orderId, string operatorName)
     {
         var currentlyHeld = _holdDecision.IsHeld(orderId);
         var newState = !currentlyHeld;

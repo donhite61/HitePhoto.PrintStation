@@ -153,7 +153,7 @@ public class PixfizzIngestService
         var existingId = _orders.FindOrderId(orderNumber, _settings.StoreId);
         if (existingId == null) return;
 
-        _verifier.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId.Value);
+        _verifier.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId);
     }
 
     /// <summary>

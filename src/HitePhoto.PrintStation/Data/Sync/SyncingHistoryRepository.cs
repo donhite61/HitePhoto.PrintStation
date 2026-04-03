@@ -20,14 +20,14 @@ public class SyncingHistoryRepository : IHistoryRepository
         _sync = sync;
     }
 
-    public void AddNote(int orderId, string note, string createdBy = "")
+    public void AddNote(string orderId, string note, string createdBy = "")
     {
         _inner.AddNote(orderId, note, createdBy);
         var payload = JsonSerializer.Serialize(new { orderId, note, createdBy });
         _ = Task.Run(() => _sync.PushAsync("order_notes", orderId, "add_note", payload));
     }
 
-    public void AddNoteIfNew(int orderId, string note, string createdBy = "")
+    public void AddNoteIfNew(string orderId, string note, string createdBy = "")
     {
         // Get note count before to detect if a new note was inserted
         var before = _inner.GetNotes(orderId).Count;
@@ -41,5 +41,5 @@ public class SyncingHistoryRepository : IHistoryRepository
         }
     }
 
-    public List<HistoryEntry> GetNotes(int orderId) => _inner.GetNotes(orderId);
+    public List<HistoryEntry> GetNotes(string orderId) => _inner.GetNotes(orderId);
 }

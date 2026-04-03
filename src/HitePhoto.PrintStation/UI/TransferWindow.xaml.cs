@@ -10,7 +10,7 @@ namespace HitePhoto.PrintStation.UI;
 
 public partial class TransferWindow : Window
 {
-    private readonly int _orderId;
+    private readonly string _orderId;
     private readonly string _externalOrderId;
     private readonly string _localFolderPath;
     private readonly ITransferService _transfer;
@@ -21,7 +21,7 @@ public partial class TransferWindow : Window
     private bool _connected;
 
     public TransferWindow(
-        int orderId,
+        string orderId,
         string externalOrderId,
         string localFolderPath,
         ITransferService transfer,

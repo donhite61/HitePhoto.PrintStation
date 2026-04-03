@@ -20,7 +20,7 @@ public class InvoicePrinter
         _orders = orders;
     }
 
-    public void PrintTransferInvoice(int orderId, string fromStoreName, string comment)
+    public void PrintTransferInvoice(string orderId, string fromStoreName, string comment)
     {
         var doc = BuildTransferInvoice(orderId, fromStoreName, comment);
         if (doc == null) return;
@@ -32,7 +32,7 @@ public class InvoicePrinter
             {
                 AlertCollector.Error(AlertCategory.Printing,
                     "No default printer found — invoice not printed",
-                    orderId: orderId.ToString(),
+                    orderId: orderId,
                     detail: "Attempted: print transfer invoice. Expected: default printer. Found: null.");
                 return;
             }
@@ -48,14 +48,14 @@ public class InvoicePrinter
         {
             AlertCollector.Error(AlertCategory.Printing,
                 $"Failed to print transfer invoice for order {orderId}",
-                orderId: orderId.ToString(),
+                orderId: orderId,
                 detail: $"Attempted: print transfer invoice. Expected: success. Found: {ex.Message}. " +
                         $"Context: printer={LocalPrintServer.GetDefaultPrintQueue()?.Name ?? "unknown"}. " +
                         $"State: {ex.GetType().Name}");
         }
     }
 
-    public Window PreviewTransferInvoice(int orderId, string fromStoreName, string comment)
+    public Window PreviewTransferInvoice(string orderId, string fromStoreName, string comment)
     {
         var doc = BuildTransferInvoice(orderId, fromStoreName, comment);
         if (doc == null) return null!;
@@ -78,7 +78,7 @@ public class InvoicePrinter
         };
     }
 
-    private FlowDocument? BuildTransferInvoice(int orderId, string fromStoreName, string comment)
+    private FlowDocument? BuildTransferInvoice(string orderId, string fromStoreName, string comment)
     {
         var order = _orders.GetFullOrder(orderId);
         if (order == null) return null;

@@ -27,7 +27,7 @@ public class OrderRepository : IOrderRepository
         _db = db ?? throw new ArgumentNullException(nameof(db));
     }
 
-    public OrderRecord? GetOrder(int orderId)
+    public OrderRecord? GetOrder(string orderId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -42,7 +42,7 @@ public class OrderRepository : IOrderRepository
         if (!reader.Read()) return null;
 
         return new OrderRecord(
-            Id: reader.GetInt32(0),
+            Id: reader.GetString(0),
             ExternalOrderId: reader.GetString(1),
             Source: OrderSourceExtensions.FromCode(reader.GetString(2)),
             PickupStoreId: reader.GetInt32(3),
@@ -52,7 +52,7 @@ public class OrderRepository : IOrderRepository
             IsExternallyModified: reader.GetInt32(7) == 1);
     }
 
-    public HitePhoto.Shared.Models.Order? GetFullOrder(int orderId)
+    public HitePhoto.Shared.Models.Order? GetFullOrder(string orderId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -73,7 +73,7 @@ public class OrderRepository : IOrderRepository
 
         return new HitePhoto.Shared.Models.Order
         {
-            Id = reader.GetInt32(0),
+            Id = reader.GetString(0),
             ExternalOrderId = reader.GetString(1),
             OrderedAt = reader.IsDBNull(2) ? null : DateTime.Parse(reader.GetString(2)),
             CustomerFirstName = reader.IsDBNull(3) ? null : reader.GetString(3),
@@ -87,7 +87,7 @@ public class OrderRepository : IOrderRepository
         };
     }
 
-    public List<OrderItemRecord> GetNoritsuItems(int orderId)
+    public List<OrderItemRecord> GetNoritsuItems(string orderId)
     {
         var items = new List<OrderItemRecord>();
         using var conn = _db.OpenConnection();
@@ -106,8 +106,8 @@ public class OrderRepository : IOrderRepository
         while (reader.Read())
         {
             items.Add(new OrderItemRecord(
-                Id: reader.GetInt32(0),
-                OrderId: reader.GetInt32(1),
+                Id: reader.GetString(0),
+                OrderId: reader.GetString(1),
                 SizeLabel: reader.GetString(2),
                 MediaType: reader.IsDBNull(3) ? "" : reader.GetString(3),
                 ImageFilepath: reader.IsDBNull(4) ? "" : reader.GetString(4),
@@ -121,7 +121,7 @@ public class OrderRepository : IOrderRepository
         return items;
     }
 
-    public void SetHold(int orderId, bool isHeld)
+    public void SetHold(string orderId, bool isHeld)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -138,7 +138,7 @@ public class OrderRepository : IOrderRepository
                         $"Context: isHeld={isHeld}. State: no matching order in SQLite");
     }
 
-    public void SetNotified(int orderId)
+    public void SetNotified(string orderId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -154,7 +154,7 @@ public class OrderRepository : IOrderRepository
                         $"Context: marking order notified. State: no matching order in SQLite");
     }
 
-    public void SetCurrentLocation(int orderId, int storeId)
+    public void SetCurrentLocation(string orderId, int storeId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -174,7 +174,7 @@ public class OrderRepository : IOrderRepository
                         $"Context: storeId={storeId}. State: no matching order in SQLite");
     }
 
-    public void SetItemsPrinted(List<int> itemIds)
+    public void SetItemsPrinted(List<string> itemIds)
     {
         if (itemIds.Count == 0) return;
         using var conn = _db.OpenConnection();
@@ -193,7 +193,7 @@ public class OrderRepository : IOrderRepository
         }
     }
 
-    public void SetItemsUnprinted(int orderId)
+    public void SetItemsUnprinted(string orderId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -211,7 +211,7 @@ public class OrderRepository : IOrderRepository
         return (string?)cmd.ExecuteScalar() ?? $"store {storeId}";
     }
 
-    public int? FindOrderId(string externalOrderId, int storeId)
+    public string? FindOrderId(string externalOrderId, int storeId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -219,20 +219,20 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@eid", externalOrderId);
         cmd.Parameters.AddWithValue("@store", storeId);
         var result = cmd.ExecuteScalar();
-        return result != null ? Convert.ToInt32(result) : null;
+        return result?.ToString();
     }
 
-    public int? FindOrderIdAnyStore(string externalOrderId)
+    public string? FindOrderIdAnyStore(string externalOrderId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT id FROM orders WHERE external_order_id = @eid LIMIT 1";
         cmd.Parameters.AddWithValue("@eid", externalOrderId);
         var result = cmd.ExecuteScalar();
-        return result != null ? Convert.ToInt32(result) : null;
+        return result?.ToString();
     }
 
-    public List<OrderItemRecord> GetItems(int orderId)
+    public List<OrderItemRecord> GetItems(string orderId)
     {
         var items = new List<OrderItemRecord>();
         using var conn = _db.OpenConnection();
@@ -251,8 +251,8 @@ public class OrderRepository : IOrderRepository
         while (reader.Read())
         {
             items.Add(new OrderItemRecord(
-                Id: reader.GetInt32(0),
-                OrderId: reader.GetInt32(1),
+                Id: reader.GetString(0),
+                OrderId: reader.GetString(1),
                 SizeLabel: reader.IsDBNull(2) ? "" : reader.GetString(2),
                 MediaType: reader.IsDBNull(3) ? "" : reader.GetString(3),
                 ImageFilepath: reader.IsDBNull(4) ? "" : reader.GetString(4),
@@ -267,7 +267,7 @@ public class OrderRepository : IOrderRepository
         return items;
     }
 
-    public void UpdateItem(int itemId, string sizeLabel, string mediaType,
+    public void UpdateItem(string itemId, string sizeLabel, string mediaType,
         string imageFilename, string imageFilepath, int quantity,
         bool isNoritsu, string category, string subCategory)
     {
@@ -300,17 +300,19 @@ public class OrderRepository : IOrderRepository
                         $"Context: size={sizeLabel}, file={imageFilename}. State: no matching item in SQLite");
     }
 
-    public void InsertItemOptions(int orderItemId, List<HitePhoto.Shared.Parsers.OrderItemOption> options)
+    public void InsertItemOptions(string orderItemId, List<HitePhoto.Shared.Parsers.OrderItemOption> options)
     {
         if (options.Count == 0) return;
         using var conn = _db.OpenConnection();
         foreach (var opt in options)
         {
+            var optId = Guid.NewGuid().ToString();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO order_item_options (order_item_id, option_key, option_value)
-                VALUES (@itemId, @key, @value)
+                INSERT INTO order_item_options (id, order_item_id, option_key, option_value)
+                VALUES (@optId, @itemId, @key, @value)
                 """;
+            cmd.Parameters.AddWithValue("@optId", optId);
             cmd.Parameters.AddWithValue("@itemId", orderItemId);
             cmd.Parameters.AddWithValue("@key", opt.Key);
             cmd.Parameters.AddWithValue("@value", opt.Value);
@@ -318,7 +320,7 @@ public class OrderRepository : IOrderRepository
         }
     }
 
-    public List<HitePhoto.Shared.Parsers.OrderItemOption> GetItemOptions(int orderItemId)
+    public List<HitePhoto.Shared.Parsers.OrderItemOption> GetItemOptions(string orderItemId)
     {
         var options = new List<HitePhoto.Shared.Parsers.OrderItemOption>();
         using var conn = _db.OpenConnection();
@@ -331,7 +333,7 @@ public class OrderRepository : IOrderRepository
         return options;
     }
 
-    public void DeleteItemOptions(int orderItemId)
+    public void DeleteItemOptions(string orderItemId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -340,28 +342,30 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
-    public void InsertItem(int orderId, UnifiedOrderItem item)
+    public void InsertItem(string orderId, UnifiedOrderItem item)
     {
         using var conn = _db.OpenConnection();
         InsertItemCore(conn, null, orderId, item, isPrinted: false);
     }
 
     private static void InsertItemCore(SqliteConnection conn, SqliteTransaction? transaction,
-        int orderId, UnifiedOrderItem item, bool isPrinted)
+        string orderId, UnifiedOrderItem item, bool isPrinted)
     {
+        var itemId = Guid.NewGuid().ToString();
         using var cmd = conn.CreateCommand();
         if (transaction != null) cmd.Transaction = transaction;
         cmd.CommandText = """
             INSERT INTO order_items (
-                order_id, size_label, media_type, category, sub_category,
+                id, order_id, size_label, media_type, category, sub_category,
                 quantity, image_filename, image_filepath, original_image_filepath,
                 is_noritsu, is_local_production, is_printed, options_json
             ) VALUES (
-                @oid, @size, @media, @cat, @subcat,
+                @itemId, @oid, @size, @media, @cat, @subcat,
                 @qty, @fname, @fpath, @orig,
                 @noritsu, @localProd, @printed, @options
             )
             """;
+        cmd.Parameters.AddWithValue("@itemId", itemId);
         cmd.Parameters.AddWithValue("@oid", orderId);
         cmd.Parameters.AddWithValue("@size", item.SizeLabel ?? "");
         cmd.Parameters.AddWithValue("@media", item.MediaType ?? "");
@@ -388,7 +392,7 @@ public class OrderRepository : IOrderRepository
                         $"State: isPrinted={isPrinted}");
     }
 
-    public void ReplaceItems(int orderId, List<UnifiedOrderItem> items)
+    public void ReplaceItems(string orderId, List<UnifiedOrderItem> items)
     {
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
@@ -427,10 +431,10 @@ public class OrderRepository : IOrderRepository
         transaction.Commit();
     }
 
-    public Dictionary<string, (int Id, string FolderPath, string SourceCode)> GetRecentOrders(int days)
+    public Dictionary<string, (string Id, string FolderPath, string SourceCode)> GetRecentOrders(int days)
     {
         var cutoff = days > 0 ? DateTime.Now.AddDays(-days) : DateTime.MinValue;
-        var result = new Dictionary<string, (int Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, (string Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase);
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -445,24 +449,24 @@ public class OrderRepository : IOrderRepository
         {
             var eid = reader.GetString(1);
             result[eid] = (
-                reader.GetInt32(0),
+                reader.GetString(0),
                 reader.IsDBNull(2) ? "" : reader.GetString(2),
                 reader.IsDBNull(3) ? "" : reader.GetString(3));
         }
         return result;
     }
 
-    public int InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0)
+    public string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0)
     {
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
 
-        int orderId;
+        var orderId = Guid.NewGuid().ToString();
         using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = """
                 INSERT INTO orders (
-                    external_order_id, order_source_id, source_code,
+                    id, external_order_id, order_source_id, source_code,
                     customer_first_name, customer_last_name, customer_email, customer_phone,
                     order_status_id, status_code, pickup_store_id,
                     total_amount, payment_status, special_instructions,
@@ -473,7 +477,7 @@ public class OrderRepository : IOrderRepository
                     shipping_state, shipping_zip, shipping_country, shipping_method,
                     is_test, harvested_by_store_id
                 ) VALUES (
-                    @eid, @srcId, @srcCode,
+                    @id, @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
                     1, 'new', @store,
                     @total, @paid, @notes,
@@ -483,12 +487,12 @@ public class OrderRepository : IOrderRepository
                     @shipAddr1, @shipAddr2, @shipCity,
                     @shipState, @shipZip, @shipCountry, @shipMethod,
                     @isTest, @harvestStore
-                );
-                SELECT last_insert_rowid();
+                )
                 """;
             var srcCode = (order.ExternalSource ?? "").ToLowerInvariant();
             var srcId = srcCode == "dakis" ? 2 : srcCode == "dashboard" ? 3 : 1;
 
+            cmd.Parameters.AddWithValue("@id", orderId);
             cmd.Parameters.AddWithValue("@eid", order.ExternalOrderId);
             cmd.Parameters.AddWithValue("@srcId", srcId);
             cmd.Parameters.AddWithValue("@srcCode", srcCode);
@@ -518,7 +522,7 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@shipMethod", (object?)order.ShippingMethod ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@isTest", order.ExternalOrderId.StartsWith("TEST-", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
             cmd.Parameters.AddWithValue("@harvestStore", harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
-            orderId = Convert.ToInt32(cmd.ExecuteScalar()!);
+            cmd.ExecuteNonQuery();
         }
 
         foreach (var item in order.Items)
@@ -560,7 +564,7 @@ public class OrderRepository : IOrderRepository
         return channels;
     }
 
-    public void UpdateOrderStatus(int orderId, string statusCode)
+    public void UpdateOrderStatus(string orderId, string statusCode)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -614,9 +618,9 @@ public class OrderRepository : IOrderRepository
         return result is string s ? s : null;
     }
 
-    public List<(int Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff)
+    public List<(string Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff)
     {
-        var results = new List<(int, string, string)>();
+        var results = new List<(string, string, string)>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -631,11 +635,11 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("O"));
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
-            results.Add((reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
+            results.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
         return results;
     }
 
-    public void MarkReceivedPushed(int orderId)
+    public void MarkReceivedPushed(string orderId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -719,9 +723,9 @@ public class OrderRepository : IOrderRepository
         return results;
     }
 
-    public Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds)
+    public Dictionary<string, List<ItemRow>> BatchLoadItems(List<string> orderIds)
     {
-        var result = new Dictionary<int, List<ItemRow>>();
+        var result = new Dictionary<string, List<ItemRow>>();
         if (orderIds.Count == 0) return result;
 
         using var conn = _db.OpenConnection();
@@ -743,9 +747,9 @@ public class OrderRepository : IOrderRepository
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var orderId = reader.GetInt32(reader.GetOrdinal("order_id"));
+            var orderId = reader.GetString(reader.GetOrdinal("order_id"));
             var item = new ItemRow(
-                Id: reader.GetInt32(reader.GetOrdinal("id")),
+                Id: reader.GetString(reader.GetOrdinal("id")),
                 SizeLabel: reader.IsDBNull(reader.GetOrdinal("size_label")) ? "" : reader.GetString(reader.GetOrdinal("size_label")),
                 MediaType: reader.IsDBNull(reader.GetOrdinal("media_type")) ? "" : reader.GetString(reader.GetOrdinal("media_type")),
                 Quantity: reader.GetInt32(reader.GetOrdinal("quantity")),
@@ -767,7 +771,7 @@ public class OrderRepository : IOrderRepository
     private static OrderRow ReadOrderRow(SqliteDataReader reader)
     {
         return new OrderRow(
-            Id: reader.GetInt32(reader.GetOrdinal("id")),
+            Id: reader.GetString(reader.GetOrdinal("id")),
             ExternalOrderId: reader.GetString(reader.GetOrdinal("external_order_id")),
             SourceCode: reader.IsDBNull(reader.GetOrdinal("source_code")) ? "" : reader.GetString(reader.GetOrdinal("source_code")),
             StatusCode: reader.IsDBNull(reader.GetOrdinal("status_code")) ? "" : reader.GetString(reader.GetOrdinal("status_code")),
@@ -787,7 +791,7 @@ public class OrderRepository : IOrderRepository
             AlterationType: reader.IsDBNull(reader.GetOrdinal("alteration_type")) ? null : reader.GetString(reader.GetOrdinal("alteration_type")));
     }
 
-    public void BatchUpdateFileStatus(List<(int ItemId, int Status)> updates)
+    public void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates)
     {
         if (updates.Count == 0) return;
         using var conn = _db.OpenConnection();
@@ -801,7 +805,7 @@ public class OrderRepository : IOrderRepository
         }
     }
 
-    public void SetHarvestedBy(int orderId, int storeId)
+    public void SetHarvestedBy(string orderId, int storeId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -811,7 +815,7 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
-    public void SetOrderPrinted(int orderId, bool printed)
+    public void SetOrderPrinted(string orderId, bool printed)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -821,7 +825,7 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
-    public bool AreAllItemsPrinted(int orderId)
+    public bool AreAllItemsPrinted(string orderId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -830,7 +834,7 @@ public class OrderRepository : IOrderRepository
         return Convert.ToInt32(cmd.ExecuteScalar()) == 0;
     }
 
-    public void SetExternallyModified(int orderId, bool modified)
+    public void SetExternallyModified(string orderId, bool modified)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -847,7 +851,7 @@ public class OrderRepository : IOrderRepository
                         $"Context: transfer or LabApi edit. State: no matching order in SQLite.");
     }
 
-    public void SetFolderPath(int orderId, string folderPath)
+    public void SetFolderPath(string orderId, string folderPath)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -889,7 +893,7 @@ public class OrderRepository : IOrderRepository
         return result is long id ? (int)id : null;
     }
 
-    public void SetPickupStore(int orderId, int storeId)
+    public void SetPickupStore(string orderId, int storeId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -904,22 +908,22 @@ public class OrderRepository : IOrderRepository
                         $"Expected: 1 row updated. Found: 0.");
     }
 
-    public HashSet<int> FindOrderIdsBySizeLabel(string search)
+    public HashSet<string> FindOrderIdsBySizeLabel(string search)
     {
-        var ids = new HashSet<int>();
+        var ids = new HashSet<string>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT order_id FROM order_items WHERE size_label LIKE @search";
         cmd.Parameters.AddWithValue("@search", $"%{search}%");
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
-            ids.Add(reader.GetInt32(0));
+            ids.Add(reader.GetString(0));
         return ids;
     }
 
-    public List<(int Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders()
+    public List<(string Id, string ExternalOrderId, string FolderPath, int PickupStoreId)> GetDakisOrders()
     {
-        var results = new List<(int, string, string, int)>();
+        var results = new List<(string, string, string, int)>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -930,7 +934,7 @@ public class OrderRepository : IOrderRepository
         while (reader.Read())
         {
             results.Add((
-                reader.GetInt32(0),
+                reader.GetString(0),
                 reader.GetString(1),
                 reader.IsDBNull(2) ? "" : reader.GetString(2),
                 reader.GetInt32(3)));
@@ -938,29 +942,33 @@ public class OrderRepository : IOrderRepository
         return results;
     }
 
-    public void InsertServiceItem(int orderId, string sizeLabel, string? filepath = null)
+    public void InsertServiceItem(string orderId, string sizeLabel, string? filepath = null)
     {
+        var itemId = Guid.NewGuid().ToString();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO order_items (order_id, size_label, quantity, is_noritsu, is_local_production,
+            INSERT INTO order_items (id, order_id, size_label, quantity, is_noritsu, is_local_production,
                                      image_filepath, image_filename, media_type, options_json)
-            VALUES (@oid, @size, 1, 0, 0, @path, '', '', '[]')
+            VALUES (@itemId, @oid, @size, 1, 0, 0, @path, '', '', '[]')
             """;
+        cmd.Parameters.AddWithValue("@itemId", itemId);
         cmd.Parameters.AddWithValue("@oid", orderId);
         cmd.Parameters.AddWithValue("@size", sizeLabel);
         cmd.Parameters.AddWithValue("@path", (object?)filepath ?? DBNull.Value);
         cmd.ExecuteNonQuery();
     }
 
-    public void InsertLink(int parentOrderId, int childOrderId, string linkType, string createdBy)
+    public void InsertLink(string parentOrderId, string childOrderId, string linkType, string createdBy)
     {
+        var linkId = Guid.NewGuid().ToString();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO order_links (parent_order_id, child_order_id, link_type, created_by)
-            VALUES (@parent, @child, @type, @by)
+            INSERT INTO order_links (id, parent_order_id, child_order_id, link_type, created_by)
+            VALUES (@linkId, @parent, @child, @type, @by)
             """;
+        cmd.Parameters.AddWithValue("@linkId", linkId);
         cmd.Parameters.AddWithValue("@parent", parentOrderId);
         cmd.Parameters.AddWithValue("@child", childOrderId);
         cmd.Parameters.AddWithValue("@type", linkType);
@@ -968,9 +976,9 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
-    public List<(int ChildOrderId, string LinkType, string CreatedBy, string CreatedAt)> GetChildOrders(int parentOrderId)
+    public List<(string ChildOrderId, string LinkType, string CreatedBy, string CreatedAt)> GetChildOrders(string parentOrderId)
     {
-        var results = new List<(int, string, string, string)>();
+        var results = new List<(string, string, string, string)>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -980,13 +988,13 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@id", parentOrderId);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
-            results.Add((reader.GetInt32(0), reader.GetString(1),
+            results.Add((reader.GetString(0), reader.GetString(1),
                 reader.IsDBNull(2) ? "" : reader.GetString(2),
                 reader.IsDBNull(3) ? "" : reader.GetString(3)));
         return results;
     }
 
-    public (int ParentOrderId, string LinkType)? GetParentOrder(int childOrderId)
+    public (string ParentOrderId, string LinkType)? GetParentOrder(string childOrderId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -997,11 +1005,11 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@id", childOrderId);
         using var reader = cmd.ExecuteReader();
         if (!reader.Read()) return null;
-        return (reader.GetInt32(0), reader.GetString(1));
+        return (reader.GetString(0), reader.GetString(1));
     }
 
-    public int CreateAlteration(int sourceOrderId, string alterationType, string reason, string alteredBy,
-        int? newPickupStoreId = null, string? newFolderPath = null, List<int>? itemIds = null)
+    public string CreateAlteration(string sourceOrderId, string alterationType, string reason, string alteredBy,
+        int? newPickupStoreId = null, string? newFolderPath = null, List<string>? itemIds = null)
     {
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
@@ -1047,13 +1055,13 @@ public class OrderRepository : IOrderRepository
         var newExternalId = $"{baseExternalId}-{prefix}{nextVersion}";
 
         // Copy order from the source
-        int newOrderId;
+        var newOrderId = Guid.NewGuid().ToString();
         using (var copyCmd = conn.CreateCommand())
         {
             copyCmd.Transaction = transaction;
             copyCmd.CommandText = $"""
                 INSERT INTO orders (
-                    external_order_id, order_source_id, source_code,
+                    id, external_order_id, order_source_id, source_code,
                     customer_first_name, customer_last_name, customer_email, customer_phone,
                     order_status_id, status_code, pickup_store_id,
                     total_amount, payment_status, special_instructions,
@@ -1066,7 +1074,7 @@ public class OrderRepository : IOrderRepository
                     supersedes, alteration_type
                 )
                 SELECT
-                    @newEid, order_source_id, source_code,
+                    @newId, @newEid, order_source_id, source_code,
                     customer_first_name, customer_last_name, customer_email, customer_phone,
                     order_status_id, status_code, {(newPickupStoreId.HasValue ? "@newStore" : "pickup_store_id")},
                     total_amount, payment_status, special_instructions,
@@ -1077,9 +1085,9 @@ public class OrderRepository : IOrderRepository
                     shipping_state, shipping_zip, shipping_country, shipping_method,
                     is_test, {(newPickupStoreId.HasValue ? "@newStore" : "harvested_by_store_id")},
                     @supersedes, @altType
-                FROM orders WHERE id = @srcId;
-                SELECT last_insert_rowid();
+                FROM orders WHERE id = @srcId
                 """;
+            copyCmd.Parameters.AddWithValue("@newId", newOrderId);
             copyCmd.Parameters.AddWithValue("@newEid", newExternalId);
             copyCmd.Parameters.AddWithValue("@srcId", sourceOrderId);
             copyCmd.Parameters.AddWithValue("@supersedes", baseExternalId);
@@ -1088,39 +1096,41 @@ public class OrderRepository : IOrderRepository
                 copyCmd.Parameters.AddWithValue("@newStore", newPickupStoreId.Value);
             if (newFolderPath != null)
                 copyCmd.Parameters.AddWithValue("@newFolder", newFolderPath);
-            newOrderId = Convert.ToInt32(copyCmd.ExecuteScalar()!);
+            copyCmd.ExecuteNonQuery();
         }
 
         // Copy items from the source order (all items, or only selected if itemIds provided)
-        using (var copyItems = conn.CreateCommand())
+        // Each copied item gets a new GUID
+        using (var readItems = conn.CreateCommand())
         {
-            copyItems.Transaction = transaction;
+            readItems.Transaction = transaction;
             var itemFilter = "WHERE order_id = @srcOid";
             if (itemIds is { Count: > 0 })
             {
                 var placeholders = string.Join(", ", itemIds.Select((_, i) => $"@itemId{i}"));
                 itemFilter += $" AND id IN ({placeholders})";
             }
-            copyItems.CommandText = $"""
+            readItems.CommandText = $"""
                 INSERT INTO order_items (
-                    order_id, size_label, media_type, category, sub_category,
+                    id, order_id, size_label, media_type, category, sub_category,
                     quantity, image_filename, image_filepath, original_image_filepath,
                     is_noritsu, is_local_production, is_printed, options_json
                 )
                 SELECT
+                    lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab',abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
                     @newOid, size_label, media_type, category, sub_category,
                     quantity, image_filename, image_filepath, original_image_filepath,
                     is_noritsu, is_local_production, 0, options_json
                 FROM order_items {itemFilter}
                 """;
-            copyItems.Parameters.AddWithValue("@newOid", newOrderId);
-            copyItems.Parameters.AddWithValue("@srcOid", sourceOrderId);
+            readItems.Parameters.AddWithValue("@newOid", newOrderId);
+            readItems.Parameters.AddWithValue("@srcOid", sourceOrderId);
             if (itemIds is { Count: > 0 })
             {
                 for (int i = 0; i < itemIds.Count; i++)
-                    copyItems.Parameters.AddWithValue($"@itemId{i}", itemIds[i]);
+                    readItems.Parameters.AddWithValue($"@itemId{i}", itemIds[i]);
             }
-            copyItems.ExecuteNonQuery();
+            readItems.ExecuteNonQuery();
         }
 
         // Mark parent as "dealt with" — only when ALL items sent (no itemIds filter)
@@ -1136,11 +1146,13 @@ public class OrderRepository : IOrderRepository
         // Insert link
         using (var linkCmd = conn.CreateCommand())
         {
+            var linkId = Guid.NewGuid().ToString();
             linkCmd.Transaction = transaction;
             linkCmd.CommandText = """
-                INSERT INTO order_links (parent_order_id, child_order_id, link_type, created_by)
-                VALUES (@parent, @child, @type, @by)
+                INSERT INTO order_links (id, parent_order_id, child_order_id, link_type, created_by)
+                VALUES (@linkId, @parent, @child, @type, @by)
                 """;
+            linkCmd.Parameters.AddWithValue("@linkId", linkId);
             linkCmd.Parameters.AddWithValue("@parent", sourceOrderId);
             linkCmd.Parameters.AddWithValue("@child", newOrderId);
             linkCmd.Parameters.AddWithValue("@type", alterationType);

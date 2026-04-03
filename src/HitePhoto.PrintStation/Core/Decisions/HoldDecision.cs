@@ -11,7 +11,7 @@ public class HoldDecision : IHoldDecision
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
     }
 
-    public bool IsHeld(int orderId)
+    public bool IsHeld(string orderId)
     {
         var order = _orders.GetOrder(orderId);
         return order?.IsHeld ?? false;

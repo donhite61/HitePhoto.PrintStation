@@ -26,7 +26,7 @@ public class SyncService : ISyncService
 
     // ── Push ─────────────────────────────────────────────────────────────
 
-    public async Task<bool> PushAsync(string tableName, int recordId, string operation, string payloadJson)
+    public async Task<bool> PushAsync(string tableName, string recordId, string operation, string payloadJson)
     {
         try
         {
@@ -35,7 +35,7 @@ public class SyncService : ISyncService
             if (operation == "insert_order")
             {
                 var orderId = GetOrderIdFromPayload(payloadJson);
-                if (orderId > 0 && !IsOurOrder(orderId))
+                if (!string.IsNullOrEmpty(orderId) && !IsOurOrder(orderId))
                     return true; // not our order to insert — treat as success
             }
 
@@ -74,41 +74,41 @@ public class SyncService : ISyncService
 
             case "set_hold":
             {
-                var orderId = payload["orderId"].GetInt32();
+                var orderId = payload["orderId"].GetString()!;
                 var isHeld = payload["isHeld"].GetBoolean();
                 var remoteId = await ResolveRemoteOrderIdAsync(orderId);
                 if (remoteId == null) return false;
-                return await _remoteDb.ToggleHoldAsync(remoteId.Value, isHeld);
+                return await _remoteDb.ToggleHoldAsync(remoteId, isHeld);
             }
 
             case "update_status":
             {
-                var orderId = payload["orderId"].GetInt32();
+                var orderId = payload["orderId"].GetString()!;
                 var statusCode = payload["statusCode"].GetString()!;
                 var remoteId = await ResolveRemoteOrderIdAsync(orderId);
                 if (remoteId == null) return false;
                 var statusId = SyncMapper.StatusCodeToStatusId(statusCode);
-                return await _remoteDb.UpdateOrderStatusAsync(remoteId.Value, statusId);
+                return await _remoteDb.UpdateOrderStatusAsync(remoteId, statusId);
             }
 
             case "set_notified":
             {
-                var orderId = payload["orderId"].GetInt32();
+                var orderId = payload["orderId"].GetString()!;
                 var remoteId = await ResolveRemoteOrderIdAsync(orderId);
                 if (remoteId == null) return false;
-                return await _remoteDb.UpdateOrderStatusAsync(remoteId.Value, 5); // notified
+                return await _remoteDb.UpdateOrderStatusAsync(remoteId, 5); // notified
             }
 
             case "set_items_printed":
             {
-                var orderId = payload["orderId"].GetInt32();
+                var orderId = payload["orderId"].GetString()!;
                 var remoteId = await ResolveRemoteOrderIdAsync(orderId);
                 if (remoteId == null) return false;
                 // Re-push all items for this order with current is_printed state
                 using var conn = _localDb.OpenConnection();
                 var items = ReadLocalItems(conn, orderId);
                 if (items.Count == 0) return true;
-                return await _remoteDb.UpsertOrderItemsAsync(remoteId.Value, items);
+                return await _remoteDb.UpsertOrderItemsAsync(remoteId, items);
             }
 
             case "set_current_location":
@@ -119,12 +119,12 @@ public class SyncService : ISyncService
 
             case "add_note":
             {
-                var orderId = payload["orderId"].GetInt32();
+                var orderId = payload["orderId"].GetString()!;
                 var note = payload["note"].GetString()!;
                 var remoteId = await ResolveRemoteOrderIdAsync(orderId);
                 if (remoteId == null) return false;
-                var mariaDbNoteId = await _remoteDb.AddNoteAsync(remoteId.Value, null, note);
-                if (mariaDbNoteId <= 0) return false;
+                var mariaDbNoteId = await _remoteDb.AddNoteAsync(remoteId, null, note);
+                if (string.IsNullOrEmpty(mariaDbNoteId)) return false;
 
                 // Set remote_id on the local note so sync pull won't duplicate it.
                 // This is best-effort — if it fails, the note is already in MariaDB
@@ -157,14 +157,14 @@ public class SyncService : ISyncService
                 return await PushCreateAlterationAsync(payload);
 
             default:
-                AppLog.Warn($"SyncService: unknown push operation '{operation}'");
+                AppLog.Info($"SyncService: unknown push operation '{operation}'");
                 return true; // don't re-queue unknown ops
         }
     }
 
     private async Task<bool> PushInsertOrderAsync(Dictionary<string, JsonElement> payload)
     {
-        var localOrderId = payload["localOrderId"].GetInt32();
+        var localOrderId = payload["localOrderId"].GetString()!;
 
         // Read the full order from SQLite to push
         using var conn = _localDb.OpenConnection();
@@ -212,7 +212,7 @@ public class SyncService : ISyncService
             alterationType: reader.IsDBNull(22) ? null : reader.GetString(22));
         reader.Close();
 
-        if (remoteId <= 0) return false;
+        if (string.IsNullOrEmpty(remoteId)) return false;
 
         // Cache the id mapping
         _outbox.SetIdMapping("orders", localOrderId, remoteId);
@@ -232,8 +232,8 @@ public class SyncService : ISyncService
 
     private async Task<bool> PushCreateAlterationAsync(Dictionary<string, JsonElement> payload)
     {
-        var localChildId = payload["localOrderId"].GetInt32();
-        var localParentId = payload["sourceOrderId"].GetInt32();
+        var localChildId = payload["localOrderId"].GetString()!;
+        var localParentId = payload["sourceOrderId"].GetString()!;
         var alterationType = payload["alterationType"].GetString() ?? "split";
 
         // 1. Push child order (same pattern as PushInsertOrderAsync)
@@ -250,22 +250,22 @@ public class SyncService : ISyncService
 
         // 2. Sync parent's is_printed state to MariaDB (only true if all items sent)
         var parentRemoteId = await ResolveRemoteOrderIdAsync(localParentId);
-        if (parentRemoteId.HasValue)
+        if (parentRemoteId != null)
         {
             using var pConn = _localDb.OpenConnection();
             using var pCmd = pConn.CreateCommand();
             pCmd.CommandText = "SELECT is_printed FROM orders WHERE id = @id";
             pCmd.Parameters.AddWithValue("@id", localParentId);
             var parentPrinted = Convert.ToInt32(pCmd.ExecuteScalar()) == 1;
-            if (!await _remoteDb.SetOrderPrintedAsync(parentRemoteId.Value, parentPrinted))
+            if (!await _remoteDb.SetOrderPrintedAsync(parentRemoteId, parentPrinted))
                 return false;
         }
 
         // 3. Insert order_links row in MariaDB
         var childRemoteId = await ResolveRemoteOrderIdAsync(localChildId);
-        if (parentRemoteId.HasValue && childRemoteId.HasValue)
+        if (parentRemoteId != null && childRemoteId != null)
         {
-            if (!await _remoteDb.InsertOrderLinkAsync(parentRemoteId.Value, childRemoteId.Value, alterationType, ""))
+            if (!await _remoteDb.InsertOrderLinkAsync(parentRemoteId, childRemoteId, alterationType, ""))
                 return false;
         }
 
@@ -273,7 +273,7 @@ public class SyncService : ISyncService
         return true;
     }
 
-    private List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> ReadLocalItems(SqliteConnection conn, int orderId)
+    private List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> ReadLocalItems(SqliteConnection conn, string orderId)
     {
         var items = new List<(string, string, int, string, string, string, string, bool)>();
         using var cmd = conn.CreateCommand();
@@ -316,7 +316,7 @@ public class SyncService : ISyncService
                 return;
             }
 
-            var pulledMariaDbOrderIds = new List<int>();
+            var pulledMariaDbOrderIds = new List<string>();
 
             int orderErrors = 0;
             foreach (var row in remoteOrders)
@@ -325,20 +325,20 @@ public class SyncService : ISyncService
                 {
                     var externalOrderId = (string)row.external_order_id;
                     var pickupStoreId = (int)row.pickup_store_id;
-                    var mariaDbOrderId = (int)row.id;
+                    var mariaDbOrderId = Convert.ToString(row.id)!;
 
                     // Check if this order has pending outbox entries — skip if so
                     var localId = FindLocalOrderId(externalOrderId, pickupStoreId);
-                    if (localId.HasValue && pendingOrderIds.Contains(localId.Value))
+                    if (localId != null && pendingOrderIds.Contains(localId))
                         continue;
 
                     UpsertLocalOrder(row, localId);
 
                     // Update id_map
                     var newLocalId = FindLocalOrderId(externalOrderId, pickupStoreId);
-                    if (newLocalId.HasValue)
+                    if (newLocalId != null)
                     {
-                        _outbox.SetIdMapping("orders", newLocalId.Value, mariaDbOrderId);
+                        _outbox.SetIdMapping("orders", newLocalId, mariaDbOrderId);
                         pulledMariaDbOrderIds.Add(mariaDbOrderId);
                     }
                 }
@@ -463,7 +463,7 @@ public class SyncService : ISyncService
         }
     }
 
-    private int? FindLocalOrderId(string externalOrderId, int pickupStoreId)
+    private string? FindLocalOrderId(string externalOrderId, int pickupStoreId)
     {
         using var conn = _localDb.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -471,7 +471,7 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@eid", externalOrderId);
         cmd.Parameters.AddWithValue("@store", pickupStoreId);
         var result = cmd.ExecuteScalar();
-        return result != null ? Convert.ToInt32(result) : null;
+        return result != null ? Convert.ToString(result) : null;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -494,7 +494,7 @@ public class SyncService : ISyncService
     //  See: project_alteration_system.md, project_sync_authority.md
     // ═══════════════════════════════════════════════════════════════
 
-    private void UpsertLocalOrder(dynamic row, int? existingLocalId)
+    private void UpsertLocalOrder(dynamic row, string? existingLocalId)
     {
         using var conn = _localDb.OpenConnection();
 
@@ -505,12 +505,12 @@ public class SyncService : ISyncService
         int orderStatusId = SyncMapper.StatusCodeToStatusId(statusCode);
         int orderSourceId = SyncMapper.SourceCodeToSourceId(sourceCode);
 
-        if (existingLocalId.HasValue)
+        if (existingLocalId != null)
         {
             // Compare updated_at — only update if MariaDB is newer
             using var checkCmd = conn.CreateCommand();
             checkCmd.CommandText = "SELECT updated_at FROM orders WHERE id = @id";
-            checkCmd.Parameters.AddWithValue("@id", existingLocalId.Value);
+            checkCmd.Parameters.AddWithValue("@id", existingLocalId);
             var localUpdatedStr = checkCmd.ExecuteScalar() as string;
             if (localUpdatedStr != null && DateTime.TryParse(localUpdatedStr, out var localUpdated))
             {
@@ -536,7 +536,7 @@ public class SyncService : ISyncService
                 """;
             BindPullUpdateParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
             cmd.Parameters.AddWithValue("@updatedAt", ((DateTime)row.updated_at).ToString("o"));
-            cmd.Parameters.AddWithValue("@id", existingLocalId.Value);
+            cmd.Parameters.AddWithValue("@id", existingLocalId);
             cmd.ExecuteNonQuery();
         }
         else
@@ -606,9 +606,9 @@ public class SyncService : ISyncService
 
     private void UpsertLocalItem(dynamic item)
     {
-        int mariaDbOrderId = (int)item.order_id;
+        string mariaDbOrderId = Convert.ToString(item.order_id)!;
         var localOrderId = _outbox.GetLocalId("orders", mariaDbOrderId);
-        if (!localOrderId.HasValue) return; // can't map this item
+        if (localOrderId == null) return; // can't map this item
 
         string sizeLabel = (string?)item.size_label ?? "";
         string mediaType = (string?)item.media_type ?? "";
@@ -623,7 +623,7 @@ public class SyncService : ISyncService
             WHERE order_id = @oid AND image_filename = @fname
               AND size_label = @size AND media_type = @media
             """;
-        findCmd.Parameters.AddWithValue("@oid", localOrderId.Value);
+        findCmd.Parameters.AddWithValue("@oid", localOrderId);
         findCmd.Parameters.AddWithValue("@fname", imageFilename);
         findCmd.Parameters.AddWithValue("@size", sizeLabel);
         findCmd.Parameters.AddWithValue("@media", mediaType);
@@ -644,7 +644,7 @@ public class SyncService : ISyncService
             cmd.Parameters.AddWithValue("@fpath", (string?)item.image_filepath ?? "");
             cmd.Parameters.AddWithValue("@options", (string?)item.options_json ?? "[]");
             cmd.Parameters.AddWithValue("@printed", Convert.ToBoolean(item.is_printed ?? false) ? 1 : 0);
-            cmd.Parameters.AddWithValue("@id", Convert.ToInt32(existingId));
+            cmd.Parameters.AddWithValue("@id", Convert.ToString(existingId));
             cmd.ExecuteNonQuery();
         }
         else
@@ -662,7 +662,7 @@ public class SyncService : ISyncService
                     @options, @printed
                 )
                 """;
-            cmd.Parameters.AddWithValue("@oid", localOrderId.Value);
+            cmd.Parameters.AddWithValue("@oid", localOrderId);
             cmd.Parameters.AddWithValue("@size", sizeLabel);
             cmd.Parameters.AddWithValue("@media", mediaType);
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);
@@ -699,17 +699,17 @@ public class SyncService : ISyncService
 
     private void InsertRemoteNote(dynamic note)
     {
-        int mariaDbNoteId = (int)note.id;
-        int mariaDbOrderId = (int)note.order_id;
+        string mariaDbNoteId = Convert.ToString(note.id)!;
+        string mariaDbOrderId = Convert.ToString(note.order_id)!;
         var localOrderId = _outbox.GetLocalId("orders", mariaDbOrderId);
-        if (!localOrderId.HasValue) return;
+        if (localOrderId == null) return;
 
         using var conn = _localDb.OpenConnection();
 
         // Verify the local order still exists (id_map can outlive deleted orders)
         using var existsCmd = conn.CreateCommand();
         existsCmd.CommandText = "SELECT COUNT(*) FROM orders WHERE id = @id";
-        existsCmd.Parameters.AddWithValue("@id", localOrderId.Value);
+        existsCmd.Parameters.AddWithValue("@id", localOrderId);
         if (Convert.ToInt32(existsCmd.ExecuteScalar()) == 0) return;
 
         // Check if we already have this remote note
@@ -734,7 +734,7 @@ public class SyncService : ISyncService
             INSERT INTO order_history (order_id, note, created_by, created_at, remote_id)
             VALUES (@oid, @note, @by, @at, @rid)
             """;
-        cmd.Parameters.AddWithValue("@oid", localOrderId.Value);
+        cmd.Parameters.AddWithValue("@oid", localOrderId);
         cmd.Parameters.AddWithValue("@note", noteText);
         cmd.Parameters.AddWithValue("@by", employeeName);
         cmd.Parameters.AddWithValue("@at", createdAt);
@@ -795,7 +795,7 @@ public class SyncService : ISyncService
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    private bool IsOurOrder(int localOrderId)
+    private bool IsOurOrder(string localOrderId)
     {
         using var conn = _localDb.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -806,11 +806,11 @@ public class SyncService : ISyncService
         return Convert.ToInt32(result) == _settings.StoreId;
     }
 
-    private async Task<int?> ResolveRemoteOrderIdAsync(int localOrderId)
+    private async Task<string?> ResolveRemoteOrderIdAsync(string localOrderId)
     {
         // Check cache first
         var cached = _outbox.GetRemoteId("orders", localOrderId);
-        if (cached.HasValue) return cached.Value;
+        if (cached != null) return cached;
 
         // Look up by natural key
         using var conn = _localDb.OpenConnection();
@@ -824,13 +824,13 @@ public class SyncService : ISyncService
         reader.Close();
 
         var remoteId = await _remoteDb.FindOrderIdByNaturalKeyAsync(eid, store);
-        if (remoteId.HasValue)
-            _outbox.SetIdMapping("orders", localOrderId, remoteId.Value);
+        if (remoteId != null)
+            _outbox.SetIdMapping("orders", localOrderId, remoteId);
 
         return remoteId;
     }
 
-    private void AddOrdersMissingItems(List<int> mariaDbOrderIds)
+    private void AddOrdersMissingItems(List<string> mariaDbOrderIds)
     {
         using var conn = _localDb.OpenConnection();
         using var cmd = conn.CreateCommand();
@@ -846,23 +846,23 @@ public class SyncService : ISyncService
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var remoteId = reader.GetInt32(0);
+            var remoteId = reader.GetString(0);
             if (!mariaDbOrderIds.Contains(remoteId))
                 mariaDbOrderIds.Add(remoteId);
         }
     }
 
-    private static int GetOrderIdFromPayload(string payloadJson)
+    private static string GetOrderIdFromPayload(string payloadJson)
     {
         try
         {
             var doc = JsonDocument.Parse(payloadJson);
             if (doc.RootElement.TryGetProperty("orderId", out var oid))
-                return oid.GetInt32();
+                return oid.GetString() ?? "";
             if (doc.RootElement.TryGetProperty("localOrderId", out var lid))
-                return lid.GetInt32();
+                return lid.GetString() ?? "";
         }
         catch { }
-        return 0;
+        return "";
     }
 }

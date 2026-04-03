@@ -7,32 +7,32 @@ namespace HitePhoto.PrintStation.Core.Services;
 public interface ITransferService
 {
     /// <summary>Transfer an entire order to another store.</summary>
-    void TransferOrder(int orderId, int targetStoreId, string operatorName, string comment);
+    void TransferOrder(string orderId, int targetStoreId, string operatorName, string comment);
 
     /// <summary>Transfer specific items to another store.</summary>
-    void TransferItems(int orderId, List<int> itemIds, int targetStoreId, string operatorName, string comment);
+    void TransferItems(string orderId, List<string> itemIds, int targetStoreId, string operatorName, string comment);
 
     /// <summary>
     /// For transferred orders (is_externally_modified=1), check if disk files match DB items.
     /// Returns a list of mismatches. Empty list = all good.
     /// </summary>
-    List<TransferMismatch> CheckTransferMismatches(int orderId);
+    List<TransferMismatch> CheckTransferMismatches(string orderId);
 
     /// <summary>
     /// Send an order to another store for production. Creates a child work order
     /// linked to the parent, SFTP's files, marks parent as dealt with.
     /// Returns the new work order's ID.
     /// </summary>
-    int SendForProduction(int orderId, int targetStoreId, string operatorName, string comment,
-        List<int>? itemIds = null, List<string>? folderNames = null, bool createOrder = true);
+    string SendForProduction(string orderId, int targetStoreId, string operatorName, string comment,
+        List<string>? itemIds = null, List<string>? folderNames = null, bool createOrder = true);
 
     /// <summary>
     /// Get an order from another store's production folder. Downloads files via SFTP,
     /// creates a -R# child order if createOrder=true.
     /// Returns the new order's ID, or null if createOrder=false.
     /// </summary>
-    int? GetFromProduction(int orderId, bool createOrder, string operatorName, string comment,
-        List<int>? itemIds = null, List<string>? folderNames = null);
+    string? GetFromProduction(string orderId, bool createOrder, string operatorName, string comment,
+        List<string>? itemIds = null, List<string>? folderNames = null);
 
     /// <summary>List subfolder names in a remote order folder (for folder checkbox UI).</summary>
     List<string> ListRemoteFolders(string remotePath);

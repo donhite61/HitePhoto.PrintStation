@@ -278,7 +278,7 @@ public class OrderDb
 
     private const string CreateOrdersTable = """
         CREATE TABLE IF NOT EXISTS orders (
-            id                        INTEGER PRIMARY KEY,
+            id                        TEXT PRIMARY KEY,
             external_order_id         TEXT NOT NULL,
             order_source_id           INTEGER NOT NULL DEFAULT 1,
             source_code               TEXT NOT NULL DEFAULT '',
@@ -328,8 +328,8 @@ public class OrderDb
 
     private const string CreateOrderItemsTable = """
         CREATE TABLE IF NOT EXISTS order_items (
-            id                      INTEGER PRIMARY KEY,
-            order_id                INTEGER NOT NULL REFERENCES orders(id),
+            id                      TEXT PRIMARY KEY,
+            order_id                TEXT NOT NULL REFERENCES orders(id),
             size_label              TEXT NOT NULL,
             media_type              TEXT DEFAULT '',
             category                TEXT DEFAULT '',
@@ -356,8 +356,8 @@ public class OrderDb
         );
 
         CREATE TABLE IF NOT EXISTS order_item_options (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_item_id INTEGER NOT NULL REFERENCES order_items(id),
+            id            TEXT PRIMARY KEY,
+            order_item_id TEXT NOT NULL REFERENCES order_items(id),
             option_key    TEXT NOT NULL,
             option_value  TEXT NOT NULL,
             created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -368,8 +368,8 @@ public class OrderDb
 
     private const string CreateOrderHistoryTable = """
         CREATE TABLE IF NOT EXISTS order_history (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_id   INTEGER NOT NULL REFERENCES orders(id),
+            id         TEXT PRIMARY KEY,
+            order_id   TEXT NOT NULL REFERENCES orders(id),
             note       TEXT NOT NULL,
             created_by TEXT DEFAULT '',
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -380,8 +380,8 @@ public class OrderDb
 
     private const string CreateColorCorrectionsTable = """
         CREATE TABLE IF NOT EXISTS color_corrections (
-            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_id           INTEGER NOT NULL,
+            id                 TEXT PRIMARY KEY,
+            order_id           TEXT NOT NULL,
             image_path         TEXT NOT NULL,
             corrected_path     TEXT DEFAULT '',
             exposure           INTEGER DEFAULT 0,
@@ -427,7 +427,7 @@ public class OrderDb
         CREATE TABLE IF NOT EXISTS sync_outbox (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             table_name   TEXT NOT NULL,
-            record_id    INTEGER NOT NULL,
+            record_id    TEXT NOT NULL,
             operation    TEXT NOT NULL,
             payload_json TEXT NOT NULL,
             created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -618,9 +618,9 @@ public class OrderDb
         AddColumnIfMissing(conn, "order_history", "remote_id", "INTEGER DEFAULT NULL");
         Execute(conn, """
             CREATE TABLE IF NOT EXISTS id_map (
-                table_name TEXT    NOT NULL,
-                local_id   INTEGER NOT NULL,
-                remote_id  INTEGER NOT NULL,
+                table_name TEXT NOT NULL,
+                local_id   TEXT NOT NULL,
+                remote_id  TEXT NOT NULL,
                 PRIMARY KEY (table_name, local_id)
             );
             """);
@@ -698,9 +698,9 @@ public class OrderDb
         // Link types: split, alteration, transfer, outlab.
         Execute(conn, """
             CREATE TABLE IF NOT EXISTS order_links (
-                id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                parent_order_id   INTEGER NOT NULL REFERENCES orders(id),
-                child_order_id    INTEGER NOT NULL REFERENCES orders(id),
+                id                TEXT PRIMARY KEY,
+                parent_order_id   TEXT NOT NULL REFERENCES orders(id),
+                child_order_id    TEXT NOT NULL REFERENCES orders(id),
                 link_type         TEXT NOT NULL,
                 created_by        TEXT NOT NULL DEFAULT '',
                 created_at        TEXT NOT NULL DEFAULT (datetime('now'))

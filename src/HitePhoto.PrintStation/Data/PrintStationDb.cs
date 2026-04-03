@@ -170,7 +170,7 @@ public class PrintStationDb
     // ── Order items ──────────────────────────────────────────────────────
 
     /// <summary>Get all items for an order.</summary>
-    public async Task<List<OrderItem>> GetOrderItemsAsync(int orderId)
+    public async Task<List<OrderItem>> GetOrderItemsAsync(string orderId)
     {
         const string sql = "SELECT * FROM order_items WHERE order_id = @OrderId ORDER BY size_label, media_type";
 
@@ -194,11 +194,11 @@ public class PrintStationDb
     /// Get items for multiple orders in a single query (batch load for pending tab).
     /// Returns a dictionary keyed by order ID.
     /// </summary>
-    public async Task<Dictionary<int, List<OrderItem>>> GetOrderItemsBatchAsync(IEnumerable<int> orderIds)
+    public async Task<Dictionary<string, List<OrderItem>>> GetOrderItemsBatchAsync(IEnumerable<string> orderIds)
     {
         var idList = orderIds.ToList();
         if (idList.Count == 0)
-            return new Dictionary<int, List<OrderItem>>();
+            return new Dictionary<string, List<OrderItem>>();
 
         const string sql = "SELECT * FROM order_items WHERE order_id IN @OrderIds ORDER BY order_id, size_label, media_type";
 
@@ -215,14 +215,14 @@ public class PrintStationDb
                 detail: $"Attempted: SELECT items for {idList.Count} orders. " +
                         $"Expected: grouped item list. Found: exception.",
                 ex: ex);
-            return new Dictionary<int, List<OrderItem>>();
+            return new Dictionary<string, List<OrderItem>>();
         }
     }
 
     // ── Order notes ──────────────────────────────────────────────────────
 
     /// <summary>Get notes for an order.</summary>
-    public async Task<List<OrderNote>> GetOrderNotesAsync(int orderId)
+    public async Task<List<OrderNote>> GetOrderNotesAsync(string orderId)
     {
         const string sql = """
             SELECT n.*, CONCAT(e.first_name, ' ', e.last_name) AS EmployeeName
@@ -272,7 +272,7 @@ public class PrintStationDb
     // ── Status updates ───────────────────────────────────────────────────
 
     /// <summary>Update an order's status and write audit history.</summary>
-    public async Task<bool> UpdateOrderStatusAsync(int orderId, int newStatusId, int? employeeId = null, string? notes = null)
+    public async Task<bool> UpdateOrderStatusAsync(string orderId, int newStatusId, int? employeeId = null, string? notes = null)
     {
         const string sqlUpdate = """
             UPDATE orders SET order_status_id = @NewStatusId, updated_at = NOW()
@@ -280,8 +280,8 @@ public class PrintStationDb
             """;
 
         const string sqlHistory = """
-            INSERT INTO order_status_history (order_id, old_status_id, new_status_id, changed_by_employee_id, notes)
-            SELECT @OrderId, order_status_id, @NewStatusId, @EmployeeId, @Notes
+            INSERT INTO order_status_history (id, order_id, old_status_id, new_status_id, changed_by_employee_id, notes)
+            SELECT @HistoryId, @OrderId, order_status_id, @NewStatusId, @EmployeeId, @Notes
             FROM orders WHERE id = @OrderId
             """;
 
@@ -291,7 +291,8 @@ public class PrintStationDb
             await conn.OpenAsync();
             await using var tx = await conn.BeginTransactionAsync();
 
-            await conn.ExecuteAsync(sqlHistory, new { OrderId = orderId, NewStatusId = newStatusId, EmployeeId = employeeId, Notes = notes }, tx);
+            var historyId = Guid.NewGuid().ToString();
+            await conn.ExecuteAsync(sqlHistory, new { HistoryId = historyId, OrderId = orderId, NewStatusId = newStatusId, EmployeeId = employeeId, Notes = notes }, tx);
             await conn.ExecuteAsync(sqlUpdate, new { OrderId = orderId, NewStatusId = newStatusId }, tx);
 
             await tx.CommitAsync();
@@ -309,7 +310,7 @@ public class PrintStationDb
     }
 
     /// <summary>Toggle hold on an order and write a note.</summary>
-    public async Task<bool> ToggleHoldAsync(int orderId, bool isHeld, string? reason = null, int? employeeId = null)
+    public async Task<bool> ToggleHoldAsync(string orderId, bool isHeld, string? reason = null, int? employeeId = null)
     {
         const string sqlHold = "UPDATE orders SET is_held = @IsHeld, updated_at = NOW() WHERE id = @OrderId";
 
@@ -323,11 +324,12 @@ public class PrintStationDb
 
             if (!string.IsNullOrWhiteSpace(reason))
             {
+                var noteId = Guid.NewGuid().ToString();
                 const string sqlNote = """
-                    INSERT INTO order_notes (order_id, employee_id, note_text, note_type)
-                    VALUES (@OrderId, @EmployeeId, @NoteText, 'hold')
+                    INSERT INTO order_notes (id, order_id, employee_id, note_text, note_type)
+                    VALUES (@NoteId, @OrderId, @EmployeeId, @NoteText, 'hold')
                     """;
-                await conn.ExecuteAsync(sqlNote, new { OrderId = orderId, EmployeeId = employeeId, NoteText = reason }, tx);
+                await conn.ExecuteAsync(sqlNote, new { NoteId = noteId, OrderId = orderId, EmployeeId = employeeId, NoteText = reason }, tx);
             }
 
             // If placing on hold, also set status to on_hold (3)
@@ -372,19 +374,19 @@ public class PrintStationDb
     }
 
     /// <summary>Add a note to an order.</summary>
-    public async Task<int> AddNoteAsync(int orderId, int? employeeId, string noteText, string noteType = "general")
+    public async Task<string> AddNoteAsync(string orderId, int? employeeId, string noteText, string noteType = "general")
     {
+        var noteId = Guid.NewGuid().ToString();
         const string sql = """
-            INSERT INTO order_notes (order_id, employee_id, note_text, note_type)
-            VALUES (@OrderId, @EmployeeId, @NoteText, @NoteType);
-            SELECT LAST_INSERT_ID();
+            INSERT INTO order_notes (id, order_id, employee_id, note_text, note_type)
+            VALUES (@NoteId, @OrderId, @EmployeeId, @NoteText, @NoteType)
             """;
 
         try
         {
             await using var conn = CreateConnection();
-            var id = await conn.ExecuteScalarAsync<int>(sql, new { OrderId = orderId, EmployeeId = employeeId, NoteText = noteText, NoteType = noteType });
-            return id;
+            await conn.ExecuteAsync(sql, new { NoteId = noteId, OrderId = orderId, EmployeeId = employeeId, NoteText = noteText, NoteType = noteType });
+            return noteId;
         }
         catch (Exception ex)
         {
@@ -392,12 +394,12 @@ public class PrintStationDb
                 "Failed to add order note",
                 detail: $"Attempted: INSERT note on order {orderId}. Found: exception.",
                 ex: ex);
-            return 0;
+            return string.Empty;
         }
     }
 
     /// <summary>Mark a single item as printed.</summary>
-    public async Task<bool> UpdateItemPrintedAsync(int itemId, DateTime printedAt)
+    public async Task<bool> UpdateItemPrintedAsync(string itemId, DateTime printedAt)
     {
         const string sql = "UPDATE order_items SET is_printed = 1, printed_at = @PrintedAt WHERE id = @ItemId";
 
@@ -418,7 +420,7 @@ public class PrintStationDb
     }
 
     /// <summary>Transfer an order to another store (DB metadata only — SFTP for files is separate).</summary>
-    public async Task<bool> TransferOrderAsync(int orderId, int targetStoreId, string? note = null, int? employeeId = null)
+    public async Task<bool> TransferOrderAsync(string orderId, int targetStoreId, string? note = null, int? employeeId = null)
     {
         const string sqlTransfer = """
             UPDATE orders SET
@@ -441,11 +443,12 @@ public class PrintStationDb
 
             if (!string.IsNullOrWhiteSpace(note))
             {
+                var noteId = Guid.NewGuid().ToString();
                 const string sqlNote = """
-                    INSERT INTO order_notes (order_id, employee_id, note_text, note_type)
-                    VALUES (@OrderId, @EmployeeId, @NoteText, 'transfer')
+                    INSERT INTO order_notes (id, order_id, employee_id, note_text, note_type)
+                    VALUES (@NoteId, @OrderId, @EmployeeId, @NoteText, 'transfer')
                     """;
-                await conn.ExecuteAsync(sqlNote, new { OrderId = orderId, EmployeeId = employeeId, NoteText = note }, tx);
+                await conn.ExecuteAsync(sqlNote, new { NoteId = noteId, OrderId = orderId, EmployeeId = employeeId, NoteText = note }, tx);
             }
 
             await tx.CommitAsync();
@@ -609,7 +612,7 @@ public class PrintStationDb
     }
 
     /// <summary>Get items for multiple orders in one query.</summary>
-    public async Task<List<dynamic>> GetOrderItemsForOrdersAsync(List<int> mariaDbOrderIds)
+    public async Task<List<dynamic>> GetOrderItemsForOrdersAsync(List<string> mariaDbOrderIds)
     {
         if (mariaDbOrderIds.Count == 0)
             return new List<dynamic>();
@@ -672,7 +675,7 @@ public class PrintStationDb
     /// Upsert an order to MariaDB. Uses INSERT...ON DUPLICATE KEY UPDATE
     /// on (external_order_id, pickup_store_id). Returns the MariaDB order id.
     /// </summary>
-    public async Task<int> UpsertOrderAsync(
+    public async Task<string> UpsertOrderAsync(
         string externalOrderId, int pickupStoreId, int orderSourceId, int orderStatusId,
         string? customerFirstName, string? customerLastName, string? customerEmail, string? customerPhone,
         decimal? totalAmount, bool isHeld, bool isTransfer, int? transferStoreId,
@@ -688,9 +691,10 @@ public class PrintStationDb
         int harvestedByStoreId = 0, bool isPrinted = false,
         string? supersedes = null, string? alterationType = null)
     {
+        var orderId = Guid.NewGuid().ToString();
         const string sql = """
             INSERT INTO orders
-                (external_order_id, pickup_store_id, current_location_store_id,
+                (id, external_order_id, pickup_store_id, current_location_store_id,
                  order_source_id, order_status_id,
                  customer_first_name, customer_last_name, customer_email, customer_phone,
                  total_amount, payment_status,
@@ -705,7 +709,7 @@ public class PrintStationDb
                  supersedes, alteration_type,
                  sync_status)
             VALUES
-                (@Eid, @Store, @Store,
+                (@OrderId, @Eid, @Store, @Store,
                  @SourceId, @StatusId,
                  @FirstName, @LastName, @Email, @Phone,
                  @Total, @PaymentStatus,
@@ -751,15 +755,15 @@ public class PrintStationDb
                 is_printed = VALUES(is_printed),
                 supersedes = COALESCE(VALUES(supersedes), supersedes),
                 alteration_type = COALESCE(VALUES(alteration_type), alteration_type),
-                sync_status = 'synced';
-            SELECT LAST_INSERT_ID();
+                sync_status = 'synced'
             """;
 
         try
         {
             await using var conn = CreateConnection();
-            var id = await conn.ExecuteScalarAsync<int>(sql, new
+            await conn.ExecuteAsync(sql, new
             {
+                OrderId = orderId,
                 Eid = externalOrderId,
                 Store = pickupStoreId,
                 SourceId = orderSourceId,
@@ -796,12 +800,18 @@ public class PrintStationDb
                 AltType = alterationType,
             });
 
-            // LAST_INSERT_ID returns 0 on update — need to query by natural key
-            if (id == 0)
+            // On duplicate key update, the generated GUID is discarded — query by natural key to get existing id
+            var id = await conn.ExecuteScalarAsync<string?>(
+                "SELECT id FROM orders WHERE external_order_id = @Eid AND pickup_store_id = @Store",
+                new { Eid = externalOrderId, Store = pickupStoreId });
+
+            if (string.IsNullOrEmpty(id))
             {
-                id = await conn.ExecuteScalarAsync<int>(
-                    "SELECT id FROM orders WHERE external_order_id = @Eid AND pickup_store_id = @Store",
-                    new { Eid = externalOrderId, Store = pickupStoreId });
+                AlertCollector.Error(AlertCategory.Database,
+                    "UpsertOrderAsync: could not retrieve order id after upsert",
+                    detail: $"Attempted: upsert order '{externalOrderId}' store {pickupStoreId}. " +
+                            $"Expected: non-empty id from SELECT. Found: null/empty.");
+                return string.Empty;
             }
             return id;
         }
@@ -815,12 +825,12 @@ public class PrintStationDb
                         $"Context: sync push. " +
                         $"State: queued in outbox for retry.",
                 ex: ex);
-            return 0;
+            return string.Empty;
         }
     }
 
     /// <summary>Upsert order items to MariaDB. Deletes existing items and re-inserts. Retries on deadlock.</summary>
-    public async Task<bool> UpsertOrderItemsAsync(int mariaDbOrderId, List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> items)
+    public async Task<bool> UpsertOrderItemsAsync(string mariaDbOrderId, List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> items)
     {
         const int maxRetries = 3;
         for (int attempt = 1; attempt <= maxRetries; attempt++)
@@ -837,18 +847,20 @@ public class PrintStationDb
 
                 foreach (var item in items)
                 {
+                    var itemId = Guid.NewGuid().ToString();
                     await conn.ExecuteAsync("""
                         INSERT INTO order_items
-                            (order_id, size_label, media_type, quantity,
+                            (id, order_id, size_label, media_type, quantity,
                              image_filename, image_filepath, original_image_filepath,
                              options_json, is_printed)
                         VALUES
-                            (@OrderId, @Size, @Media, @Qty,
+                            (@ItemId, @OrderId, @Size, @Media, @Qty,
                              @Filename, @Filepath, @OrigFilepath,
                              @Options, @Printed)
                         """,
                         new
                         {
+                            ItemId = itemId,
                             OrderId = mariaDbOrderId,
                             Size = item.SizeLabel,
                             Media = item.MediaType,
@@ -886,7 +898,7 @@ public class PrintStationDb
         return false;
     }
 
-    public async Task<bool> SetOrderPrintedAsync(int mariaDbOrderId, bool printed)
+    public async Task<bool> SetOrderPrintedAsync(string mariaDbOrderId, bool printed)
     {
         const string sql = "UPDATE orders SET is_printed = @Val WHERE id = @Id";
         try
@@ -909,16 +921,17 @@ public class PrintStationDb
         }
     }
 
-    public async Task<bool> InsertOrderLinkAsync(int parentId, int childId, string linkType, string createdBy)
+    public async Task<bool> InsertOrderLinkAsync(string parentId, string childId, string linkType, string createdBy)
     {
+        var linkId = Guid.NewGuid().ToString();
         const string sql = """
-            INSERT INTO order_links (parent_order_id, child_order_id, link_type, created_by)
-            VALUES (@Parent, @Child, @Type, @By)
+            INSERT INTO order_links (id, parent_order_id, child_order_id, link_type, created_by)
+            VALUES (@LinkId, @Parent, @Child, @Type, @By)
             """;
         try
         {
             await using var conn = CreateConnection();
-            await conn.ExecuteAsync(sql, new { Parent = parentId, Child = childId, Type = linkType, By = createdBy });
+            await conn.ExecuteAsync(sql, new { LinkId = linkId, Parent = parentId, Child = childId, Type = linkType, By = createdBy });
             return true;
         }
         catch (Exception ex)
@@ -936,14 +949,14 @@ public class PrintStationDb
     }
 
     /// <summary>Find MariaDB order ID by natural key.</summary>
-    public async Task<int?> FindOrderIdByNaturalKeyAsync(string externalOrderId, int pickupStoreId)
+    public async Task<string?> FindOrderIdByNaturalKeyAsync(string externalOrderId, int pickupStoreId)
     {
         const string sql = "SELECT id FROM orders WHERE external_order_id = @Eid AND pickup_store_id = @Store";
 
         try
         {
             await using var conn = CreateConnection();
-            return await conn.ExecuteScalarAsync<int?>(sql, new { Eid = externalOrderId, Store = pickupStoreId });
+            return await conn.ExecuteScalarAsync<string?>(sql, new { Eid = externalOrderId, Store = pickupStoreId });
         }
         catch (Exception ex)
         {

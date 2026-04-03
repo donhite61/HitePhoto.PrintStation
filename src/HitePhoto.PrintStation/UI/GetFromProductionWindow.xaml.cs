@@ -8,7 +8,7 @@ namespace HitePhoto.PrintStation.UI;
 
 public partial class GetFromProductionWindow : Window
 {
-    private readonly int _orderId;
+    private readonly string _orderId;
     private readonly string _externalOrderId;
     private readonly string _remotePath;
     private readonly ITransferService _transfer;
@@ -29,7 +29,7 @@ public partial class GetFromProductionWindow : Window
     }
 
     public GetFromProductionWindow(
-        int orderId,
+        string orderId,
         string externalOrderId,
         string folderPath,
         ITransferService transfer,
@@ -210,9 +210,9 @@ public partial class GetFromProductionWindow : Window
         GetBtn.IsEnabled = selectedItems > 0 || selectedFolders > 0;
     }
 
-    private List<int> GetSelectedItemIds()
+    private List<string> GetSelectedItemIds()
     {
-        var ids = new List<int>();
+        var ids = new List<string>();
         foreach (var group in _sizeGroups)
             foreach (var (item, cb) in group.Items)
                 if (cb.IsChecked == true)
@@ -251,7 +251,7 @@ public partial class GetFromProductionWindow : Window
 
         var comment = CommentBox.Text.Trim();
         var operatorName = Environment.UserName;
-        List<int>? itemIds = selectedIds.Count > 0 && selectedIds.Count < _totalItemCount ? selectedIds : null;
+        List<string>? itemIds = selectedIds.Count > 0 && selectedIds.Count < _totalItemCount ? selectedIds : null;
         List<string>? folderNames = selectedFolders.Count > 0 ? selectedFolders : null;
 
         try

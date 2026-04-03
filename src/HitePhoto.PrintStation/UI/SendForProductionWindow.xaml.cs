@@ -8,7 +8,7 @@ namespace HitePhoto.PrintStation.UI;
 
 public partial class SendForProductionWindow : Window
 {
-    private readonly int _orderId;
+    private readonly string _orderId;
     private readonly string _externalOrderId;
     private readonly ITransferService _transfer;
     private readonly IOrderRepository _orders;
@@ -28,13 +28,13 @@ public partial class SendForProductionWindow : Window
     }
 
     public SendForProductionWindow(
-        int orderId,
+        string orderId,
         string externalOrderId,
         string folderPath,
         ITransferService transfer,
         IOrderRepository orders,
         AppSettings settings,
-        List<int>? preSelectedItemIds = null)
+        List<string>? preSelectedItemIds = null)
     {
         InitializeComponent();
 
@@ -66,7 +66,7 @@ public partial class SendForProductionWindow : Window
             StoreCombo.SelectedIndex = 0;
     }
 
-    private void LoadItems(List<int>? preSelectedItemIds)
+    private void LoadItems(List<string>? preSelectedItemIds)
     {
         var items = _orders.GetItems(_orderId);
         if (items.Count == 0)
@@ -180,9 +180,9 @@ public partial class SendForProductionWindow : Window
         SendBtn.IsEnabled = (selectedItems > 0 || selectedFolders > 0) && StoreCombo.SelectedItem != null;
     }
 
-    private List<int> GetSelectedItemIds()
+    private List<string> GetSelectedItemIds()
     {
-        var ids = new List<int>();
+        var ids = new List<string>();
         foreach (var group in _sizeGroups)
             foreach (var (item, cb) in group.Items)
                 if (cb.IsChecked == true)
@@ -256,7 +256,7 @@ public partial class SendForProductionWindow : Window
         var comment = CommentBox.Text.Trim();
         var operatorName = Environment.UserName;
 
-        List<int>? itemIds = isPartial ? selectedIds : null;
+        List<string>? itemIds = isPartial ? selectedIds : null;
         var selectedFolders = GetSelectedFolderNames();
         List<string>? folderNames = selectedFolders.Count > 0 ? selectedFolders : null;
         bool createOrder = CreateOrderCheck.IsChecked == true;

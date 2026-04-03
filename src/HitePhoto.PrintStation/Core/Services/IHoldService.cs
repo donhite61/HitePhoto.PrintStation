@@ -6,5 +6,5 @@ namespace HitePhoto.PrintStation.Core.Services;
 public interface IHoldService
 {
     /// <summary>Toggles hold state. Returns the new is_held value.</summary>
-    bool ToggleHold(int orderId, string operatorName);
+    bool ToggleHold(string orderId, string operatorName);
 }

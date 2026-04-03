@@ -39,15 +39,15 @@ public class IngestOrderWriter
         {
             var harvestStore = harvestedByStoreId > 0 ? harvestedByStoreId : storeId;
             var orderId = _orders.InsertOrder(order, storeId, harvestStore);
-            if (orderId <= 0)
+            if (string.IsNullOrEmpty(orderId))
             {
                 AlertCollector.Error(AlertCategory.Database,
                     $"InsertOrder returned invalid ID for {sourceCode} order {order.ExternalOrderId}",
                     orderId: order.ExternalOrderId,
-                    detail: $"Attempted: InsertOrder. Expected: positive integer ID. " +
-                            $"Found: {orderId}. Context: store {storeId}, {order.Items.Count} items. " +
+                    detail: $"Attempted: InsertOrder. Expected: GUID string ID. " +
+                            $"Found: empty/null. Context: store {storeId}, {order.Items.Count} items. " +
                             $"State: order may not have been saved.");
-                throw new InvalidOperationException($"InsertOrder returned {orderId} for {order.ExternalOrderId}");
+                throw new InvalidOperationException($"InsertOrder returned empty ID for {order.ExternalOrderId}");
             }
 
             // Ingest events go to AppLog, not operator history
@@ -60,8 +60,8 @@ public class IngestOrderWriter
         }
         else
         {
-            _orders.SetHarvestedBy(existingId.Value, harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
-            _verifier.VerifyOrder(order.ExternalOrderId, folderPath, sourceCode, existingId.Value);
+            _orders.SetHarvestedBy(existingId, harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
+            _verifier.VerifyOrder(order.ExternalOrderId, folderPath, sourceCode, existingId);
         }
     }
 

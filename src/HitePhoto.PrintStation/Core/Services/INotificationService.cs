@@ -9,5 +9,5 @@ namespace HitePhoto.PrintStation.Core.Services;
 /// </summary>
 public interface INotificationService
 {
-    void NotifyCustomer(int orderId, string operatorName, EmailTemplate? templateOverride = null);
+    void NotifyCustomer(string orderId, string operatorName, EmailTemplate? templateOverride = null);
 }

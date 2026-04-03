@@ -34,7 +34,7 @@ public class PrintService : IPrintService
         _noritsuOutputRoot = noritsuOutputRoot;
     }
 
-    public SendResult SendToPrinter(int orderId, HashSet<string>? sizeFilter = null)
+    public SendResult SendToPrinter(string orderId, HashSet<string>? sizeFilter = null)
     {
         var sent = new List<SentItem>();
         var skipped = new List<SkippedItem>();

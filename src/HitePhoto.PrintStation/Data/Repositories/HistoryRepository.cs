@@ -11,21 +11,22 @@ public class HistoryRepository : IHistoryRepository
         _db = db ?? throw new ArgumentNullException(nameof(db));
     }
 
-    public void AddNote(int orderId, string note, string createdBy = "")
+    public void AddNote(string orderId, string note, string createdBy = "")
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO order_history (order_id, note, created_by, created_at)
-            VALUES (@id, @note, @by, datetime('now'))
+            INSERT INTO order_history (id, order_id, note, created_by, created_at)
+            VALUES (@hid, @id, @note, @by, datetime('now'))
             """;
+        cmd.Parameters.AddWithValue("@hid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.Parameters.AddWithValue("@note", note);
         cmd.Parameters.AddWithValue("@by", createdBy);
         cmd.ExecuteNonQuery();
     }
 
-    public void AddNoteIfNew(int orderId, string note, string createdBy = "")
+    public void AddNoteIfNew(string orderId, string note, string createdBy = "")
     {
         using var conn = _db.OpenConnection();
 
@@ -45,16 +46,17 @@ public class HistoryRepository : IHistoryRepository
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO order_history (order_id, note, created_by, created_at)
-            VALUES (@id, @note, @by, datetime('now'))
+            INSERT INTO order_history (id, order_id, note, created_by, created_at)
+            VALUES (@hid, @id, @note, @by, datetime('now'))
             """;
+        cmd.Parameters.AddWithValue("@hid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.Parameters.AddWithValue("@note", note);
         cmd.Parameters.AddWithValue("@by", createdBy);
         cmd.ExecuteNonQuery();
     }
 
-    public List<HistoryEntry> GetNotes(int orderId)
+    public List<HistoryEntry> GetNotes(string orderId)
     {
         var results = new List<HistoryEntry>();
         using var conn = _db.OpenConnection();
@@ -69,7 +71,7 @@ public class HistoryRepository : IHistoryRepository
         while (reader.Read())
         {
             results.Add(new HistoryEntry(
-                reader.GetInt32(0), reader.GetInt32(1),
+                reader.GetString(0), reader.GetString(1),
                 reader.GetString(2),
                 reader.IsDBNull(3) ? "" : reader.GetString(3),
                 reader.GetString(4)));

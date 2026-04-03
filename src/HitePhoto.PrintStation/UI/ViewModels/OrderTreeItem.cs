@@ -125,7 +125,7 @@ public class SizeTreeItem : INotifyPropertyChanged
 /// </summary>
 public class OrderTreeItem : INotifyPropertyChanged
 {
-    private int _dbId;
+    private string _dbId = "";
     private string _externalOrderId = "";
     private string _customerName = "";
     private string _customerPhone = "";
@@ -143,7 +143,7 @@ public class OrderTreeItem : INotifyPropertyChanged
     private int _totalImages;
     private string _folderPath = "";
 
-    public int DbId
+    public string DbId
     {
         get => _dbId;
         set { _dbId = value; OnPropertyChanged(); }

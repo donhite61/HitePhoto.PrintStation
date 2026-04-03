@@ -6,5 +6,5 @@ namespace HitePhoto.PrintStation.Core.Decisions;
 /// </summary>
 public interface IHoldDecision
 {
-    bool IsHeld(int orderId);
+    bool IsHeld(string orderId);
 }

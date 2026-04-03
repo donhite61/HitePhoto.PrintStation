@@ -231,7 +231,7 @@ public class MainViewModel : ViewModelBase
         var allItems = BatchLoadItems(orderIds);
 
         // Lookup existing items by DbId for O(1) matching
-        var existingByDbId = new Dictionary<int, OrderTreeItem>();
+        var existingByDbId = new Dictionary<string, OrderTreeItem>();
         foreach (var item in target)
             existingByDbId[item.DbId] = item;
 
@@ -415,9 +415,9 @@ public class MainViewModel : ViewModelBase
         treeItem.HasUnmapped = treeItem.Sizes.Any(s => s.IsUnmapped);
     }
 
-    private Dictionary<int, List<ItemRow>> BatchLoadItems(List<int> orderIds)
+    private Dictionary<string, List<ItemRow>> BatchLoadItems(List<string> orderIds)
     {
-        var result = new Dictionary<int, List<ItemRow>>();
+        var result = new Dictionary<string, List<ItemRow>>();
         if (orderIds.Count == 0) return result;
 
         using var conn = _db.OpenConnection();
@@ -438,9 +438,9 @@ public class MainViewModel : ViewModelBase
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var orderId = reader.GetInt32(0);
+            var orderId = reader.GetString(0);
             var item = new ItemRow(
-                Id: reader.GetInt32(1),
+                Id: reader.GetString(1),
                 SizeLabel: reader.IsDBNull(2) ? "" : reader.GetString(2),
                 MediaType: reader.IsDBNull(3) ? "" : reader.GetString(3),
                 Quantity: reader.GetInt32(4),
@@ -559,7 +559,7 @@ public class MainViewModel : ViewModelBase
     //  Printing
     // ══════════════════════════════════════════════════════════════════════
 
-    public SendResult PrintOrder(int orderId, string externalOrderId, string folderPath, string sourceCode,
+    public SendResult PrintOrder(string orderId, string externalOrderId, string folderPath, string sourceCode,
         HashSet<string>? sizeFilter = null)
     {
         _verifier.VerifyOrder(externalOrderId, folderPath, sourceCode, orderId);
@@ -569,7 +569,7 @@ public class MainViewModel : ViewModelBase
         return result;
     }
 
-    public List<TransferMismatch> CheckTransferMismatches(int orderId)
+    public List<TransferMismatch> CheckTransferMismatches(string orderId)
         => _transferService.CheckTransferMismatches(orderId);
 
     public List<Core.Models.ChannelInfo> GetAllChannels() => _orders.GetAllChannels();
@@ -583,7 +583,7 @@ public class MainViewModel : ViewModelBase
         _channelNamesDirty = true;
     }
 
-    public void MarkDone(int orderId)
+    public void MarkDone(string orderId)
     {
         var allIds = _orders.GetItems(orderId).Select(i => i.Id).ToList();
         _orders.SetItemsPrinted(allIds);
@@ -591,7 +591,7 @@ public class MainViewModel : ViewModelBase
         _history.AddNote(orderId, "Marked done by operator", "operator");
     }
 
-    public void MarkUnprinted(int orderId)
+    public void MarkUnprinted(string orderId)
     {
         _orders.SetItemsUnprinted(orderId);
         _orders.SetOrderPrinted(orderId, false);
@@ -626,6 +626,6 @@ public class MainViewModel : ViewModelBase
 // ── Internal data records ──
 
 internal record ItemRow(
-    int Id, string SizeLabel, string MediaType, int Quantity,
+    string Id, string SizeLabel, string MediaType, int Quantity,
     string ImageFilename, string ImageFilepath,
     bool IsNoritsu, bool IsLocalProduction, bool IsPrinted, string OptionsJson);

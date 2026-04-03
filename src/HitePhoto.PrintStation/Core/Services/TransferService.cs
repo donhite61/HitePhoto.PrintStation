@@ -18,7 +18,7 @@ public class TransferService : ITransferService
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
-    public void TransferOrder(int orderId, int targetStoreId, string operatorName, string comment)
+    public void TransferOrder(string orderId, int targetStoreId, string operatorName, string comment)
     {
         var order = _orders.GetOrder(orderId);
         if (order is null)
@@ -57,7 +57,7 @@ public class TransferService : ITransferService
         AppLog.Info($"Transfer complete: order {orderId} → {storeName} ({allFiles.Length} files)");
     }
 
-    public void TransferItems(int orderId, List<int> itemIds, int targetStoreId, string operatorName, string comment)
+    public void TransferItems(string orderId, List<string> itemIds, int targetStoreId, string operatorName, string comment)
     {
         var order = _orders.GetOrder(orderId);
         if (order is null)
@@ -107,7 +107,7 @@ public class TransferService : ITransferService
 
     // ── Mismatch check ────────────────────────────────────────────────
 
-    public List<TransferMismatch> CheckTransferMismatches(int orderId)
+    public List<TransferMismatch> CheckTransferMismatches(string orderId)
     {
         var mismatches = new List<TransferMismatch>();
 
@@ -138,8 +138,8 @@ public class TransferService : ITransferService
         return mismatches;
     }
 
-    public int SendForProduction(int orderId, int targetStoreId, string operatorName, string comment,
-        List<int>? itemIds = null, List<string>? folderNames = null, bool createOrder = true)
+    public string SendForProduction(string orderId, int targetStoreId, string operatorName, string comment,
+        List<string>? itemIds = null, List<string>? folderNames = null, bool createOrder = true)
     {
         var fullOrder = _orders.GetFullOrder(orderId);
         if (fullOrder is null)
@@ -222,7 +222,7 @@ public class TransferService : ITransferService
         if (!createOrder)
         {
             AppLog.Info($"SendForProduction (no order): uploaded files from {orderId} → {targetStoreName}");
-            return -1;
+            return "";
         }
 
         var childFolderPath = _settings.TransferNasPrefix + remoteFolderBase.Replace('/', '\\');
@@ -248,8 +248,8 @@ public class TransferService : ITransferService
         return childId;
     }
 
-    public int? GetFromProduction(int orderId, bool createOrder, string operatorName, string comment,
-        List<int>? itemIds = null, List<string>? folderNames = null)
+    public string? GetFromProduction(string orderId, bool createOrder, string operatorName, string comment,
+        List<string>? itemIds = null, List<string>? folderNames = null)
     {
         var fullOrder = _orders.GetFullOrder(orderId);
         if (fullOrder is null)
@@ -609,7 +609,7 @@ public class TransferService : ITransferService
     // ── Local marker ────────────────────────────────────────────────────
 
     private void WriteTransferMarker(string folderPath, int targetStoreId,
-        string operatorName, string comment, List<int>? itemIds, string? storeName = null)
+        string operatorName, string comment, List<string>? itemIds, string? storeName = null)
     {
         if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
             return;
@@ -639,7 +639,7 @@ public class TransferService : ITransferService
     /// <summary>
     /// Collect image files from items. When itemIds is provided, only those items; otherwise all.
     /// </summary>
-    private static List<string> CollectItemFiles(List<OrderItemRecord> allItems, List<int>? itemIds = null)
+    private static List<string> CollectItemFiles(List<OrderItemRecord> allItems, List<string>? itemIds = null)
     {
         var items = itemIds is { Count: > 0 }
             ? allItems.Where(i => itemIds.Contains(i.Id)).ToList()
