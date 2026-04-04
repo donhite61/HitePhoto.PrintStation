@@ -100,7 +100,7 @@
 
         <!-- ── Order node template ── -->
         <HierarchicalDataTemplate DataType="{x:Type vm:OrderTreeItem}"
-                                  ItemsSource="{Binding Sizes}">
+                                  ItemsSource="{Binding TreeChildren}">
             <Border x:Name="SelectionBorder" Background="Transparent"
                     CornerRadius="3" Padding="2,0" Margin="0,8,4,1">
                 <Border.ContextMenu>

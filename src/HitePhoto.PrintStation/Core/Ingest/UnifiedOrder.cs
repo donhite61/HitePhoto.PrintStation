@@ -27,6 +27,12 @@ public record UnifiedOrder
     public bool IsInvoiceOnly { get; init; }
     public bool IsRush { get; init; }
 
+    /// <summary>
+    /// True when Dakis split fulfillment across multiple stores.
+    /// Ingest creates a parent order (no items) + store-suffixed child orders.
+    /// </summary>
+    public bool IsMultiFulfiller { get; init; }
+
     // Delivery
     public int DeliveryMethodId { get; init; } = 1; // 1=pickup, 2=ship, 3=inter_store
     public string? ShippingFirstName { get; init; }

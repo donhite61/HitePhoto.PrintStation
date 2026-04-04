@@ -229,8 +229,15 @@ public class MainViewModel : ViewModelBase
             DiffAndPatch(PrintedOrders, printed);
             DiffAndPatch(OtherStoreOrders, otherStore, fromStore: true);
 
-            var total = pending.Count + printed.Count + otherStore.Count;
-            StatusText = $"{pending.Count} pending, {printed.Count} printed, {otherStore.Count} other store";
+            // Nest child orders under parents (split orders, alterations)
+            NestChildOrders(PendingOrders);
+            NestChildOrders(PrintedOrders);
+            NestChildOrders(OtherStoreOrders);
+
+            var pendingCount = PendingOrders.Count;
+            var printedCount = PrintedOrders.Count;
+            var otherCount = OtherStoreOrders.Count;
+            StatusText = $"{pendingCount} pending, {printedCount} printed, {otherCount} other store";
         }
         catch (Exception ex)
         {
@@ -295,6 +302,60 @@ public class MainViewModel : ViewModelBase
         // Remove items that are no longer in the filtered/sorted set
         while (target.Count > sorted.Count)
             target.RemoveAt(target.Count - 1);
+    }
+
+    /// <summary>
+    /// Post-process a tab's order list to nest children under parents.
+    /// If parent and child are both in the same tab, child moves into parent's ChildOrders.
+    /// If parent isn't in this tab, child stays top-level.
+    /// </summary>
+    private void NestChildOrders(ObservableCollection<OrderTreeItem> orders)
+    {
+        if (orders.Count == 0) return;
+
+        var orderIds = orders.Select(o => o.DbId).ToList();
+        var links = _orders.GetLinksForOrders(orderIds);
+        if (links.Count == 0)
+        {
+            // Clear any stale child orders from previous nesting
+            foreach (var order in orders)
+                if (order.ChildOrders.Count > 0) order.ChildOrders.Clear();
+            return;
+        }
+
+        // Build parent → children map (only for orders in this tab)
+        var orderLookup = orders.ToDictionary(o => o.DbId);
+        var childToParent = new Dictionary<string, string>();
+        foreach (var (parentId, childId, _) in links)
+        {
+            if (orderLookup.ContainsKey(parentId) && orderLookup.ContainsKey(childId))
+                childToParent[childId] = parentId;
+        }
+
+        if (childToParent.Count == 0)
+        {
+            foreach (var order in orders)
+                if (order.ChildOrders.Count > 0) order.ChildOrders.Clear();
+            return;
+        }
+
+        // Nest children under parents
+        foreach (var (childId, parentId) in childToParent)
+        {
+            var parent = orderLookup[parentId];
+            var child = orderLookup[childId];
+
+            // Add to parent's ChildOrders if not already there
+            if (!parent.ChildOrders.Any(c => c.DbId == childId))
+                parent.ChildOrders.Add(child);
+        }
+
+        // Remove children from top-level (iterate backwards to avoid index issues)
+        for (int i = orders.Count - 1; i >= 0; i--)
+        {
+            if (childToParent.ContainsKey(orders[i].DbId))
+                orders.RemoveAt(i);
+        }
     }
 
     private static OrderTreeItem CreateOrderTreeItem(OrderRow order, bool fromStore = false) => new()
@@ -586,6 +647,43 @@ public class MainViewModel : ViewModelBase
         _orders.SetItemsPrinted(allIds);
         _orders.SetOrderPrinted(orderId, true);
         _history.AddNote(orderId, "Marked done by operator", "operator");
+
+        // Parent completion: if this is a child order, check if all siblings are printed
+        CheckParentCompletion(orderId);
+    }
+
+    /// <summary>
+    /// If orderId is a child order, check if all sibling children are printed.
+    /// If so, mark the parent as printed too.
+    /// </summary>
+    private void CheckParentCompletion(string childOrderId)
+    {
+        var parentLink = _orders.GetParentOrder(childOrderId);
+        if (parentLink == null) return;
+
+        var parentId = parentLink.Value.ParentOrderId;
+        var children = _orders.GetChildOrders(parentId);
+
+        // Check if ALL children are printed
+        bool allDone = true;
+        foreach (var (childId, _, _, _) in children)
+        {
+            var childOrder = _orders.GetOrder(childId);
+            if (childOrder == null) continue;
+
+            // Check the order's is_printed flag via items
+            if (!_orders.AreAllItemsPrinted(childId))
+            {
+                allDone = false;
+                break;
+            }
+        }
+
+        if (allDone)
+        {
+            _orders.SetOrderPrinted(parentId, true);
+            AppLog.Info($"Parent order {parentId} auto-completed: all children printed");
+        }
     }
 
     public void MarkUnprinted(string orderId)
@@ -593,6 +691,11 @@ public class MainViewModel : ViewModelBase
         _orders.SetItemsUnprinted(orderId);
         _orders.SetOrderPrinted(orderId, false);
         _history.AddNote(orderId, "Marked unprinted by operator", "operator");
+
+        // If this is a child, ensure parent goes back to unprinted
+        var parentLink = _orders.GetParentOrder(orderId);
+        if (parentLink != null)
+            _orders.SetOrderPrinted(parentLink.Value.ParentOrderId, false);
     }
 
     public void UnassignChannel(string sizeLabel, string mediaType)

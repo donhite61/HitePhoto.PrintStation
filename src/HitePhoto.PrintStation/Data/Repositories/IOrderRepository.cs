@@ -148,6 +148,13 @@ public interface IOrderRepository
     /// <summary>Get order IDs that have been superseded (have children in order_links).</summary>
     HashSet<string> GetSupersededOrderIds(List<string> orderIds);
 
+    /// <summary>
+    /// Get all parent→child links for a batch of order IDs.
+    /// Returns links where parent_order_id is in the provided set.
+    /// Used by tree builder to nest children under parents.
+    /// </summary>
+    List<(string ParentOrderId, string ChildOrderId, string LinkType)> GetLinksForOrders(List<string> orderIds);
+
     /// <summary>Insert a link between parent and child orders.</summary>
     void InsertLink(string parentOrderId, string childOrderId, string linkType, string createdBy);
 

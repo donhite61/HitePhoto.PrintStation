@@ -121,10 +121,20 @@ public class SizeTreeItem : INotifyPropertyChanged
 }
 
 /// <summary>
-/// Represents an order node in the tree. Children are SizeTreeItem groups.
+/// Represents an order node in the tree. Children are SizeTreeItem groups,
+/// or for parent orders (splits/alterations), child OrderTreeItems.
 /// </summary>
 public class OrderTreeItem : INotifyPropertyChanged
 {
+    public OrderTreeItem()
+    {
+        ChildOrders.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(TreeChildren));
+            OnPropertyChanged(nameof(IsParentOrder));
+        };
+    }
+
     private string _dbId = "";
     private string _externalOrderId = "";
     private string _customerName = "";
@@ -272,6 +282,20 @@ public class OrderTreeItem : INotifyPropertyChanged
 
 
     public ObservableCollection<SizeTreeItem> Sizes { get; } = new();
+
+    /// <summary>Child orders for split/alteration parents. Empty for normal orders.</summary>
+    public ObservableCollection<OrderTreeItem> ChildOrders { get; } = new();
+
+    /// <summary>
+    /// What the tree shows when expanded:
+    /// - Parent orders (has ChildOrders) → show child order nodes
+    /// - Normal/leaf orders → show size group nodes
+    /// </summary>
+    public IEnumerable<object> TreeChildren =>
+        ChildOrders.Count > 0 ? ChildOrders : Sizes;
+
+    /// <summary>True if this is a parent order with linked children (no items of its own).</summary>
+    public bool IsParentOrder => ChildOrders.Count > 0;
 
     /// <summary>Reference to the Shared Order model.</summary>
     public Order? Order { get; set; }

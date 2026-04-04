@@ -988,6 +988,27 @@ public class OrderRepository : IOrderRepository
         return result;
     }
 
+    public List<(string ParentOrderId, string ChildOrderId, string LinkType)> GetLinksForOrders(List<string> orderIds)
+    {
+        var results = new List<(string, string, string)>();
+        if (orderIds.Count == 0) return results;
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        var placeholders = string.Join(",", orderIds.Select((_, i) => $"@id{i}"));
+        cmd.CommandText = $"""
+            SELECT parent_order_id, child_order_id, link_type
+            FROM order_links
+            WHERE parent_order_id IN ({placeholders}) OR child_order_id IN ({placeholders})
+            """;
+        for (int i = 0; i < orderIds.Count; i++)
+            cmd.Parameters.AddWithValue($"@id{i}", orderIds[i]);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        return results;
+    }
+
     public void InsertLink(string parentOrderId, string childOrderId, string linkType, string createdBy)
     {
         var linkId = Guid.NewGuid().ToString();
@@ -1054,20 +1075,31 @@ public class OrderRepository : IOrderRepository
             if (sourceEid == null)
                 throw new InvalidOperationException($"CreateAlteration: source order {sourceOrderId} not found");
 
-            // Strip any -A#, -W#, or -R# suffix to find root
+            // Strip any suffix to find root order ID.
+            // Suffixes: -A# (legacy alteration), -W# (legacy split), -R# (legacy receive),
+            // -C# (change), -S# (split), -X# (outlab), -BH# / -WB# (store fulfillment split)
             baseExternalId = sourceEid;
-            var dash = baseExternalId.LastIndexOf("-A", StringComparison.Ordinal);
-            if (dash < 0) dash = baseExternalId.LastIndexOf("-W", StringComparison.Ordinal);
-            if (dash < 0) dash = baseExternalId.LastIndexOf("-R", StringComparison.Ordinal);
-            if (dash >= 0) baseExternalId = baseExternalId[..dash];
+            var dash = baseExternalId.LastIndexOf('-');
+            if (dash > 0)
+            {
+                var suffix = baseExternalId[(dash + 1)..];
+                // Valid suffix = letters followed by digits (e.g., "A1", "BH1", "C2")
+                int letterEnd = 0;
+                while (letterEnd < suffix.Length && char.IsLetter(suffix[letterEnd]))
+                    letterEnd++;
+                if (letterEnd > 0 && letterEnd < suffix.Length && suffix[letterEnd..].All(char.IsDigit))
+                    baseExternalId = baseExternalId[..dash];
+            }
         }
 
         // Determine the next version number
         var prefix = alterationType switch
         {
-            "split" => "W",
-            "receive" => "R",
-            _ => "A"
+            "change" => "C",
+            "split" => "S",
+            "outlab" => "X",
+            "dakis_split" => "W", // store splits use store code, not this path
+            _ => "C" // default to change
         };
         int nextVersion;
         using (var countCmd = conn.CreateCommand())

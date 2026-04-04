@@ -84,10 +84,14 @@ public class DakisOrderParser
         else
             items = BuildGiftItems(root, info, folderPath);
 
+        // ── Multi-fulfiller detection ──
+        // If any item is fulfilled at a different store, this is a split order
+        bool isMultiFulfiller = items.Any(i => !i.IsLocalProduction);
+
         // ── Validate ──
         ValidateOrder(info, items, folderPath);
 
-        return BuildUnifiedOrder(info, folderPath, items, isInvoiceOnly: false);
+        return BuildUnifiedOrder(info, folderPath, items, isInvoiceOnly: false, isMultiFulfiller: isMultiFulfiller);
     }
 
     // ── Order header extraction ──────────────────────────────────────────
@@ -440,7 +444,7 @@ public class DakisOrderParser
                         ImageFilepath = expectedPath,
                         IsNoritsu = true,
                         IsLocalProduction = localItem,
-                        FulfillmentStore = info.CurrentStoreId,
+                        FulfillmentStore = !string.IsNullOrEmpty(fulfillmentStoreId) ? fulfillmentStoreId : info.CurrentStoreId,
                         Options = options
                     });
                 }
@@ -613,7 +617,7 @@ public class DakisOrderParser
     // ── Build final UnifiedOrder ─────────────────────────────────────────
 
     private static UnifiedOrder BuildUnifiedOrder(DakisOrderInfo info, string? folderPath,
-        List<UnifiedOrderItem> items, bool isInvoiceOnly)
+        List<UnifiedOrderItem> items, bool isInvoiceOnly, bool isMultiFulfiller = false)
     {
         return new UnifiedOrder
         {
@@ -645,6 +649,7 @@ public class DakisOrderParser
             ShippingZip = info.ShippingZip,
             ShippingCountry = info.ShippingCountry,
             ShippingMethod = info.ShippingMethod,
+            IsMultiFulfiller = isMultiFulfiller,
             Items = items
         };
     }

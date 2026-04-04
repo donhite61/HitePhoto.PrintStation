@@ -155,7 +155,128 @@ public class DakisIngestService : IDisposable
         var pickupStoreId = _orders.ResolveStoreId("dakis", order.BillingStoreId ?? "")
                             ?? _settings.StoreId;
 
-        _writer.WriteToSqlite(order, pickupStoreId, "dakis", order.FolderPath ?? "", _settings.StoreId);
+        if (order.IsMultiFulfiller)
+        {
+            ProcessMultiFulfillerOrder(order, pickupStoreId, folderPath);
+        }
+        else
+        {
+            _writer.WriteToSqlite(order, pickupStoreId, "dakis", order.FolderPath ?? "", _settings.StoreId);
+        }
+    }
+
+    /// <summary>
+    /// Handle Dakis orders split across multiple stores.
+    /// Creates a parent order (no items, tracking hub) + a child order with this store's items.
+    /// Second store finds the parent via sync and adds its own child.
+    /// </summary>
+    private void ProcessMultiFulfillerOrder(UnifiedOrder order, int pickupStoreId, string folderPath)
+    {
+        var externalOrderId = order.ExternalOrderId;
+        var storeCode = _orders.GetStoreName(_settings.StoreId); // "BH" or "WB"
+
+        // Separate local items (this store produces) from remote items
+        var localItems = order.Items.Where(i => i.IsLocalProduction).ToList();
+
+        if (localItems.Count == 0)
+        {
+            // Invoice-only copy — this store has nothing to produce.
+            // Still ensure parent exists so the order shows up in the tree.
+            EnsureParentOrder(order, pickupStoreId, folderPath);
+            AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: invoice-only at {storeCode}, no child created");
+            return;
+        }
+
+        // Ensure parent order exists (no items, tracking hub)
+        var parentId = EnsureParentOrder(order, pickupStoreId, folderPath);
+
+        // Generate child external_order_id: "12345-BH1"
+        var childExternalId = GenerateChildExternalId(externalOrderId, storeCode);
+
+        // Check if this child already exists (idempotent re-ingest)
+        var existingChildId = _orders.FindOrderIdAnyStore(childExternalId);
+        if (existingChildId != null)
+        {
+            AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: child {childExternalId} already exists, skipping");
+            return;
+        }
+
+        // Create child order with only local items
+        var childOrder = order with
+        {
+            ExternalOrderId = childExternalId,
+            Items = localItems
+        };
+
+        _writer.WriteToSqlite(childOrder, pickupStoreId, "dakis", order.FolderPath ?? "", _settings.StoreId);
+
+        // Look up the child's internal ID (just inserted)
+        var childId = _orders.FindOrderIdAnyStore(childExternalId);
+        if (childId == null)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                $"Dakis split: child order {childExternalId} not found after insert",
+                orderId: childExternalId,
+                detail: $"Attempted: find child after WriteToSqlite. Expected: order ID. " +
+                        $"Found: null. Context: parent {externalOrderId}, store {storeCode}. " +
+                        $"State: order_link not created.");
+            return;
+        }
+
+        // Link child to parent
+        if (parentId != null)
+        {
+            _orders.InsertLink(parentId, childId, "dakis_split", "ingest");
+            AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: created child {childExternalId} linked to parent");
+        }
+    }
+
+    /// <summary>
+    /// Ensure the parent order exists for a multi-fulfiller Dakis order.
+    /// Parent has customer info but no items — it's a tracking hub.
+    /// Returns the parent's internal order ID.
+    /// </summary>
+    private string? EnsureParentOrder(UnifiedOrder order, int pickupStoreId, string folderPath)
+    {
+        var parentId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
+        if (parentId != null)
+            return parentId;
+
+        // Create parent with no items
+        var parentOrder = order with
+        {
+            Items = [],
+            IsInvoiceOnly = true // allows zero items through validation
+        };
+
+        _writer.WriteToSqlite(parentOrder, pickupStoreId, "dakis", order.FolderPath ?? "", _settings.StoreId);
+
+        parentId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
+        if (parentId == null)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                $"Dakis split: parent order {order.ExternalOrderId} not found after insert",
+                orderId: order.ExternalOrderId,
+                detail: $"Attempted: find parent after WriteToSqlite. Expected: order ID. " +
+                        $"Found: null. Context: folder {folderPath}. " +
+                        $"State: child will be created without link.");
+        }
+
+        return parentId;
+    }
+
+    /// <summary>
+    /// Generate the next child external_order_id for a store.
+    /// Pattern: "12345-BH1", "12345-BH2", etc.
+    /// </summary>
+    private string GenerateChildExternalId(string parentExternalId, string storeCode)
+    {
+        // Count existing children with this store prefix
+        int seq = 1;
+        while (_orders.FindOrderIdAnyStore($"{parentExternalId}-{storeCode}{seq}") != null)
+            seq++;
+
+        return $"{parentExternalId}-{storeCode}{seq}";
     }
 
     public void Dispose()

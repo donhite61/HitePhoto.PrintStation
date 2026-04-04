@@ -148,6 +148,15 @@ public class SyncService : ISyncService
             case "create_alteration":
                 return await PushCreateAlterationAsync(payload);
 
+            case "insert_link":
+            {
+                var parentId = payload["parentOrderId"].GetString()!;
+                var childId = payload["childOrderId"].GetString()!;
+                var linkType = payload["linkType"].GetString()!;
+                var createdBy = payload.TryGetValue("createdBy", out var cb) ? cb.GetString() ?? "" : "";
+                return await _remoteDb.InsertOrderLinkAsync(parentId, childId, linkType, createdBy);
+            }
+
             default:
                 AppLog.Info($"SyncService: unknown push operation '{operation}'");
                 return true; // don't re-queue unknown ops
