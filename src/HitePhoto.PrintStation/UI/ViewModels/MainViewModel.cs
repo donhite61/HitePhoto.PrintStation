@@ -518,11 +518,12 @@ public class MainViewModel : ViewModelBase
     {
         return _sortMode switch
         {
+            "Date Ordered" => orders.OrderByDescending(o => o.OrderedAt ?? "").ToList(),
+            "Date Printed" => orders.OrderByDescending(o => o.PrintedAt ?? "").ToList(),
             "Customer Name" => orders.OrderBy(o => o.CustomerLastName, StringComparer.OrdinalIgnoreCase)
                                      .ThenBy(o => o.CustomerFirstName, StringComparer.OrdinalIgnoreCase).ToList(),
             "Order ID" => orders.OrderByDescending(o => o.ExternalOrderId).ToList(),
-            "Date Printed" => orders.OrderByDescending(o => o.PrintedAt ?? "").ToList(),
-            _ => orders.OrderByDescending(o => o.OrderedAt ?? "").ToList()
+            _ => orders.OrderByDescending(o => o.CreatedAt ?? "").ToList()
         };
     }
 
