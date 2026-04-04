@@ -355,6 +355,8 @@ public class OrderDb
             received_at             TEXT DEFAULT NULL,
             match_key               TEXT DEFAULT NULL,
             files_expected          INTEGER DEFAULT NULL,
+            is_local_production     INTEGER NOT NULL DEFAULT 1,
+            file_status             INTEGER NOT NULL DEFAULT 0,
             created_at              TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -679,13 +681,8 @@ public class OrderDb
             )
             """);
 
-        // Migration 016: Alteration system — orders are frozen after ingest.
-        // All changes (customer edits, splits, transfers, outlab) create new child orders.
-        // supersedes = child points back to parent's external_order_id (convenience field).
-        // alteration_type = display label: split, alteration, transfer (convenience field).
-        // Relationships tracked in order_links table. Reason goes in order_history.
-        AddColumnIfMissing(conn, "orders", "supersedes", "TEXT DEFAULT NULL");
-        AddColumnIfMissing(conn, "orders", "alteration_type", "TEXT DEFAULT NULL");
+        // Migration 016: (Historical) Added supersedes + alteration_type columns.
+        // Migration 021 below drops them — order_links replaces both.
 
         // Drop superseded_by, alteration_reason, altered_by — replaced by order_links + order_history
         DropColumnIfExists(conn, "orders", "superseded_by");
@@ -725,6 +722,11 @@ public class OrderDb
             DROP TABLE order_history;
             ALTER TABLE order_history_new RENAME TO order_history;
             """);
+
+        // Migration 021: Drop supersedes + alteration_type columns.
+        // Redundant with order_links table (link_type + parent_order_id).
+        DropColumnIfExists(conn, "orders", "supersedes");
+        DropColumnIfExists(conn, "orders", "alteration_type");
 
     }
 
@@ -804,6 +806,7 @@ public class OrderDb
                 fulfillment_status TEXT DEFAULT 'pending', sent_at TEXT DEFAULT NULL, sent_by TEXT DEFAULT NULL,
                 due_at TEXT DEFAULT NULL, received_at TEXT DEFAULT NULL, match_key TEXT DEFAULT NULL,
                 files_expected INTEGER DEFAULT NULL,
+                is_local_production INTEGER NOT NULL DEFAULT 1, file_status INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """);
@@ -899,7 +902,6 @@ public class OrderDb
                 pixfizz_job_id TEXT DEFAULT NULL, is_received_pushed INTEGER NOT NULL DEFAULT 0,
                 is_notified INTEGER NOT NULL DEFAULT 0, notified_at TEXT DEFAULT NULL,
                 is_printed INTEGER NOT NULL DEFAULT 0,
-                supersedes TEXT DEFAULT NULL, alteration_type TEXT DEFAULT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 UNIQUE(external_order_id, pickup_store_id)
             )
@@ -927,7 +929,6 @@ public class OrderDb
                         shipping_state, shipping_zip, shipping_country, shipping_method,
                         is_transfer, transfer_store_id, pixfizz_job_id, is_received_pushed,
                         is_notified, notified_at, is_printed,
-                        supersedes, alteration_type,
                         created_at, updated_at)
                     SELECT @newId, external_order_id, order_source_id, source_code,
                         customer_first_name, customer_last_name, customer_email, customer_phone,
@@ -940,7 +941,6 @@ public class OrderDb
                         shipping_state, shipping_zip, shipping_country, shipping_method,
                         is_transfer, transfer_store_id, pixfizz_job_id, is_received_pushed,
                         is_notified, notified_at, is_printed,
-                        supersedes, alteration_type,
                         created_at, updated_at
                     FROM orders WHERE id = @oldId
                     """;

@@ -15,8 +15,7 @@ public class OrderRepository : IOrderRepository
                o.customer_email, o.customer_phone,
                o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
                o.folder_path, o.special_instructions, o.download_status,
-               s.short_name AS store_name,
-               o.supersedes, o.alteration_type
+               s.short_name AS store_name
         FROM orders o
         LEFT JOIN stores s ON s.id = o.pickup_store_id
 
@@ -795,9 +794,7 @@ public class OrderRepository : IOrderRepository
             FolderPath: reader.IsDBNull(reader.GetOrdinal("folder_path")) ? "" : reader.GetString(reader.GetOrdinal("folder_path")),
             SpecialInstructions: reader.IsDBNull(reader.GetOrdinal("special_instructions")) ? "" : reader.GetString(reader.GetOrdinal("special_instructions")),
             DownloadStatus: reader.IsDBNull(reader.GetOrdinal("download_status")) ? "" : reader.GetString(reader.GetOrdinal("download_status")),
-            StoreName: reader.IsDBNull(reader.GetOrdinal("store_name")) ? "" : reader.GetString(reader.GetOrdinal("store_name")),
-            Supersedes: reader.IsDBNull(reader.GetOrdinal("supersedes")) ? null : reader.GetString(reader.GetOrdinal("supersedes")),
-            AlterationType: reader.IsDBNull(reader.GetOrdinal("alteration_type")) ? null : reader.GetString(reader.GetOrdinal("alteration_type")));
+            StoreName: reader.IsDBNull(reader.GetOrdinal("store_name")) ? "" : reader.GetString(reader.GetOrdinal("store_name")));
     }
 
     public void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates)
@@ -968,6 +965,23 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
+    public HashSet<string> GetSupersededOrderIds(List<string> orderIds)
+    {
+        var result = new HashSet<string>();
+        if (orderIds.Count == 0) return result;
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        var placeholders = string.Join(",", orderIds.Select((_, i) => $"@id{i}"));
+        cmd.CommandText = $"SELECT DISTINCT parent_order_id FROM order_links WHERE parent_order_id IN ({placeholders})";
+        for (int i = 0; i < orderIds.Count; i++)
+            cmd.Parameters.AddWithValue($"@id{i}", orderIds[i]);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            result.Add(reader.GetString(0));
+        return result;
+    }
+
     public void InsertLink(string parentOrderId, string childOrderId, string linkType, string createdBy)
     {
         var linkId = Guid.NewGuid().ToString();
@@ -1079,8 +1093,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, harvested_by_store_id,
-                    supersedes, alteration_type
+                    is_test, harvested_by_store_id
                 )
                 SELECT
                     @newId, @newEid, order_source_id, source_code,
@@ -1092,15 +1105,12 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, {(newPickupStoreId.HasValue ? "@newStore" : "harvested_by_store_id")},
-                    @supersedes, @altType
+                    is_test, {(newPickupStoreId.HasValue ? "@newStore" : "harvested_by_store_id")}
                 FROM orders WHERE id = @srcId
                 """;
             copyCmd.Parameters.AddWithValue("@newId", newOrderId);
             copyCmd.Parameters.AddWithValue("@newEid", newExternalId);
             copyCmd.Parameters.AddWithValue("@srcId", sourceOrderId);
-            copyCmd.Parameters.AddWithValue("@supersedes", baseExternalId);
-            copyCmd.Parameters.AddWithValue("@altType", alterationType);
             if (newPickupStoreId.HasValue)
                 copyCmd.Parameters.AddWithValue("@newStore", newPickupStoreId.Value);
             if (newFolderPath != null)

@@ -145,6 +145,9 @@ public interface IOrderRepository
     /// <summary>Insert a Transfer service item (for orders with no real printable items).</summary>
     void InsertServiceItem(string orderId, string sizeLabel, string? filepath = null);
 
+    /// <summary>Get order IDs that have been superseded (have children in order_links).</summary>
+    HashSet<string> GetSupersededOrderIds(List<string> orderIds);
+
     /// <summary>Insert a link between parent and child orders.</summary>
     void InsertLink(string parentOrderId, string childOrderId, string linkType, string createdBy);
 
@@ -162,8 +165,7 @@ public record OrderRow(
     string? OrderedAt, decimal TotalAmount,
     bool IsHeld, bool IsTransfer,
     string FolderPath, string SpecialInstructions, string DownloadStatus,
-    string StoreName,
-    string? Supersedes = null, string? AlterationType = null);
+    string StoreName);
 
 public record ItemRow(
     string Id, string SizeLabel, string MediaType, int Quantity,

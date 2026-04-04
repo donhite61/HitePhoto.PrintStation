@@ -139,6 +139,7 @@ public class SyncingOrderRepository : IOrderRepository
     public void InsertServiceItem(string orderId, string sizeLabel, string? filepath = null) => _inner.InsertServiceItem(orderId, sizeLabel, filepath);
 
     // Link table — reads pass through, writes could push in future
+    public HashSet<string> GetSupersededOrderIds(List<string> orderIds) => _inner.GetSupersededOrderIds(orderIds);
     public void InsertLink(string parentOrderId, string childOrderId, string linkType, string createdBy) => _inner.InsertLink(parentOrderId, childOrderId, linkType, createdBy);
     public List<(string ChildOrderId, string LinkType, string CreatedBy, string CreatedAt)> GetChildOrders(string parentOrderId) => _inner.GetChildOrders(parentOrderId);
     public (string ParentOrderId, string LinkType)? GetParentOrder(string childOrderId) => _inner.GetParentOrder(childOrderId);

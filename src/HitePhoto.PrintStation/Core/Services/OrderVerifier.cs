@@ -85,10 +85,12 @@ public class OrderVerifier : IOrderVerifier
         int inserted = 0, errors = 0;
         int matchCount = 0;
 
-        // ── Orders in BOTH lists: already in DB, just count them ──
+        // ── Orders in BOTH lists: already in DB, update file statuses ──
         var matched = folderList.Keys.Intersect(dbList.Keys, StringComparer.OrdinalIgnoreCase).ToList();
         foreach (var orderId in matched)
         {
+            var dbOrderId = dbList[orderId].Id;
+            UpdateFileStatuses(dbOrderId);
             folderList.Remove(orderId);
             dbList.Remove(orderId);
             matchCount++;
@@ -132,6 +134,31 @@ public class OrderVerifier : IOrderVerifier
 
         AppLog.Info($"Verify complete: {matchCount} matched, {inserted} inserted, {errors} errors");
         return new VerifyResult(matchCount, inserted, 0, errors);
+    }
+
+    /// <summary>
+    /// Check each item's file on disk and write file_status to DB.
+    /// Called during verify so tree can read status from DB without disk I/O.
+    /// </summary>
+    private void UpdateFileStatuses(string dbOrderId)
+    {
+        var items = _orders.GetItems(dbOrderId);
+        var updates = new List<(string ItemId, int Status)>();
+
+        foreach (var item in items)
+        {
+            if (!item.IsLocalProduction)
+            {
+                updates.Add((item.Id, 1)); // not our files — always OK
+                continue;
+            }
+
+            var error = OrderHelpers.VerifyFile(item.ImageFilepath);
+            updates.Add((item.Id, error == null ? 1 : -1));
+        }
+
+        if (updates.Count > 0)
+            _orders.BatchUpdateFileStatus(updates);
     }
 
     // ── TXT-vs-DB compare-and-repair (Pixfizz — TXT is source of truth) ──

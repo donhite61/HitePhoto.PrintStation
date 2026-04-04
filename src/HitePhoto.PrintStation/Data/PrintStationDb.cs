@@ -669,6 +669,35 @@ public class PrintStationDb
         }
     }
 
+    /// <summary>Get order_links created since a given timestamp.</summary>
+    public async Task<List<dynamic>> GetOrderLinksSinceAsync(DateTime since)
+    {
+        const string sql = """
+            SELECT id, parent_order_id, child_order_id, link_type, created_by, created_at
+            FROM order_links
+            WHERE created_at > @Since
+            ORDER BY created_at ASC
+            """;
+
+        try
+        {
+            await using var conn = CreateConnection();
+            return (await conn.QueryAsync(sql, new { Since = since })).ToList();
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to pull order links from MariaDB",
+                detail: $"Attempted: SELECT links since {since:o}. " +
+                        $"Expected: link list. " +
+                        $"Found: {ex.GetType().Name}. " +
+                        $"Context: sync pull. " +
+                        $"State: local SQLite unaffected.",
+                ex: ex);
+            return new List<dynamic>();
+        }
+    }
+
     // ── Sync: push (upsert) ──────────────────────────────────────────────
 
     /// <summary>
@@ -689,8 +718,7 @@ public class PrintStationDb
         string? shippingCity = null, string? shippingState = null,
         string? shippingZip = null, string? shippingCountry = null,
         string? shippingMethod = null,
-        int harvestedByStoreId = 0, bool isPrinted = false,
-        string? supersedes = null, string? alterationType = null)
+        int harvestedByStoreId = 0, bool isPrinted = false)
     {
         const string sql = """
             INSERT INTO orders
@@ -706,7 +734,6 @@ public class PrintStationDb
                  shipping_address1, shipping_address2, shipping_city,
                  shipping_state, shipping_zip, shipping_country, shipping_method,
                  harvested_by_store_id, is_printed,
-                 supersedes, alteration_type,
                  sync_status)
             VALUES
                 (@OrderId, @Eid, @Store, @Store,
@@ -721,7 +748,6 @@ public class PrintStationDb
                  @ShipAddr1, @ShipAddr2, @ShipCity,
                  @ShipState, @ShipZip, @ShipCountry, @ShipMethod,
                  @HarvestedBy, @Printed,
-                 @Supersedes, @AltType,
                  'synced')
             ON DUPLICATE KEY UPDATE
                 order_status_id = VALUES(order_status_id),
@@ -753,8 +779,6 @@ public class PrintStationDb
                 shipping_method = COALESCE(VALUES(shipping_method), shipping_method),
                 harvested_by_store_id = VALUES(harvested_by_store_id),
                 is_printed = VALUES(is_printed),
-                supersedes = COALESCE(VALUES(supersedes), supersedes),
-                alteration_type = COALESCE(VALUES(alteration_type), alteration_type),
                 sync_status = 'synced'
             """;
 
@@ -796,8 +820,6 @@ public class PrintStationDb
                 ShipMethod = shippingMethod,
                 HarvestedBy = harvestedByStoreId,
                 Printed = isPrinted ? 1 : 0,
-                Supersedes = supersedes,
-                AltType = alterationType,
             });
 
             // On duplicate key update, the generated GUID is discarded — query by natural key to get existing id

@@ -33,11 +33,12 @@ Store IDs: BH=1, WB=2. Status IDs: new=1, in_progress=2, on_hold=3, ready=4, not
 ## Sync Field Ownership — CRITICAL
 The ingesting machine OWNS its orders in SQLite. MariaDB is a relay between stores, not an authority.
 
-**Sync pull INSERT** (new order from another store): Set all fields — we don't own this order.
-**Sync pull UPDATE** (existing local order): Only update shared fields (status, customer info, hold state). NEVER overwrite: `folder_path`, `harvested_by_store_id`, `is_printed`, `supersedes`, `alteration_type`, `is_test`.
+**Sync pull INSERT** (new order from another store): Set all fields via `BindPullInsertParams` — we don't own this order.
+**Sync pull UPDATE** (existing local order): Only writes `is_held` + `updated_at`. Nothing else. Edits create child orders linked via `order_links`.
 **Sync push** (local → MariaDB): Send everything — MariaDB needs the full picture for other stores.
+**Sync pull order_links**: Pulls new links from MariaDB, inserts locally if both parent and child exist.
 
-This is enforced in `SyncService.cs` via split bind methods: `BindPullUpdateParams` (whitelist of safe fields) and `BindPullInsertParams` (all fields). Do not merge these methods or add locally-owned fields to the UPDATE path.
+Supersession is tracked via `order_links` table (parent_order_id → child_order_id, link_type). The `supersedes` and `alteration_type` columns were removed in migration 021.
 
 See: `project_alteration_system.md`, `project_sync_authority.md` in memory.
 

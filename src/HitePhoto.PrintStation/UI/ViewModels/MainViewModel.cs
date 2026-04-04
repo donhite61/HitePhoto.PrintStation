@@ -197,9 +197,9 @@ public class MainViewModel : ViewModelBase
             var printed = _orders.LoadPrintedOrders(_settings.StoreId);
             var otherStore = _orders.LoadOtherStoreOrders(_settings.StoreId);
 
-            DiffAndPatch(PendingOrders, pending, verifyFiles: true);
-            DiffAndPatch(PrintedOrders, printed, verifyFiles: false);
-            DiffAndPatch(OtherStoreOrders, otherStore, verifyFiles: false);
+            DiffAndPatch(PendingOrders, pending);
+            DiffAndPatch(PrintedOrders, printed);
+            DiffAndPatch(OtherStoreOrders, otherStore);
 
             var total = pending.Count + printed.Count + otherStore.Count;
             StatusText = $"{pending.Count} pending, {printed.Count} printed, {otherStore.Count} other store";
@@ -220,7 +220,7 @@ public class MainViewModel : ViewModelBase
     /// In-place diff-and-patch: updates existing tree items instead of clear-and-rebuild.
     /// Preserves WPF selection, expansion, and scroll position.
     /// </summary>
-    private void DiffAndPatch(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders, bool verifyFiles)
+    private void DiffAndPatch(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders)
     {
         var filtered = ApplyFilters(orders);
         var sorted = ApplySort(filtered);
@@ -228,7 +228,7 @@ public class MainViewModel : ViewModelBase
         if (sorted.Count == 0) { target.Clear(); return; }
 
         var orderIds = sorted.Select(o => o.Id).ToList();
-        var allItems = BatchLoadItems(orderIds);
+        var allItems = _orders.BatchLoadItems(orderIds);
 
         // Lookup existing items by DbId for O(1) matching
         var existingByDbId = new Dictionary<string, OrderTreeItem>();
@@ -244,7 +244,7 @@ public class MainViewModel : ViewModelBase
             {
                 // Same item at same position — update in place
                 UpdateOrderProperties(target[i], row);
-                DiffSizes(target[i], items, verifyFiles);
+                DiffSizes(target[i], items);
             }
             else if (existingByDbId.TryGetValue(row.Id, out var existing))
             {
@@ -253,13 +253,13 @@ public class MainViewModel : ViewModelBase
                 if (oldIndex != i)
                     target.Move(oldIndex, i);
                 UpdateOrderProperties(existing, row);
-                DiffSizes(existing, items, verifyFiles);
+                DiffSizes(existing, items);
             }
             else
             {
                 // New item — create and insert
                 var treeItem = CreateOrderTreeItem(row);
-                BuildSizeGroups(treeItem, items, verifyFiles);
+                BuildSizeGroups(treeItem, items);
                 target.Insert(i, treeItem);
             }
         }
@@ -310,7 +310,7 @@ public class MainViewModel : ViewModelBase
         int ChannelNumber, string ChannelName, string? LayoutName,
         List<HitePhoto.Shared.Models.OrderItem> Items);
 
-    private SizeGroupResult ProcessSizeGroup(IEnumerable<ItemRow> group, string sizeLabel, string optionsKey, bool verifyFiles)
+    private SizeGroupResult ProcessSizeGroup(IEnumerable<ItemRow> group, string sizeLabel, string optionsKey)
     {
         int missingCount = 0;
         int printedCount = 0;
@@ -323,11 +323,7 @@ public class MainViewModel : ViewModelBase
 
         foreach (var item in group)
         {
-            if (verifyFiles && item.IsLocalProduction && !string.IsNullOrEmpty(item.ImageFilepath))
-            {
-                var error = OrderHelpers.VerifyFile(item.ImageFilepath);
-                if (error != null) missingCount++;
-            }
+            if (item.FileStatus == -1) missingCount++;
             if (item.IsPrinted) printedCount += item.Quantity;
             totalQty += item.Quantity;
 
@@ -352,7 +348,7 @@ public class MainViewModel : ViewModelBase
         return new SizeGroupResult(sizeLabel, optionsKey, displayOptions, totalQty, printedCount, missingCount, channelNumber, chName, layoutName, orderItems);
     }
 
-    private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
+    private void DiffSizes(OrderTreeItem treeItem, List<ItemRow> items)
     {
         var groups = items
             .GroupBy(i => new {
@@ -371,7 +367,7 @@ public class MainViewModel : ViewModelBase
         for (int i = 0; i < groups.Count; i++)
         {
             var group = groups[i];
-            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.OptionsKey, verifyFiles);
+            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.OptionsKey);
             var key = $"{r.SizeLabel}|{r.MediaType}";
 
             totalImages += r.ImageCount;
@@ -415,52 +411,10 @@ public class MainViewModel : ViewModelBase
         treeItem.HasUnmapped = treeItem.Sizes.Any(s => s.IsUnmapped);
     }
 
-    private Dictionary<string, List<ItemRow>> BatchLoadItems(List<string> orderIds)
-    {
-        var result = new Dictionary<string, List<ItemRow>>();
-        if (orderIds.Count == 0) return result;
-
-        using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-
-        var placeholders = string.Join(",", orderIds.Select((_, i) => $"@id{i}"));
-        cmd.CommandText = $"""
-            SELECT oi.order_id, oi.id, oi.size_label, oi.media_type, oi.quantity,
-                   oi.image_filename, oi.image_filepath,
-                   oi.is_noritsu, oi.is_local_production, oi.is_printed, oi.options_json
-            FROM order_items oi
-            WHERE oi.order_id IN ({placeholders})
-            ORDER BY oi.order_id, oi.size_label, oi.media_type
-            """;
-        for (int i = 0; i < orderIds.Count; i++)
-            cmd.Parameters.AddWithValue($"@id{i}", orderIds[i]);
-
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            var orderId = reader.GetString(0);
-            var item = new ItemRow(
-                Id: reader.GetString(1),
-                SizeLabel: reader.IsDBNull(2) ? "" : reader.GetString(2),
-                MediaType: reader.IsDBNull(3) ? "" : reader.GetString(3),
-                Quantity: reader.GetInt32(4),
-                ImageFilename: reader.IsDBNull(5) ? "" : reader.GetString(5),
-                ImageFilepath: reader.IsDBNull(6) ? "" : reader.GetString(6),
-                IsNoritsu: reader.GetInt32(7) == 1,
-                IsLocalProduction: reader.GetInt32(8) == 1,
-                IsPrinted: reader.GetInt32(9) == 1,
-                OptionsJson: reader.IsDBNull(10) ? "[]" : reader.GetString(10));
-
-            if (!result.ContainsKey(orderId))
-                result[orderId] = new List<ItemRow>();
-            result[orderId].Add(item);
-        }
-        return result;
-    }
 
 
 
-    private void BuildSizeGroups(OrderTreeItem treeItem, List<ItemRow> items, bool verifyFiles)
+    private void BuildSizeGroups(OrderTreeItem treeItem, List<ItemRow> items)
     {
         int totalImages = 0;
         bool hasMissing = false;
@@ -473,7 +427,7 @@ public class MainViewModel : ViewModelBase
 
         foreach (var group in groups)
         {
-            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.OptionsKey, verifyFiles);
+            var r = ProcessSizeGroup(group, group.Key.Size, group.Key.OptionsKey);
             var sizeItem = new SizeTreeItem
             {
                 SizeLabel = r.SizeLabel, MediaType = r.MediaType,
@@ -623,9 +577,3 @@ public class MainViewModel : ViewModelBase
     public void StartDakisWatcher() => _dakisIngest.StartWatching();
 }
 
-// ── Internal data records ──
-
-internal record ItemRow(
-    string Id, string SizeLabel, string MediaType, int Quantity,
-    string ImageFilename, string ImageFilepath,
-    bool IsNoritsu, bool IsLocalProduction, bool IsPrinted, string OptionsJson);

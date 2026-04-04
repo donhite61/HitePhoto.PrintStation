@@ -167,8 +167,7 @@ public class SyncService : ISyncService
                    total_amount, is_held, is_transfer, transfer_store_id,
                    special_instructions, folder_path, delivery_method_id,
                    ordered_at, pixfizz_job_id, download_status, source_code,
-                   harvested_by_store_id, is_printed,
-                   supersedes, alteration_type
+                   harvested_by_store_id, is_printed
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", localOrderId);
@@ -200,9 +199,7 @@ public class SyncService : ISyncService
             orderedAt: reader.IsDBNull(15) ? null : reader.GetString(15),
             pixfizzJobId: reader.IsDBNull(16) ? null : reader.GetString(16),
             harvestedByStoreId: reader.GetInt32(19),
-            isPrinted: reader.GetInt32(20) == 1,
-            supersedes: reader.IsDBNull(21) ? null : reader.GetString(21),
-            alterationType: reader.IsDBNull(22) ? null : reader.GetString(22));
+            isPrinted: reader.GetInt32(20) == 1);
         reader.Close();
 
         if (string.IsNullOrEmpty(upserted)) return false;
@@ -427,8 +424,31 @@ public class SyncService : ISyncService
                 }
             }
 
+            // Pull order_links
+            var lastLinksSync = _outbox.GetLastSyncAt("order_links", "pull") ?? DateTime.MinValue;
+            var remoteLinks = await _remoteDb.GetOrderLinksSinceAsync(lastLinksSync);
+            foreach (var link in remoteLinks)
+            {
+                try
+                {
+                    InsertRemoteLink(link);
+                }
+                catch (Exception ex)
+                {
+                    AlertCollector.Error(AlertCategory.Database,
+                        "Failed to pull order link into SQLite",
+                        detail: $"Attempted: insert pulled link. " +
+                                $"Expected: local order_links updated. " +
+                                $"Found: {ex.GetType().Name}. " +
+                                $"Context: sync pull. " +
+                                $"State: link skipped.",
+                        ex: ex);
+                }
+            }
+
             _outbox.SetLastSyncAt("orders", "pull", DateTime.Now);
             _outbox.SetLastSyncAt("order_notes", "pull", DateTime.Now);
+            _outbox.SetLastSyncAt("order_links", "pull", DateTime.Now);
         }
         catch (Exception ex)
         {
@@ -457,19 +477,12 @@ public class SyncService : ISyncService
     // ═══════════════════════════════════════════════════════════════
     //  SYNC PULL — FIELD OWNERSHIP RULES
     //
-    //  The ingesting machine OWNS these fields in SQLite. The pull
-    //  UPDATE must NEVER overwrite them from MariaDB:
+    //  Pull UPDATE writes ONLY is_held + updated_at. Nothing else.
+    //  MariaDB is a relay, not an authority. Edits create child
+    //  orders linked via order_links — they never modify the parent.
     //
-    //    folder_path, harvested_by_store_id, is_printed,
-    //    supersedes, alteration_type, is_test
-    //
-    //  These fields are set on INSERT (new orders from another store)
-    //  but never touched on UPDATE (existing local orders).
-    //
-    //  BindPullUpdateParams binds ONLY the update-safe fields.
-    //  BindPullInsertParams adds the locally-owned fields on top.
-    //  This split makes it physically impossible to accidentally
-    //  overwrite owned fields in the UPDATE path.
+    //  Pull INSERT sets ALL fields (new orders from another store).
+    //  BindPullInsertParams is standalone — not shared with UPDATE.
     //
     //  See: project_alteration_system.md, project_sync_authority.md
     // ═══════════════════════════════════════════════════════════════
@@ -503,18 +516,11 @@ public class SyncService : ISyncService
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 UPDATE orders SET
-                    order_source_id = @srcId, source_code = @srcCode,
-                    order_status_id = @statusId, status_code = @statusCode,
-                    customer_first_name = @fname, customer_last_name = @lname,
-                    customer_email = @email, customer_phone = @phone,
-                    total_amount = @total, is_held = @held,
-                    is_transfer = @transfer, transfer_store_id = @transferStore,
-                    special_instructions = @instructions,
-                    delivery_method_id = @delivery, ordered_at = @orderedAt,
+                    is_held = @held,
                     updated_at = @updatedAt
                 WHERE id = @id
                 """;
-            BindPullUpdateParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
+            cmd.Parameters.AddWithValue("@held", Convert.ToBoolean(row.is_held) ? 1 : 0);
             cmd.Parameters.AddWithValue("@updatedAt", ((DateTime)row.updated_at).ToString("o"));
             cmd.Parameters.AddWithValue("@id", existingLocalId);
             cmd.ExecuteNonQuery();
@@ -531,7 +537,6 @@ public class SyncService : ISyncService
                     total_amount, is_held, is_transfer, transfer_store_id,
                     special_instructions, folder_path, delivery_method_id, ordered_at,
                     harvested_by_store_id, is_printed,
-                    supersedes, alteration_type,
                     created_at, updated_at
                 ) VALUES (
                     @id, @eid, @store, @srcId, @srcCode,
@@ -540,7 +545,6 @@ public class SyncService : ISyncService
                     @total, @held, @transfer, @transferStore,
                     @instructions, @folder, @delivery, @orderedAt,
                     @harvestedBy, @isPrinted,
-                    @supersedes, @altType,
                     @createdAt, @updatedAt
                 )
                 """;
@@ -554,8 +558,8 @@ public class SyncService : ISyncService
         }
     }
 
-    /// <summary>Bind ONLY the fields that sync pull is allowed to UPDATE on existing local orders.</summary>
-    private static void BindPullUpdateParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
+    /// <summary>Bind ALL fields for INSERT (new orders from another store). Standalone — not shared with UPDATE.</summary>
+    private static void BindPullInsertParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
     {
         cmd.Parameters.AddWithValue("@srcId", orderSourceId);
         cmd.Parameters.AddWithValue("@srcCode", sourceCode);
@@ -572,17 +576,9 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@instructions", (string?)row.special_instructions ?? "");
         cmd.Parameters.AddWithValue("@delivery", row.delivery_method_id != null ? (int)row.delivery_method_id : 1);
         cmd.Parameters.AddWithValue("@orderedAt", row.ordered_at != null ? ((DateTime)row.ordered_at).ToString("o") : DateTime.Now.ToString("o"));
-    }
-
-    /// <summary>Bind ALL fields for INSERT (new orders from another store). Includes locally-owned fields.</summary>
-    private static void BindPullInsertParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
-    {
-        BindPullUpdateParams(cmd, row, sourceCode, orderSourceId, statusCode, orderStatusId);
         cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
         cmd.Parameters.AddWithValue("@harvestedBy", row.harvested_by_store_id != null ? (int)row.harvested_by_store_id : 0);
         cmd.Parameters.AddWithValue("@isPrinted", Convert.ToBoolean(row.is_printed) ? 1 : 0);
-        cmd.Parameters.AddWithValue("@supersedes", (string?)row.supersedes ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@altType", (string?)row.alteration_type ?? (object)DBNull.Value);
     }
 
     private void UpsertLocalItem(dynamic item)
@@ -724,6 +720,31 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@by", employeeName);
         cmd.Parameters.AddWithValue("@at", createdAt);
         cmd.Parameters.AddWithValue("@rid", mariaDbNoteId);
+        cmd.ExecuteNonQuery();
+    }
+
+    private void InsertRemoteLink(dynamic link)
+    {
+        string linkId = Convert.ToString(link.id)!;
+        string parentOrderId = Convert.ToString(link.parent_order_id)!;
+        string childOrderId = Convert.ToString(link.child_order_id)!;
+        string linkType = (string)link.link_type;
+        string createdBy = (string?)link.created_by ?? "";
+
+        if (VerifyOrderExists(parentOrderId) == null || VerifyOrderExists(childOrderId) == null)
+            return;
+
+        using var conn = _localDb.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT OR IGNORE INTO order_links (id, parent_order_id, child_order_id, link_type, created_by)
+            VALUES (@id, @pid, @cid, @type, @by)
+            """;
+        cmd.Parameters.AddWithValue("@id", linkId);
+        cmd.Parameters.AddWithValue("@pid", parentOrderId);
+        cmd.Parameters.AddWithValue("@cid", childOrderId);
+        cmd.Parameters.AddWithValue("@type", linkType);
+        cmd.Parameters.AddWithValue("@by", createdBy);
         cmd.ExecuteNonQuery();
     }
 
