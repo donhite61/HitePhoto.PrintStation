@@ -1074,32 +1074,16 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
 
-        // Get the source order's external ID to find the base
+        // Get the source order's external ID — children branch off the source directly.
+        // e.g., splitting "12345-WB1" produces "12345-WB1-S1", not "12345-S1".
         string baseExternalId;
         using (var getEid = conn.CreateCommand())
         {
             getEid.Transaction = transaction;
             getEid.CommandText = "SELECT external_order_id FROM orders WHERE id = @id";
             getEid.Parameters.AddWithValue("@id", sourceOrderId);
-            var sourceEid = getEid.ExecuteScalar()?.ToString();
-            if (sourceEid == null)
-                throw new InvalidOperationException($"CreateAlteration: source order {sourceOrderId} not found");
-
-            // Strip any suffix to find root order ID.
-            // Suffixes: -A# (legacy alteration), -W# (legacy split), -R# (legacy receive),
-            // -C# (change), -S# (split), -X# (outlab), -BH# / -WB# (store fulfillment split)
-            baseExternalId = sourceEid;
-            var dash = baseExternalId.LastIndexOf('-');
-            if (dash > 0)
-            {
-                var suffix = baseExternalId[(dash + 1)..];
-                // Valid suffix = letters followed by digits (e.g., "A1", "BH1", "C2")
-                int letterEnd = 0;
-                while (letterEnd < suffix.Length && char.IsLetter(suffix[letterEnd]))
-                    letterEnd++;
-                if (letterEnd > 0 && letterEnd < suffix.Length && suffix[letterEnd..].All(char.IsDigit))
-                    baseExternalId = baseExternalId[..dash];
-            }
+            baseExternalId = getEid.ExecuteScalar()?.ToString()
+                ?? throw new InvalidOperationException($"CreateAlteration: source order {sourceOrderId} not found");
         }
 
         // Determine the next version number
