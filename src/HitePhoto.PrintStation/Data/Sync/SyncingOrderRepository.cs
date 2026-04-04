@@ -107,6 +107,7 @@ public class SyncingOrderRepository : IOrderRepository
     public HitePhoto.Shared.Models.Order? GetFullOrder(string orderId) => _inner.GetFullOrder(orderId);
     public string? FindOrderId(string externalOrderId, int storeId) => _inner.FindOrderId(externalOrderId, storeId);
     public string? FindOrderIdAnyStore(string externalOrderId) => _inner.FindOrderIdAnyStore(externalOrderId);
+    public string? FindOrderIdByPattern(string pattern) => _inner.FindOrderIdByPattern(pattern);
     public List<OrderItemRecord> GetNoritsuItems(string orderId) => _inner.GetNoritsuItems(orderId);
     public string GetStoreName(int storeId) => _inner.GetStoreName(storeId);
     public List<OrderItemRecord> GetItems(string orderId) => _inner.GetItems(orderId);

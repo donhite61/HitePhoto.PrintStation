@@ -9,6 +9,9 @@ public interface IOrderRepository
     HitePhoto.Shared.Models.Order? GetFullOrder(string orderId);
     string? FindOrderId(string externalOrderId, int storeId);
     string? FindOrderIdAnyStore(string externalOrderId);
+
+    /// <summary>Find an order by external_order_id LIKE pattern (e.g., "12345-BH%").</summary>
+    string? FindOrderIdByPattern(string pattern);
     List<OrderItemRecord> GetNoritsuItems(string orderId);
     void SetHold(string orderId, bool isHeld);
     void SetNotified(string orderId);

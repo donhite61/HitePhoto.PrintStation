@@ -187,19 +187,19 @@ public class DakisIngestService : IDisposable
             return;
         }
 
+        // Check if this store already has a child for this order (idempotent re-ingest)
+        var existingChildId = FindExistingStoreChild(externalOrderId, storeCode);
+        if (existingChildId != null)
+        {
+            AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: {storeCode} child already exists, skipping");
+            return;
+        }
+
         // Ensure parent order exists (no items, tracking hub)
         var parentId = EnsureParentOrder(order, pickupStoreId, folderPath);
 
         // Generate child external_order_id: "12345-BH1"
         var childExternalId = GenerateChildExternalId(externalOrderId, storeCode);
-
-        // Check if this child already exists (idempotent re-ingest)
-        var existingChildId = _orders.FindOrderIdAnyStore(childExternalId);
-        if (existingChildId != null)
-        {
-            AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: child {childExternalId} already exists, skipping");
-            return;
-        }
 
         // Create child order with only local items
         var childOrder = order with
@@ -266,12 +266,20 @@ public class DakisIngestService : IDisposable
     }
 
     /// <summary>
+    /// Check if this store already created a child for this parent order.
+    /// Returns the child's internal ID if found, null otherwise.
+    /// </summary>
+    private string? FindExistingStoreChild(string parentExternalId, string storeCode)
+    {
+        return _orders.FindOrderIdByPattern($"{parentExternalId}-{storeCode}%");
+    }
+
+    /// <summary>
     /// Generate the next child external_order_id for a store.
     /// Pattern: "12345-BH1", "12345-BH2", etc.
     /// </summary>
     private string GenerateChildExternalId(string parentExternalId, string storeCode)
     {
-        // Count existing children with this store prefix
         int seq = 1;
         while (_orders.FindOrderIdAnyStore($"{parentExternalId}-{storeCode}{seq}") != null)
             seq++;

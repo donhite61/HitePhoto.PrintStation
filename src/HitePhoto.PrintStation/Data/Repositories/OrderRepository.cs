@@ -241,6 +241,16 @@ public class OrderRepository : IOrderRepository
         return result?.ToString();
     }
 
+    public string? FindOrderIdByPattern(string pattern)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id FROM orders WHERE external_order_id LIKE @pattern LIMIT 1";
+        cmd.Parameters.AddWithValue("@pattern", pattern);
+        var result = cmd.ExecuteScalar();
+        return result?.ToString();
+    }
+
     public List<OrderItemRecord> GetItems(string orderId)
     {
         var items = new List<OrderItemRecord>();
