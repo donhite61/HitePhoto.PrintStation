@@ -767,6 +767,16 @@ public class SyncService : ISyncService
             _outbox.PurgeBrokenEntries();
 
             var pending = _outbox.GetPending();
+
+            // Process insert_order first so the parent row exists in MariaDB
+            // before items, links, or status updates reference it via FK.
+            pending.Sort((a, b) =>
+            {
+                var aOrder = a.Operation == "insert_order" ? 0 : 1;
+                var bOrder = b.Operation == "insert_order" ? 0 : 1;
+                return aOrder != bOrder ? aOrder.CompareTo(bOrder) : a.Id.CompareTo(b.Id);
+            });
+
             foreach (var entry in pending)
             {
                 try

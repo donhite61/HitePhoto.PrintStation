@@ -28,6 +28,7 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
 
     private readonly object _lock = new();
     private readonly List<AlertRecord> _batch = new();
+    private readonly HashSet<string> _batchSeen = new();
     private readonly Timer _timer;
     private bool _disposed;
 
@@ -95,9 +96,11 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
             && record.Summary.Contains("alert upload", StringComparison.OrdinalIgnoreCase))
             return;
 
+        // Dedup within the batch — same category+summary+orderId only reported once per flush
+        var dedupKey = $"{record.Category}|{record.Summary}|{record.OrderId}";
         lock (_lock)
         {
-            if (_batch.Count < MaxBatchSize)
+            if (_batch.Count < MaxBatchSize && _batchSeen.Add(dedupKey))
                 _batch.Add(record);
         }
     }
@@ -111,6 +114,7 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
             if (_batch.Count == 0) return;
             snapshot = new List<AlertRecord>(_batch);
             _batch.Clear();
+            _batchSeen.Clear();
         }
 
         try
