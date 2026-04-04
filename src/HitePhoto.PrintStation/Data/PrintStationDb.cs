@@ -851,6 +851,17 @@ public class PrintStationDb
         }
     }
 
+    /// <summary>Check if an order exists in MariaDB by its GUID id.</summary>
+    public async Task<bool> OrderExistsAsync(string orderId)
+    {
+        await using var conn = CreateConnection();
+        await conn.OpenAsync();
+        var count = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM orders WHERE id = @Id",
+            new { Id = orderId });
+        return count > 0;
+    }
+
     /// <summary>Upsert order items to MariaDB. Deletes existing items and re-inserts. Retries on deadlock.</summary>
     public async Task<bool> UpsertOrderItemsAsync(string mariaDbOrderId, List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> items)
     {

@@ -98,6 +98,7 @@ public class SyncService : ISyncService
             {
                 var orderId = payload["orderId"].GetString()!;
                 if (VerifyOrderExists(orderId) == null) return false;
+                if (!await EnsureOrderInMariaDbAsync(orderId)) return false;
                 using var conn = _localDb.OpenConnection();
                 var items = ReadLocalItems(conn, orderId);
                 if (items.Count == 0) return true;
@@ -154,6 +155,8 @@ public class SyncService : ISyncService
                 var childId = payload["childOrderId"].GetString()!;
                 var linkType = payload["linkType"].GetString()!;
                 var createdBy = payload.TryGetValue("createdBy", out var cb) ? cb.GetString() ?? "" : "";
+                if (!await EnsureOrderInMariaDbAsync(parentId)) return false;
+                if (!await EnsureOrderInMariaDbAsync(childId)) return false;
                 return await _remoteDb.InsertOrderLinkAsync(parentId, childId, linkType, createdBy);
             }
 
@@ -843,6 +846,24 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@id", orderId);
         var exists = Convert.ToInt32(cmd.ExecuteScalar()) > 0;
         return exists ? orderId : null;
+    }
+
+    /// <summary>
+    /// Ensure the order exists in MariaDB. If not, read it from SQLite and push it.
+    /// This prevents FK failures when items/links push before their parent order.
+    /// </summary>
+    private async Task<bool> EnsureOrderInMariaDbAsync(string localOrderId)
+    {
+        if (await _remoteDb.OrderExistsAsync(localOrderId))
+            return true;
+
+        // Order missing in MariaDB — push it from SQLite
+        AppLog.Info($"SyncPush: order {localOrderId} missing in MariaDB, pushing now");
+        var payload = new Dictionary<string, JsonElement>
+        {
+            ["localOrderId"] = JsonSerializer.SerializeToElement(localOrderId)
+        };
+        return await PushInsertOrderAsync(payload);
     }
 
     private void AddOrdersMissingItems(List<string> mariaDbOrderIds)
