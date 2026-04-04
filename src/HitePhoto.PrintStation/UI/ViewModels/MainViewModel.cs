@@ -144,6 +144,33 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Repair all Pending tab orders from source files. Called on hourly timer.
+    /// </summary>
+    public void RepairPendingOrders()
+    {
+        var pending = _orders.LoadPendingOrders(_settings.StoreId);
+        int totalRepairs = 0;
+        foreach (var order in pending)
+        {
+            try
+            {
+                totalRepairs += _verifier.RepairOrder(order.Id, order.FolderPath, order.SourceCode);
+            }
+            catch (Exception ex)
+            {
+                AlertCollector.Error(AlertCategory.Parsing,
+                    $"Repair failed for {order.ExternalOrderId}",
+                    orderId: order.ExternalOrderId, ex: ex);
+            }
+        }
+        if (totalRepairs > 0)
+        {
+            AppLog.Info($"Pending repair: {totalRepairs} item(s) fixed across {pending.Count} orders");
+            NeedsRefresh = true;
+        }
+    }
+
+    /// <summary>
     /// Verify/repair a single order — called when operator clicks an order in the tree.
     /// </summary>
     public void VerifyOrder(OrderTreeItem order)

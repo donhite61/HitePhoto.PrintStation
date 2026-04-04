@@ -103,7 +103,13 @@ public partial class MainWindow : Window
         _verifyTimer = new DispatcherTimer { Interval = TimeSpan.FromHours(1) };
         _verifyTimer.Tick += async (_, _) =>
         {
-            await Task.Run(() => _vm.VerifyRecentOrders(_settings.DaysToVerify));
+            await Task.Run(() =>
+            {
+                _vm.VerifyRecentOrders(_settings.DaysToVerify);
+                _vm.RepairPendingOrders();
+            });
+            if (_vm.NeedsRefresh)
+                _vm.NeedsRefresh = false;
             _vm.LoadOrders();
             UpdateStatusBar();
         };
