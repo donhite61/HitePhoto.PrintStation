@@ -862,16 +862,6 @@ public class PrintStationDb
         return count > 0;
     }
 
-    /// <summary>Find the MariaDB order ID by external_order_id + pickup_store_id.</summary>
-    public async Task<string?> FindOrderIdByExternalAsync(string externalOrderId, int pickupStoreId)
-    {
-        await using var conn = CreateConnection();
-        await conn.OpenAsync();
-        return await conn.ExecuteScalarAsync<string?>(
-            "SELECT id FROM orders WHERE external_order_id = @Eid AND pickup_store_id = @Store",
-            new { Eid = externalOrderId, Store = pickupStoreId });
-    }
-
     /// <summary>Upsert order items to MariaDB. Deletes existing items and re-inserts. Retries on deadlock.</summary>
     public async Task<bool> UpsertOrderItemsAsync(string mariaDbOrderId, List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> items)
     {

@@ -124,7 +124,6 @@ public static class AlertCollector
             default:                    AppLog.Info(logMsg);   break;
         }
 
-        // Dispatch to sinks (SFTP upload, MariaDB, SQLite)
         if (!SuspendPersistence)
         {
             var record = new AlertRecord(
@@ -141,13 +140,15 @@ public static class AlertCollector
                 CreatedAt: alert.Timestamp.ToString("o"),
                 Acknowledged: false);
 
-            lock (_lock)
+            // Snapshot sinks under lock, call Persist outside to avoid
+            // holding the lock during SQLite/MariaDB I/O.
+            IAlertSink[] sinks;
+            lock (_lock) { sinks = _sinks.ToArray(); }
+
+            foreach (var sink in sinks)
             {
-                foreach (var sink in _sinks)
-                {
-                    try { sink.Persist(record); }
-                    catch { /* sink failures must never crash the app */ }
-                }
+                try { sink.Persist(record); }
+                catch { /* sink failures must never crash the app */ }
             }
         }
     }

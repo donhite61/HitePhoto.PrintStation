@@ -24,6 +24,9 @@ public static class AppLog
     private static string LogPath => Path.Combine(_logDir, "printstation.log");
     private static string? NasLogPath => _nasLogDir != null ? Path.Combine(_nasLogDir, "printstation.log") : null;
 
+    /// <summary>Current local log file path (for upload by SftpAlertSink).</summary>
+    public static string CurrentLogPath => LogPath;
+
     public static void Init(string? logDirectory)
     {
         if (!string.IsNullOrWhiteSpace(logDirectory))

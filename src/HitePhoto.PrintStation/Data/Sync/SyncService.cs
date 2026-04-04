@@ -68,7 +68,7 @@ public class SyncService : ISyncService
         switch (operation)
         {
             case "insert_order":
-                return await PushInsertOrderAsync(payload);
+                return await PushInsertOrderAsync(payload) != null;
 
             case "set_hold":
             {
@@ -169,11 +169,14 @@ public class SyncService : ISyncService
         }
     }
 
-    private async Task<bool> PushInsertOrderAsync(Dictionary<string, JsonElement> payload)
+    /// <summary>
+    /// Push a local order to MariaDB. Returns the MariaDB order ID (may differ
+    /// from the local GUID if the other store pushed first), or null on failure.
+    /// </summary>
+    private async Task<string?> PushInsertOrderAsync(Dictionary<string, JsonElement> payload)
     {
         var localOrderId = payload["localOrderId"].GetString()!;
 
-        // Read the full order from SQLite to push
         using var conn = _localDb.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -187,14 +190,14 @@ public class SyncService : ISyncService
             """;
         cmd.Parameters.AddWithValue("@id", localOrderId);
         using var reader = cmd.ExecuteReader();
-        if (!reader.Read()) return false;
+        if (!reader.Read()) return null;
 
         var externalOrderId = reader.GetString(0);
         var pickupStoreId = reader.GetInt32(1);
         var sourceCode = reader.IsDBNull(18) ? "pixfizz" : reader.GetString(18);
         var orderSourceId = SyncMapper.SourceCodeToSourceId(sourceCode);
 
-        var upserted = await _remoteDb.UpsertOrderAsync(
+        var mariaDbId = await _remoteDb.UpsertOrderAsync(
             orderId: localOrderId,
             externalOrderId: externalOrderId,
             pickupStoreId: pickupStoreId,
@@ -217,11 +220,7 @@ public class SyncService : ISyncService
             isPrinted: reader.GetInt32(20) == 1);
         reader.Close();
 
-        if (string.IsNullOrEmpty(upserted)) return false;
-
-        // Use the MariaDB ID (may differ from localOrderId if order was already
-        // pushed by the other store — ON DUPLICATE KEY keeps the existing GUID).
-        var mariaDbId = upserted;
+        if (string.IsNullOrEmpty(mariaDbId)) return null;
 
         var items = ReadLocalItems(conn, localOrderId);
         AppLog.Info($"SyncPush: order {externalOrderId} (local={localOrderId}, mariadb={mariaDbId}), {items.Count} items to push");
@@ -229,10 +228,10 @@ public class SyncService : ISyncService
         {
             var itemResult = await _remoteDb.UpsertOrderItemsAsync(mariaDbId, items);
             AppLog.Info($"SyncPush: items push result={itemResult} for order {externalOrderId}");
-            if (!itemResult) return false;
+            if (!itemResult) return null;
         }
 
-        return true;
+        return mariaDbId;
     }
 
     private async Task<bool> PushCreateAlterationAsync(Dictionary<string, JsonElement> payload)
@@ -241,19 +240,23 @@ public class SyncService : ISyncService
         var localParentId = payload["sourceOrderId"].GetString()!;
         var alterationType = payload["alterationType"].GetString() ?? "split";
 
-        // 1. Push child order (same pattern as PushInsertOrderAsync)
-        var childPayload = new Dictionary<string, JsonElement>
-        {
-            ["localOrderId"] = JsonSerializer.SerializeToElement(localChildId)
-        };
-        var childPushed = await PushInsertOrderAsync(childPayload);
-        if (!childPushed)
+        // Push child order and get its MariaDB ID
+        var mariaChildId = await PushInsertOrderAsync(
+            new Dictionary<string, JsonElement>
+            {
+                ["localOrderId"] = JsonSerializer.SerializeToElement(localChildId)
+            });
+        if (mariaChildId == null)
         {
             AppLog.Info($"SyncPush: create_alteration failed — could not push child order {localChildId}");
             return false;
         }
 
-        // 2. Sync parent's is_printed state to MariaDB (only true if all items sent)
+        // Ensure parent exists in MariaDB and get its ID
+        var mariaParentId = await EnsureOrderInMariaDbAsync(localParentId);
+        if (mariaParentId == null) return false;
+
+        // Sync parent's is_printed state
         if (VerifyOrderExists(localParentId) != null)
         {
             using var pConn = _localDb.OpenConnection();
@@ -261,18 +264,15 @@ public class SyncService : ISyncService
             pCmd.CommandText = "SELECT is_printed FROM orders WHERE id = @id";
             pCmd.Parameters.AddWithValue("@id", localParentId);
             var parentPrinted = Convert.ToInt32(pCmd.ExecuteScalar()) == 1;
-            if (!await _remoteDb.SetOrderPrintedAsync(localParentId, parentPrinted))
+            if (!await _remoteDb.SetOrderPrintedAsync(mariaParentId, parentPrinted))
                 return false;
         }
 
-        // 3. Insert order_links row in MariaDB
-        if (VerifyOrderExists(localParentId) != null && VerifyOrderExists(localChildId) != null)
-        {
-            if (!await _remoteDb.InsertOrderLinkAsync(localParentId, localChildId, alterationType, ""))
-                return false;
-        }
+        // Insert order_links row using MariaDB IDs
+        if (!await _remoteDb.InsertOrderLinkAsync(mariaParentId, mariaChildId, alterationType, ""))
+            return false;
 
-        AppLog.Info($"SyncPush: create_alteration complete — child {localChildId}, parent {localParentId}");
+        AppLog.Info($"SyncPush: create_alteration complete — child {localChildId}→{mariaChildId}, parent {localParentId}→{mariaParentId}");
         return true;
     }
 
@@ -857,51 +857,20 @@ public class SyncService : ISyncService
 
     /// <summary>
     /// Ensure the order exists in MariaDB and return its MariaDB ID.
-    /// If missing, read from SQLite and push it. The MariaDB ID may differ
-    /// from the local GUID when the other store pushed the order first.
-    /// Returns null on failure.
+    /// The MariaDB ID may differ from the local GUID when the other store
+    /// pushed the order first. Returns null on failure.
     /// </summary>
     private async Task<string?> EnsureOrderInMariaDbAsync(string localOrderId)
     {
-        // Check if order exists by local ID
         if (await _remoteDb.OrderExistsAsync(localOrderId))
             return localOrderId;
 
-        // Order missing — push it from SQLite, which returns the MariaDB ID
         AppLog.Info($"SyncPush: order {localOrderId} missing in MariaDB, pushing now");
         var payload = new Dictionary<string, JsonElement>
         {
             ["localOrderId"] = JsonSerializer.SerializeToElement(localOrderId)
         };
-        var pushed = await PushInsertOrderAsync(payload);
-        if (!pushed) return null;
-
-        // The MariaDB ID may differ — look it up by external_order_id
-        return await ResolveMariaDbOrderIdAsync(localOrderId);
-    }
-
-    /// <summary>
-    /// Given a local order ID, find the corresponding MariaDB order ID.
-    /// They may differ if another store pushed the order first.
-    /// </summary>
-    private async Task<string?> ResolveMariaDbOrderIdAsync(string localOrderId)
-    {
-        // Try direct match first (same GUID)
-        if (await _remoteDb.OrderExistsAsync(localOrderId))
-            return localOrderId;
-
-        // Look up by external_order_id + pickup_store_id
-        using var conn = _localDb.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT external_order_id, pickup_store_id FROM orders WHERE id = @id";
-        cmd.Parameters.AddWithValue("@id", localOrderId);
-        using var reader = cmd.ExecuteReader();
-        if (!reader.Read()) return null;
-        var extId = reader.GetString(0);
-        var storeId = reader.GetInt32(1);
-        reader.Close();
-
-        return await _remoteDb.FindOrderIdByExternalAsync(extId, storeId);
+        return await PushInsertOrderAsync(payload);
     }
 
     private void AddOrdersMissingItems(List<string> mariaDbOrderIds)

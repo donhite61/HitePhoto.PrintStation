@@ -19,9 +19,14 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
     private const int FlushIntervalSeconds = 60;
     private const int MaxBatchSize = 200;
 
+    private static readonly JsonSerializerOptions s_jsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private readonly AppSettings _settings;
     private readonly string _storeCode;
-    private readonly string _localLogPath;
     private readonly string _remoteAlertsDir;
     private readonly string _remoteLogPath;
     private readonly bool _useSftp;
@@ -30,29 +35,20 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
     private readonly List<AlertRecord> _batch = new();
     private readonly HashSet<string> _batchSeen = new();
     private readonly Timer _timer;
+    private bool _sftpDirectoriesVerified;
     private bool _disposed;
 
-    /// <param name="settings">App settings (SFTP credentials, NAS paths, StoreId).</param>
     public SftpAlertSink(AppSettings settings)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _storeCode = settings.StoreId == 1 ? "BH" : "WB";
 
-        // Local log file path (same as AppLog default)
-        _localLogPath = Path.Combine(
-            string.IsNullOrWhiteSpace(settings.LogDirectory)
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "HitePhoto.PrintStation")
-                : settings.LogDirectory,
-            "printstation.log");
-
-        // Determine if we need SFTP or can write directly to NAS
         _useSftp = !string.IsNullOrWhiteSpace(settings.UpdateSftpHost)
                 && !string.IsNullOrWhiteSpace(settings.UpdateSftpFolder);
 
         if (_useSftp)
         {
-            // Derive log/alert paths from UpdateSftpFolder:
+            // Derive from UpdateSftpFolder:
             //   /EMPLOYEES SAVE!!!/Don/StoreManagementSoftware/updates/PrintStation
             // → /EMPLOYEES SAVE!!!/Don/StoreManagementSoftware/logs/PrintStation/{StoreCode}
             var basePath = settings.UpdateSftpFolder;
@@ -64,7 +60,6 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
         }
         else
         {
-            // WB — write directly to NAS share
             var nasBase = settings.NasLogFolder;
             if (string.IsNullOrWhiteSpace(nasBase))
             {
@@ -78,7 +73,6 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
             }
         }
 
-        // Flush timer — fires every FlushIntervalSeconds
         _timer = new Timer(_ => Flush(), null,
             TimeSpan.FromSeconds(FlushIntervalSeconds),
             TimeSpan.FromSeconds(FlushIntervalSeconds));
@@ -86,17 +80,15 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
 
     public void Persist(AlertRecord record)
     {
-        // Only batch Error-level alerts
-        if (!string.Equals(record.Severity, "Error", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(record.Severity, "ERROR", StringComparison.OrdinalIgnoreCase))
             return;
 
-        // Skip self-referential SFTP/upload errors to avoid infinite loops
+        // Skip self-referential errors to avoid infinite loops
         if (string.Equals(record.Category, "Network", StringComparison.OrdinalIgnoreCase)
             && record.Summary != null
             && record.Summary.Contains("alert upload", StringComparison.OrdinalIgnoreCase))
             return;
 
-        // Dedup within the batch — same category+summary+orderId only reported once per flush
         var dedupKey = $"{record.Category}|{record.Summary}|{record.OrderId}";
         lock (_lock)
         {
@@ -105,7 +97,6 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
         }
     }
 
-    /// <summary>Drain the batch and upload. Called by timer and on dispose.</summary>
     private void Flush()
     {
         List<AlertRecord> snapshot;
@@ -117,63 +108,56 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
             _batchSeen.Clear();
         }
 
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var fileName = $"{timestamp}_{_storeCode}_{snapshot.Count}alerts.json";
+        var json = SerializeReport(snapshot);
+
         try
         {
             if (_useSftp)
-                FlushViaSftp(snapshot);
+                FlushViaSftp(fileName, json);
             else
-                FlushViaNas(snapshot);
+                FlushViaNas(fileName, json);
         }
         catch (Exception ex)
         {
-            // Log locally only — do NOT feed back into AlertCollector (would loop)
             AppLog.Error($"SftpAlertSink flush failed ({snapshot.Count} alerts): {ex.Message}");
         }
     }
 
-    private void FlushViaSftp(List<AlertRecord> alerts)
+    private void FlushViaSftp(string fileName, string json)
     {
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var fileName = $"{timestamp}_{_storeCode}_{alerts.Count}alerts.json";
-        var json = SerializeReport(alerts);
-
         using var client = CreateClient();
         client.Connect();
 
-        // Ensure directories exist
-        EnsureSftpDirectory(client, _remoteAlertsDir);
-        EnsureSftpDirectory(client, Path.GetDirectoryName(_remoteLogPath)!.Replace('\\', '/'));
-
-        // Upload alert report
-        using (var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json)))
+        if (!_sftpDirectoriesVerified)
         {
-            client.UploadFile(stream, $"{_remoteAlertsDir}/{fileName}");
+            EnsureSftpDirectory(client, _remoteAlertsDir);
+            EnsureSftpDirectory(client, Path.GetDirectoryName(_remoteLogPath)!.Replace('\\', '/'));
+            _sftpDirectoriesVerified = true;
         }
 
-        // Upload current log file
-        if (File.Exists(_localLogPath))
+        using (var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json)))
+            client.UploadFile(stream, $"{_remoteAlertsDir}/{fileName}");
+
+        var logPath = AppLog.CurrentLogPath;
+        if (File.Exists(logPath))
         {
-            using var logStream = new FileStream(_localLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var logStream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             client.UploadFile(logStream, _remoteLogPath);
         }
 
-        AppLog.Info($"SftpAlertSink: uploaded {alerts.Count} alerts + log to {_remoteAlertsDir}/{fileName}");
+        AppLog.Info($"SftpAlertSink: uploaded alerts + log to {_remoteAlertsDir}/{fileName}");
     }
 
-    private void FlushViaNas(List<AlertRecord> alerts)
+    private void FlushViaNas(string fileName, string json)
     {
         if (string.IsNullOrWhiteSpace(_remoteAlertsDir)) return;
 
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var fileName = $"{timestamp}_{_storeCode}_{alerts.Count}alerts.json";
-        var json = SerializeReport(alerts);
-
         Directory.CreateDirectory(_remoteAlertsDir);
-
         File.WriteAllText(Path.Combine(_remoteAlertsDir, fileName), json);
 
-        // Log file is already written to NAS by AppLog.InitNas — no extra copy needed
-        AppLog.Info($"SftpAlertSink: wrote {alerts.Count} alerts to {_remoteAlertsDir}/{fileName}");
+        AppLog.Info($"SftpAlertSink: wrote alerts to {_remoteAlertsDir}/{fileName}");
     }
 
     private string SerializeReport(List<AlertRecord> alerts)
@@ -188,11 +172,7 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
             alerts = alerts
         };
 
-        return JsonSerializer.Serialize(report, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
+        return JsonSerializer.Serialize(report, s_jsonOptions);
     }
 
     private SftpClient CreateClient()
@@ -207,7 +187,6 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
         return client;
     }
 
-    /// <summary>Recursively create remote directories if they don't exist.</summary>
     private static void EnsureSftpDirectory(SftpClient client, string path)
     {
         if (string.IsNullOrWhiteSpace(path) || path == "/") return;
@@ -227,6 +206,6 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
         if (_disposed) return;
         _disposed = true;
         _timer.Dispose();
-        Flush(); // drain any remaining alerts
+        Flush();
     }
 }
