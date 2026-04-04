@@ -78,7 +78,7 @@ public class OutboxRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE sync_outbox SET pushed_at = datetime('now') WHERE id = @id";
+        cmd.CommandText = "UPDATE sync_outbox SET pushed_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", outboxId);
         cmd.ExecuteNonQuery();
     }

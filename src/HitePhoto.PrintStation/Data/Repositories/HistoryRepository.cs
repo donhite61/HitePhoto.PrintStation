@@ -17,7 +17,7 @@ public class HistoryRepository : IHistoryRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO order_history (id, order_id, note, created_by, created_at)
-            VALUES (@hid, @id, @note, @by, datetime('now'))
+            VALUES (@hid, @id, @note, @by, datetime('now','localtime'))
             """;
         cmd.Parameters.AddWithValue("@hid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@id", orderId);
@@ -47,7 +47,7 @@ public class HistoryRepository : IHistoryRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO order_history (id, order_id, note, created_by, created_at)
-            VALUES (@hid, @id, @note, @by, datetime('now'))
+            VALUES (@hid, @id, @note, @by, datetime('now','localtime'))
             """;
         cmd.Parameters.AddWithValue("@hid", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@id", orderId);

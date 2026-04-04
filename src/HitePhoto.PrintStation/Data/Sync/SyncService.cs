@@ -637,7 +637,7 @@ public class SyncService : ISyncService
                 UPDATE order_items SET
                     quantity = @qty, image_filepath = @fpath,
                     options_json = @options,
-                    is_printed = @printed, updated_at = datetime('now')
+                    is_printed = @printed, updated_at = datetime('now','localtime')
                 WHERE id = @id
                 """;
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);
@@ -682,7 +682,7 @@ public class SyncService : ISyncService
         check.CommandText = """
             CREATE TABLE IF NOT EXISTS migrations_applied (
                 id TEXT PRIMARY KEY,
-                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+                applied_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
             )
             """;
         check.ExecuteNonQuery();

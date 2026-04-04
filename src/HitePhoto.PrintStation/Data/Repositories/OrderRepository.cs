@@ -125,7 +125,7 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_held = @held, updated_at = datetime('now') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET is_held = @held, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@held", isHeld ? 1 : 0);
         cmd.Parameters.AddWithValue("@id", orderId);
         var rows = cmd.ExecuteNonQuery();
@@ -142,7 +142,7 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_notified = 1, updated_at = datetime('now') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET is_notified = 1, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", orderId);
         var rows = cmd.ExecuteNonQuery();
         if (rows == 0)
@@ -159,7 +159,7 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            UPDATE orders SET current_location_store_id = @store, updated_at = datetime('now')
+            UPDATE orders SET current_location_store_id = @store, updated_at = datetime('now','localtime')
             WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@store", storeId);
@@ -181,7 +181,7 @@ public class OrderRepository : IOrderRepository
         foreach (var id in itemIds)
         {
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "UPDATE order_items SET is_printed = 1, updated_at = datetime('now') WHERE id = @id";
+            cmd.CommandText = "UPDATE order_items SET is_printed = 1, updated_at = datetime('now','localtime') WHERE id = @id";
             cmd.Parameters.AddWithValue("@id", id);
             var rows = cmd.ExecuteNonQuery();
             if (rows == 0)
@@ -197,7 +197,7 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE order_items SET is_printed = 0, updated_at = datetime('now') WHERE order_id = @oid";
+        cmd.CommandText = "UPDATE order_items SET is_printed = 0, updated_at = datetime('now','localtime') WHERE order_id = @oid";
         cmd.Parameters.AddWithValue("@oid", orderId);
         cmd.ExecuteNonQuery();
     }
@@ -298,7 +298,7 @@ public class OrderRepository : IOrderRepository
                 image_filename = @fname, image_filepath = @fpath,
                 quantity = @qty, is_noritsu = @noritsu,
                 category = @cat, sub_category = @subcat,
-                updated_at = datetime('now')
+                updated_at = datetime('now','localtime')
             WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@size", sizeLabel);
@@ -589,7 +589,7 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET status_code = @status, updated_at = datetime('now') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET status_code = @status, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@status", statusCode);
         cmd.Parameters.AddWithValue("@id", orderId);
         var rows = cmd.ExecuteNonQuery();
@@ -830,7 +830,7 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET harvested_by_store_id = @val, updated_at = datetime('now') WHERE id = @id AND harvested_by_store_id != @val";
+        cmd.CommandText = "UPDATE orders SET harvested_by_store_id = @val, updated_at = datetime('now','localtime') WHERE id = @id AND harvested_by_store_id != @val";
         cmd.Parameters.AddWithValue("@val", storeId);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
@@ -840,7 +840,7 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_printed = @val, printed_at = @pat, updated_at = datetime('now') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET is_printed = @val, printed_at = @pat, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@val", printed ? 1 : 0);
         cmd.Parameters.AddWithValue("@pat", printed ? DateTime.Now.ToString("o") : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@id", orderId);
@@ -860,7 +860,7 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_externally_modified = @val, updated_at = datetime('now') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET is_externally_modified = @val, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@val", modified ? 1 : 0);
         cmd.Parameters.AddWithValue("@id", orderId);
         var rows = cmd.ExecuteNonQuery();
@@ -877,7 +877,7 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET folder_path = @path, updated_at = datetime('now') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET folder_path = @path, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@path", folderPath);
         cmd.Parameters.AddWithValue("@id", orderId);
         var rows = cmd.ExecuteNonQuery();
@@ -919,7 +919,7 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET pickup_store_id = @store, updated_at = datetime('now') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET pickup_store_id = @store, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@store", storeId);
         cmd.Parameters.AddWithValue("@id", orderId);
         var rows = cmd.ExecuteNonQuery();
@@ -1189,7 +1189,7 @@ public class OrderRepository : IOrderRepository
         {
             using var markDone = conn.CreateCommand();
             markDone.Transaction = transaction;
-            markDone.CommandText = "UPDATE orders SET is_printed = 1, printed_at = datetime('now'), updated_at = datetime('now') WHERE id = @id";
+            markDone.CommandText = "UPDATE orders SET is_printed = 1, printed_at = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE id = @id";
             markDone.Parameters.AddWithValue("@id", sourceOrderId);
             markDone.ExecuteNonQuery();
         }

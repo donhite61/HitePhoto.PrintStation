@@ -98,7 +98,7 @@ public class OrderDb
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = """
                     INSERT OR REPLACE INTO channel_mappings (routing_key, channel_number, layout_name, source, updated_at)
-                    VALUES (@key, @ch, @layout, @src, datetime('now'))
+                    VALUES (@key, @ch, @layout, @src, datetime('now','localtime'))
                     """;
                 cmd.Parameters.AddWithValue("@key", m.Key);
                 cmd.Parameters.AddWithValue("@ch", m.Channel);
@@ -238,8 +238,8 @@ public class OrderDb
             default_needs_files        INTEGER NOT NULL DEFAULT 1,
             notes                      TEXT DEFAULT '',
             is_active                  INTEGER NOT NULL DEFAULT 1,
-            created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at                 TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at                 TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at                 TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );
         """;
 
@@ -250,7 +250,7 @@ public class OrderDb
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             category_name TEXT NOT NULL UNIQUE,
             sort_order    INTEGER NOT NULL DEFAULT 0,
-            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );
         """;
 
@@ -273,8 +273,8 @@ public class OrderDb
             match_key_dakis    TEXT DEFAULT NULL,
             match_key_pixfizz  TEXT DEFAULT NULL,
             is_active          INTEGER NOT NULL DEFAULT 1,
-            created_at         TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at         TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at         TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );
         """;
 
@@ -324,8 +324,8 @@ public class OrderDb
             notified_at               TEXT DEFAULT NULL,
             is_printed                INTEGER NOT NULL DEFAULT 0,
             printed_at                TEXT DEFAULT NULL,
-            created_at                TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at                TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             UNIQUE(external_order_id, pickup_store_id)
         );
         """;
@@ -359,8 +359,8 @@ public class OrderDb
             files_expected          INTEGER DEFAULT NULL,
             is_local_production     INTEGER NOT NULL DEFAULT 1,
             file_status             INTEGER NOT NULL DEFAULT 0,
-            created_at              TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at              TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at              TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS order_item_options (
@@ -368,7 +368,7 @@ public class OrderDb
             order_item_id TEXT NOT NULL REFERENCES order_items(id),
             option_key    TEXT NOT NULL,
             option_value  TEXT NOT NULL,
-            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );
         """;
 
@@ -380,7 +380,7 @@ public class OrderDb
             order_id   TEXT NOT NULL REFERENCES orders(id),
             note       TEXT NOT NULL,
             created_by TEXT DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );
         """;
 
@@ -412,7 +412,7 @@ public class OrderDb
             normalize          INTEGER DEFAULT 0,
             grayscale          INTEGER DEFAULT 0,
             sepia              INTEGER DEFAULT 0,
-            created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at         TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             UNIQUE(order_id, image_path)
         );
         """;
@@ -425,7 +425,7 @@ public class OrderDb
             channel_number INTEGER NOT NULL DEFAULT 0,
             layout_name    TEXT DEFAULT NULL,
             source         TEXT DEFAULT '',
-            updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+            updated_at     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );
         """;
 
@@ -438,7 +438,7 @@ public class OrderDb
             record_id    TEXT NOT NULL,
             operation    TEXT NOT NULL,
             payload_json TEXT NOT NULL,
-            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             pushed_at    TEXT DEFAULT NULL
         );
 
@@ -700,7 +700,7 @@ public class OrderDb
                 child_order_id    TEXT NOT NULL REFERENCES orders(id),
                 link_type         TEXT NOT NULL,
                 created_by        TEXT NOT NULL DEFAULT '',
-                created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at        TEXT NOT NULL DEFAULT (datetime('now','localtime'))
             )
             """);
 
@@ -717,7 +717,7 @@ public class OrderDb
                 order_id   TEXT NOT NULL REFERENCES orders(id),
                 note       TEXT NOT NULL,
                 created_by TEXT DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                 remote_id  TEXT DEFAULT NULL
             );
             INSERT INTO order_history_new SELECT id, order_id, note, created_by, created_at, remote_id FROM order_history;
@@ -738,7 +738,7 @@ public class OrderDb
     private static void MigrateToGuidPrimaryKeys(SqliteConnection conn)
     {
         // Check if migration already applied
-        Execute(conn, "CREATE TABLE IF NOT EXISTS migrations_applied (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))");
+        Execute(conn, "CREATE TABLE IF NOT EXISTS migrations_applied (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
         using (var check = conn.CreateCommand())
         {
             check.CommandText = "SELECT 1 FROM migrations_applied WHERE id = '020_guid_primary_keys'";
@@ -812,7 +812,7 @@ public class OrderDb
                 due_at TEXT DEFAULT NULL, received_at TEXT DEFAULT NULL, match_key TEXT DEFAULT NULL,
                 files_expected INTEGER DEFAULT NULL,
                 is_local_production INTEGER NOT NULL DEFAULT 1, file_status INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
             )
             """);
 
@@ -855,7 +855,7 @@ public class OrderDb
         Execute(conn, """
             CREATE TABLE order_history_new2 (
                 id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id),
-                note TEXT NOT NULL, created_by TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                note TEXT NOT NULL, created_by TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                 remote_id TEXT DEFAULT NULL
             )
             """);
@@ -908,7 +908,7 @@ public class OrderDb
                 is_notified INTEGER NOT NULL DEFAULT 0, notified_at TEXT DEFAULT NULL,
                 is_printed INTEGER NOT NULL DEFAULT 0,
                 printed_at TEXT DEFAULT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                 UNIQUE(external_order_id, pickup_store_id)
             )
             """);
@@ -964,7 +964,7 @@ public class OrderDb
             CREATE TABLE IF NOT EXISTS order_item_options (
                 id TEXT PRIMARY KEY, order_item_id TEXT NOT NULL REFERENCES order_items(id),
                 option_key TEXT NOT NULL, option_value TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
             )
             """);
 
@@ -1008,7 +1008,7 @@ public class OrderDb
         Execute(conn, """
             CREATE TABLE IF NOT EXISTS migrations_applied (
                 id TEXT PRIMARY KEY,
-                applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+                applied_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
             )
             """);
 
