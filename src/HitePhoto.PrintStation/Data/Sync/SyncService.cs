@@ -98,11 +98,12 @@ public class SyncService : ISyncService
             {
                 var orderId = payload["orderId"].GetString()!;
                 if (VerifyOrderExists(orderId) == null) return false;
-                if (!await EnsureOrderInMariaDbAsync(orderId)) return false;
+                var mariaDbId = await EnsureOrderInMariaDbAsync(orderId);
+                if (mariaDbId == null) return false;
                 using var conn = _localDb.OpenConnection();
                 var items = ReadLocalItems(conn, orderId);
                 if (items.Count == 0) return true;
-                return await _remoteDb.UpsertOrderItemsAsync(orderId, items);
+                return await _remoteDb.UpsertOrderItemsAsync(mariaDbId, items);
             }
 
             case "set_current_location":
@@ -155,9 +156,11 @@ public class SyncService : ISyncService
                 var childId = payload["childOrderId"].GetString()!;
                 var linkType = payload["linkType"].GetString()!;
                 var createdBy = payload.TryGetValue("createdBy", out var cb) ? cb.GetString() ?? "" : "";
-                if (!await EnsureOrderInMariaDbAsync(parentId)) return false;
-                if (!await EnsureOrderInMariaDbAsync(childId)) return false;
-                return await _remoteDb.InsertOrderLinkAsync(parentId, childId, linkType, createdBy);
+                var mariaParent = await EnsureOrderInMariaDbAsync(parentId);
+                if (mariaParent == null) return false;
+                var mariaChild = await EnsureOrderInMariaDbAsync(childId);
+                if (mariaChild == null) return false;
+                return await _remoteDb.InsertOrderLinkAsync(mariaParent, mariaChild, linkType, createdBy);
             }
 
             default:
@@ -216,11 +219,15 @@ public class SyncService : ISyncService
 
         if (string.IsNullOrEmpty(upserted)) return false;
 
+        // Use the MariaDB ID (may differ from localOrderId if order was already
+        // pushed by the other store — ON DUPLICATE KEY keeps the existing GUID).
+        var mariaDbId = upserted;
+
         var items = ReadLocalItems(conn, localOrderId);
-        AppLog.Info($"SyncPush: order {externalOrderId} ({localOrderId}), {items.Count} items to push");
+        AppLog.Info($"SyncPush: order {externalOrderId} (local={localOrderId}, mariadb={mariaDbId}), {items.Count} items to push");
         if (items.Count > 0)
         {
-            var itemResult = await _remoteDb.UpsertOrderItemsAsync(localOrderId, items);
+            var itemResult = await _remoteDb.UpsertOrderItemsAsync(mariaDbId, items);
             AppLog.Info($"SyncPush: items push result={itemResult} for order {externalOrderId}");
             if (!itemResult) return false;
         }
@@ -849,21 +856,52 @@ public class SyncService : ISyncService
     }
 
     /// <summary>
-    /// Ensure the order exists in MariaDB. If not, read it from SQLite and push it.
-    /// This prevents FK failures when items/links push before their parent order.
+    /// Ensure the order exists in MariaDB and return its MariaDB ID.
+    /// If missing, read from SQLite and push it. The MariaDB ID may differ
+    /// from the local GUID when the other store pushed the order first.
+    /// Returns null on failure.
     /// </summary>
-    private async Task<bool> EnsureOrderInMariaDbAsync(string localOrderId)
+    private async Task<string?> EnsureOrderInMariaDbAsync(string localOrderId)
     {
+        // Check if order exists by local ID
         if (await _remoteDb.OrderExistsAsync(localOrderId))
-            return true;
+            return localOrderId;
 
-        // Order missing in MariaDB — push it from SQLite
+        // Order missing — push it from SQLite, which returns the MariaDB ID
         AppLog.Info($"SyncPush: order {localOrderId} missing in MariaDB, pushing now");
         var payload = new Dictionary<string, JsonElement>
         {
             ["localOrderId"] = JsonSerializer.SerializeToElement(localOrderId)
         };
-        return await PushInsertOrderAsync(payload);
+        var pushed = await PushInsertOrderAsync(payload);
+        if (!pushed) return null;
+
+        // The MariaDB ID may differ — look it up by external_order_id
+        return await ResolveMariaDbOrderIdAsync(localOrderId);
+    }
+
+    /// <summary>
+    /// Given a local order ID, find the corresponding MariaDB order ID.
+    /// They may differ if another store pushed the order first.
+    /// </summary>
+    private async Task<string?> ResolveMariaDbOrderIdAsync(string localOrderId)
+    {
+        // Try direct match first (same GUID)
+        if (await _remoteDb.OrderExistsAsync(localOrderId))
+            return localOrderId;
+
+        // Look up by external_order_id + pickup_store_id
+        using var conn = _localDb.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT external_order_id, pickup_store_id FROM orders WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", localOrderId);
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return null;
+        var extId = reader.GetString(0);
+        var storeId = reader.GetInt32(1);
+        reader.Close();
+
+        return await _remoteDb.FindOrderIdByExternalAsync(extId, storeId);
     }
 
     private void AddOrdersMissingItems(List<string> mariaDbOrderIds)
