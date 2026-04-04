@@ -173,6 +173,9 @@ public partial class App : Application
         AlertCollector.AddSink(new MariaDbAlertSink(mariaDb, settings.StoreId));
         _ = mariaDb.EnsureAlertsTableAsync();
 
+        // SFTP/NAS alert upload — batches errors, uploads JSON reports + log file
+        AlertCollector.AddSink(new SftpAlertSink(settings));
+
         // Show main window
         try
         {

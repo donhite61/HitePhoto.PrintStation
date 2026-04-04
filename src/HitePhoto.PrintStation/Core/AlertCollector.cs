@@ -124,9 +124,32 @@ public static class AlertCollector
             default:                    AppLog.Info(logMsg);   break;
         }
 
-        // Alert persistence disabled — alerts log to file only.
-        // SQLite sink writes were locking up the UI during verify/ingest.
-        // Re-enable when POS system needs alert history.
+        // Dispatch to sinks (SFTP upload, MariaDB, SQLite)
+        if (!SuspendPersistence)
+        {
+            var record = new AlertRecord(
+                Id: 0,
+                Severity: alert.SeverityLabel,
+                Category: alert.CategoryLabel,
+                Summary: alert.Summary,
+                OrderId: alert.OrderId,
+                Detail: alert.Detail,
+                Exception: alert.Exception,
+                SourceMethod: alert.Method,
+                SourceFile: alert.SourceFile,
+                SourceLine: alert.SourceLine,
+                CreatedAt: alert.Timestamp.ToString("o"),
+                Acknowledged: false);
+
+            lock (_lock)
+            {
+                foreach (var sink in _sinks)
+                {
+                    try { sink.Persist(record); }
+                    catch { /* sink failures must never crash the app */ }
+                }
+            }
+        }
     }
 
     // ── Convenience methods (auto-capture caller info) ───────────────────
