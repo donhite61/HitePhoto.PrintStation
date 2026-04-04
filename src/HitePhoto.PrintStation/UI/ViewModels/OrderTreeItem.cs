@@ -246,7 +246,7 @@ public class OrderTreeItem : INotifyPropertyChanged
         set { _folderPath = value; OnPropertyChanged(); }
     }
 
-    public string FromStoreTag
+    public string StoreTag
     {
         get => _fromStoreTag;
         set { _fromStoreTag = value; OnPropertyChanged(); }

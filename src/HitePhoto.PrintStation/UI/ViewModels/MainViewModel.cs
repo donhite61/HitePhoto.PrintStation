@@ -283,7 +283,7 @@ public class MainViewModel : ViewModelBase
         IsHeld = order.IsHeld,
         IsTransfer = order.IsTransfer,
         FolderPath = order.FolderPath,
-        FromStoreTag = fromStore ? $"From {order.StoreName}" : "",
+        StoreTag = fromStore ? $"From {order.StoreName}" : order.IsTransfer ? "Transferred" : "",
         IsExpanded = true
     };
 
