@@ -567,7 +567,10 @@ public partial class MainWindow : Window
 
         SizeDetailPanel.Visibility = Visibility.Visible;
         SizeDetailLabel.Text = sizeItem.DisplayLabel;
-        SizeDetailChannel.Text = sizeItem.ChannelLabel;
+        SizeDetailChannel.Text = sizeItem.IsUnmapped ? "NO CHANNEL" : sizeItem.ChannelLabel;
+        SizeDetailChannel.Foreground = sizeItem.IsUnmapped
+            ? (Brush)FindResource("AccentRed")
+            : (Brush)FindResource("TextSecondary");
         ChannelSearchBox.Text = "";
         ChannelPopup.IsOpen = false;
     }
@@ -675,6 +678,7 @@ public partial class MainWindow : Window
 
         _selectedSizeItem.ChannelNumber = selected.Channel;
         SizeDetailChannel.Text = _selectedSizeItem.ChannelLabel;
+        SizeDetailChannel.Foreground = (Brush)FindResource("TextSecondary");
         ChannelPopup.IsOpen = false;
         ChannelSearchBox.Text = "";
 

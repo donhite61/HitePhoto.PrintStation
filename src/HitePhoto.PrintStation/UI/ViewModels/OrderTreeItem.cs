@@ -142,6 +142,7 @@ public class OrderTreeItem : INotifyPropertyChanged
     private bool _hasMissingFiles;
     private int _totalImages;
     private string _folderPath = "";
+    private string _fromStoreTag = "";
 
     public string DbId
     {
@@ -243,6 +244,12 @@ public class OrderTreeItem : INotifyPropertyChanged
     {
         get => _folderPath;
         set { _folderPath = value; OnPropertyChanged(); }
+    }
+
+    public string FromStoreTag
+    {
+        get => _fromStoreTag;
+        set { _fromStoreTag = value; OnPropertyChanged(); }
     }
 
     // ── Computed display properties ──

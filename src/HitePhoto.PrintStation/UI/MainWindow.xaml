@@ -123,21 +123,22 @@
                                Foreground="{Binding StoreName, Converter={StaticResource StoreColorConverter}}"
                                FontSize="9" FontWeight="Bold"
                                VerticalAlignment="Center" Margin="8,0,0,0"/>
-                    <TextBlock x:Name="HoldBadge" Text=" HOLD"
+                    <TextBlock x:Name="FromTag"
+                               Text="{Binding FromStoreTag}"
                                Foreground="#FF9800" FontSize="10" FontWeight="Bold"
-                               VerticalAlignment="Center" Visibility="Collapsed"/>
-                    <TextBlock x:Name="MissingBadge" Text=" MISSING FILES"
-                               Foreground="{DynamicResource AccentRed}" FontSize="10" FontWeight="Bold"
+                               VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    <TextBlock x:Name="HoldBadge" Text=" HOLD"
+                               Foreground="White" FontSize="10" FontWeight="Bold"
                                VerticalAlignment="Center" Visibility="Collapsed"/>
                 </StackPanel>
             </Border>
             <HierarchicalDataTemplate.Triggers>
                 <DataTrigger Binding="{Binding IsHeld}" Value="True">
+                    <Setter TargetName="SelectionBorder" Property="Background" Value="#D32F2F"/>
+                    <Setter TargetName="NameText" Property="Foreground" Value="White"/>
                     <Setter TargetName="HoldBadge" Property="Visibility" Value="Visible"/>
-                    <Setter TargetName="NameText" Property="Foreground" Value="{DynamicResource AccentRed}"/>
-                </DataTrigger>
-                <DataTrigger Binding="{Binding HasMissingFiles}" Value="True">
-                    <Setter TargetName="MissingBadge" Property="Visibility" Value="Visible"/>
+                    <Setter TargetName="FromTag" Property="Foreground" Value="#FFCDD2"/>
+                    <Setter TargetName="SrcTag" Property="Foreground" Value="#FFCDD2"/>
                 </DataTrigger>
             </HierarchicalDataTemplate.Triggers>
         </HierarchicalDataTemplate>
@@ -163,6 +164,9 @@
                            Visibility="Collapsed"/>
             </StackPanel>
             <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsUnmapped}" Value="True">
+                    <Setter TargetName="SzText" Property="Foreground" Value="{DynamicResource TextMuted}"/>
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsPrinted}" Value="True">
                     <Setter TargetName="SzText" Property="Foreground" Value="{DynamicResource AccentGreen}"/>
                 </DataTrigger>

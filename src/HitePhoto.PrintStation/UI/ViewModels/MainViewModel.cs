@@ -197,9 +197,9 @@ public class MainViewModel : ViewModelBase
             var printed = _orders.LoadPrintedOrders(_settings.StoreId);
             var otherStore = _orders.LoadOtherStoreOrders(_settings.StoreId);
 
-            DiffAndPatch(PendingOrders, pending);
-            DiffAndPatch(PrintedOrders, printed);
-            DiffAndPatch(OtherStoreOrders, otherStore);
+            DiffAndPatch(PendingOrders, pending, fromStore: false);
+            DiffAndPatch(PrintedOrders, printed, fromStore: false);
+            DiffAndPatch(OtherStoreOrders, otherStore, fromStore: true);
 
             var total = pending.Count + printed.Count + otherStore.Count;
             StatusText = $"{pending.Count} pending, {printed.Count} printed, {otherStore.Count} other store";
@@ -220,7 +220,7 @@ public class MainViewModel : ViewModelBase
     /// In-place diff-and-patch: updates existing tree items instead of clear-and-rebuild.
     /// Preserves WPF selection, expansion, and scroll position.
     /// </summary>
-    private void DiffAndPatch(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders)
+    private void DiffAndPatch(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders, bool fromStore = false)
     {
         var filtered = ApplyFilters(orders);
         var sorted = ApplySort(filtered);
@@ -258,7 +258,7 @@ public class MainViewModel : ViewModelBase
             else
             {
                 // New item — create and insert
-                var treeItem = CreateOrderTreeItem(row);
+                var treeItem = CreateOrderTreeItem(row, fromStore);
                 BuildSizeGroups(treeItem, items);
                 target.Insert(i, treeItem);
             }
@@ -269,7 +269,7 @@ public class MainViewModel : ViewModelBase
             target.RemoveAt(target.Count - 1);
     }
 
-    private static OrderTreeItem CreateOrderTreeItem(OrderRow order) => new()
+    private static OrderTreeItem CreateOrderTreeItem(OrderRow order, bool fromStore = false) => new()
     {
         DbId = order.Id,
         ExternalOrderId = order.ExternalOrderId,
@@ -283,6 +283,7 @@ public class MainViewModel : ViewModelBase
         IsHeld = order.IsHeld,
         IsTransfer = order.IsTransfer,
         FolderPath = order.FolderPath,
+        FromStoreTag = fromStore ? $"From {order.StoreName}" : "",
         IsExpanded = true
     };
 
