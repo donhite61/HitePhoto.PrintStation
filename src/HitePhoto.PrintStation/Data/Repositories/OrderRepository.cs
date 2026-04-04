@@ -440,7 +440,7 @@ public class OrderRepository : IOrderRepository
         transaction.Commit();
     }
 
-    public Dictionary<string, (string Id, string FolderPath, string SourceCode)> GetRecentOrders(int days)
+    public Dictionary<string, (string Id, string FolderPath, string SourceCode)> GetRecentOrders(int days, int storeId)
     {
         var cutoff = days > 0 ? DateTime.Now.AddDays(-days) : DateTime.MinValue;
         var result = new Dictionary<string, (string Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase);
@@ -449,8 +449,10 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = """
             SELECT o.id, o.external_order_id, o.folder_path, o.source_code
             FROM orders o
-            WHERE (@daysBack = 0 OR o.ordered_at >= @cutoff)
+            WHERE o.harvested_by_store_id = @storeId
+              AND (@daysBack = 0 OR o.created_at >= @cutoff)
             """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
         cmd.Parameters.AddWithValue("@daysBack", days);
         cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("yyyy-MM-dd"));
         using var reader = cmd.ExecuteReader();

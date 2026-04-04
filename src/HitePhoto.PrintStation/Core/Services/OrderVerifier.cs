@@ -53,7 +53,7 @@ public class OrderVerifier : IOrderVerifier
             ScanFoldersIntoList(_settings.OrderOutputPath, "pixfizz", cutoff, folderList);
             ScanFoldersIntoList(_settings.DakisWatchFolder, "dakis", cutoff, folderList);
 
-            var dbList = _orders.GetRecentOrders(days);
+            var dbList = _orders.GetRecentOrders(days, _settings.StoreId);
 
             return VerifyOrders(folderList, dbList);
         }
@@ -66,16 +66,8 @@ public class OrderVerifier : IOrderVerifier
     public VerifyResult VerifyOrder(string externalOrderId, string folderPath,
         string sourceCode, string dbOrderId)
     {
-        var folderList = new Dictionary<string, (string Path, string Source)>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(folderPath))
-            folderList[externalOrderId] = (folderPath, sourceCode);
-
-        var dbList = new Dictionary<string, (string Id, string FolderPath, string SourceCode)>(StringComparer.OrdinalIgnoreCase)
-        {
-            [externalOrderId] = (dbOrderId, folderPath, sourceCode)
-        };
-
-        return VerifyOrders(folderList, dbList);
+        var repaired = RepairOrder(dbOrderId, folderPath, sourceCode);
+        return new VerifyResult(1, 0, repaired, 0);
     }
 
     public VerifyResult VerifyOrders(
@@ -127,13 +119,39 @@ public class OrderVerifier : IOrderVerifier
             }
         }
 
-        // Leftover in DB list = orders not found in folder scan.
-        // Expected for synced orders (is_local_order=0) and orders outside scan date range.
+        // Leftover in DB list = local orders whose folder wasn't found on disk.
         if (dbList.Count > 0)
-            AppLog.Info($"Verify: {dbList.Count} DB orders not in folder scan (synced or outside date range)");
+            AppLog.Info($"Verify: {dbList.Count} local orders with no folder on disk");
 
         AppLog.Info($"Verify complete: {matchCount} matched, {inserted} inserted, {errors} errors");
         return new VerifyResult(matchCount, inserted, 0, errors);
+    }
+
+    /// <summary>
+    /// Full repair for a single order: compare source file to DB, fix mismatches, update file statuses.
+    /// Called on click (Printed tab) and periodically (Pending tab).
+    /// </summary>
+    public int RepairOrder(string dbOrderId, string folderPath, string sourceCode)
+    {
+        int repairs = 0;
+        if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
+        {
+            if (sourceCode.Equals("pixfizz", StringComparison.OrdinalIgnoreCase))
+            {
+                var txtPath = Path.Combine(folderPath, "darkroom_ticket.txt");
+                if (File.Exists(txtPath))
+                    repairs = RepairFromTxt(dbOrderId, folderPath, txtPath);
+            }
+            else
+            {
+                var ymlPath = Path.Combine(folderPath, "order.yml");
+                if (File.Exists(ymlPath))
+                    repairs = RepairFromYml(dbOrderId, folderPath, ymlPath);
+            }
+        }
+
+        UpdateFileStatuses(dbOrderId);
+        return repairs;
     }
 
     /// <summary>

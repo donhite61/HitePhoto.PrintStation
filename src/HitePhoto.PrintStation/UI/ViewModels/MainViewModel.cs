@@ -144,7 +144,7 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Verify a single order — called when operator clicks an order in the tree.
+    /// Verify/repair a single order — called when operator clicks an order in the tree.
     /// </summary>
     public void VerifyOrder(OrderTreeItem order)
     {
@@ -152,6 +152,7 @@ public class MainViewModel : ViewModelBase
             order.ExternalOrderId, order.FolderPath, order.SourceCode, order.DbId);
         NeedsRefresh = result.Repaired > 0 || result.Errors > 0;
     }
+
 
 
     // ══════════════════════════════════════════════════════════════════════

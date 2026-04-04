@@ -27,6 +27,12 @@ public interface IOrderVerifier
     /// </summary>
     VerifyResult VerifyOrder(string externalOrderId, string folderPath,
         string sourceCode, string dbOrderId);
+
+    /// <summary>
+    /// Full repair for a single order: compare source file to DB, fix mismatches, update file statuses.
+    /// Called on click (Printed tab) and periodically (Pending tab).
+    /// </summary>
+    int RepairOrder(string dbOrderId, string folderPath, string sourceCode);
 }
 
 public record VerifyResult(int Matched, int Inserted, int Repaired, int Errors);

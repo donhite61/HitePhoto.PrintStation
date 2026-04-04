@@ -112,7 +112,7 @@ public class SyncingOrderRepository : IOrderRepository
     public List<OrderItemRecord> GetItems(string orderId) => _inner.GetItems(orderId);
     public List<HitePhoto.Shared.Parsers.OrderItemOption> GetItemOptions(string orderItemId) => _inner.GetItemOptions(orderItemId);
     public void DeleteItemOptions(string orderItemId) => _inner.DeleteItemOptions(orderItemId);
-    public Dictionary<string, (string Id, string FolderPath, string SourceCode)> GetRecentOrders(int days) => _inner.GetRecentOrders(days);
+    public Dictionary<string, (string Id, string FolderPath, string SourceCode)> GetRecentOrders(int days, int storeId) => _inner.GetRecentOrders(days, storeId);
     public List<ChannelInfo> GetAllChannels() => _inner.GetAllChannels();
     public void SaveChannelMapping(string routingKey, int channelNumber, string? layoutName = null) => _inner.SaveChannelMapping(routingKey, channelNumber, layoutName);
     public void DeleteChannelMapping(string routingKey) => _inner.DeleteChannelMapping(routingKey);
