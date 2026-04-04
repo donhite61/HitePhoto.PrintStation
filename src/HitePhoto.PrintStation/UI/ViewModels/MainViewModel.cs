@@ -197,8 +197,8 @@ public class MainViewModel : ViewModelBase
             var printed = _orders.LoadPrintedOrders(_settings.StoreId);
             var otherStore = _orders.LoadOtherStoreOrders(_settings.StoreId);
 
-            DiffAndPatch(PendingOrders, pending, fromStore: false);
-            DiffAndPatch(PrintedOrders, printed, fromStore: false);
+            DiffAndPatch(PendingOrders, pending);
+            DiffAndPatch(PrintedOrders, printed);
             DiffAndPatch(OtherStoreOrders, otherStore, fromStore: true);
 
             var total = pending.Count + printed.Count + otherStore.Count;
@@ -273,13 +273,14 @@ public class MainViewModel : ViewModelBase
     {
         DbId = order.Id,
         ExternalOrderId = order.ExternalOrderId,
-        CustomerName = $"{order.CustomerFirstName} {order.CustomerLastName}".Trim(),
+        CustomerName = FormatCustomerName(order.CustomerFirstName, order.CustomerLastName),
         CustomerPhone = order.CustomerPhone,
         CustomerEmail = order.CustomerEmail,
         SourceCode = order.SourceCode,
         StatusCode = order.StatusCode,
         StoreName = order.StoreName,
         OrderedAt = order.OrderedAt != null && DateTime.TryParse(order.OrderedAt, out var dt) ? dt : null,
+        PrintedAt = order.PrintedAt != null && DateTime.TryParse(order.PrintedAt, out var pt) ? pt : null,
         IsHeld = order.IsHeld,
         IsTransfer = order.IsTransfer,
         FolderPath = order.FolderPath,
@@ -289,7 +290,7 @@ public class MainViewModel : ViewModelBase
 
     private static void UpdateOrderProperties(OrderTreeItem existing, OrderRow row)
     {
-        var name = $"{row.CustomerFirstName} {row.CustomerLastName}".Trim();
+        var name = FormatCustomerName(row.CustomerFirstName, row.CustomerLastName);
         if (existing.ExternalOrderId != row.ExternalOrderId) existing.ExternalOrderId = row.ExternalOrderId;
         if (existing.CustomerName != name) existing.CustomerName = name;
         if (existing.CustomerPhone != row.CustomerPhone) existing.CustomerPhone = row.CustomerPhone;
@@ -303,6 +304,9 @@ public class MainViewModel : ViewModelBase
 
         var orderedAt = row.OrderedAt != null && DateTime.TryParse(row.OrderedAt, out var dt) ? dt : (DateTime?)null;
         if (existing.OrderedAt != orderedAt) existing.OrderedAt = orderedAt;
+
+        var printedAt = row.PrintedAt != null && DateTime.TryParse(row.PrintedAt, out var pt) ? pt : (DateTime?)null;
+        if (existing.PrintedAt != printedAt) existing.PrintedAt = printedAt;
     }
 
     private record SizeGroupResult(
@@ -475,12 +479,21 @@ public class MainViewModel : ViewModelBase
         return result.ToList();
     }
 
+    private static string FormatCustomerName(string first, string last)
+    {
+        if (string.IsNullOrWhiteSpace(last)) return first.Trim();
+        if (string.IsNullOrWhiteSpace(first)) return last.Trim();
+        return $"{last}, {first}";
+    }
+
     private List<OrderRow> ApplySort(List<OrderRow> orders)
     {
         return _sortMode switch
         {
-            "Customer Name" => orders.OrderBy(o => $"{o.CustomerFirstName} {o.CustomerLastName}".Trim()).ToList(),
-            "Order ID" => orders.OrderBy(o => o.ExternalOrderId).ToList(),
+            "Customer Name" => orders.OrderBy(o => o.CustomerLastName, StringComparer.OrdinalIgnoreCase)
+                                     .ThenBy(o => o.CustomerFirstName, StringComparer.OrdinalIgnoreCase).ToList(),
+            "Order ID" => orders.OrderByDescending(o => o.ExternalOrderId).ToList(),
+            "Date Printed" => orders.OrderByDescending(o => o.PrintedAt ?? "").ToList(),
             _ => orders.OrderByDescending(o => o.OrderedAt ?? "").ToList()
         };
     }

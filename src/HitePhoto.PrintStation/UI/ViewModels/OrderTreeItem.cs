@@ -134,6 +134,7 @@ public class OrderTreeItem : INotifyPropertyChanged
     private string _statusCode = "";
     private string _storeName = "";
     private DateTime? _orderedAt;
+    private DateTime? _printedAt;
     private bool _isHeld;
     private bool _isTransfer;
     private bool _isExpanded;
@@ -196,6 +197,12 @@ public class OrderTreeItem : INotifyPropertyChanged
     {
         get => _orderedAt;
         set { _orderedAt = value; OnPropertyChanged(); OnPropertyChanged(nameof(DateLabel)); }
+    }
+
+    public DateTime? PrintedAt
+    {
+        get => _printedAt;
+        set { _printedAt = value; OnPropertyChanged(); }
     }
 
     public bool IsHeld
@@ -261,7 +268,7 @@ public class OrderTreeItem : INotifyPropertyChanged
 
     public string SourceLabel => SourceCode?.ToUpperInvariant() ?? "";
 
-    public string DateLabel => OrderedAt?.ToString("MM/dd HH:mm") ?? "";
+    public string DateLabel => OrderedAt?.ToString("M/dd h:mm tt") ?? "";
 
 
     public ObservableCollection<SizeTreeItem> Sizes { get; } = new();

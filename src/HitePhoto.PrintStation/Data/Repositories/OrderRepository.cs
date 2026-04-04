@@ -15,7 +15,8 @@ public class OrderRepository : IOrderRepository
                o.customer_email, o.customer_phone,
                o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
                o.folder_path, o.special_instructions, o.download_status,
-               s.short_name AS store_name
+               s.short_name AS store_name,
+               o.printed_at, o.created_at
         FROM orders o
         LEFT JOIN stores s ON s.id = o.pickup_store_id
 
@@ -794,7 +795,9 @@ public class OrderRepository : IOrderRepository
             FolderPath: reader.IsDBNull(reader.GetOrdinal("folder_path")) ? "" : reader.GetString(reader.GetOrdinal("folder_path")),
             SpecialInstructions: reader.IsDBNull(reader.GetOrdinal("special_instructions")) ? "" : reader.GetString(reader.GetOrdinal("special_instructions")),
             DownloadStatus: reader.IsDBNull(reader.GetOrdinal("download_status")) ? "" : reader.GetString(reader.GetOrdinal("download_status")),
-            StoreName: reader.IsDBNull(reader.GetOrdinal("store_name")) ? "" : reader.GetString(reader.GetOrdinal("store_name")));
+            StoreName: reader.IsDBNull(reader.GetOrdinal("store_name")) ? "" : reader.GetString(reader.GetOrdinal("store_name")),
+            PrintedAt: reader.IsDBNull(reader.GetOrdinal("printed_at")) ? null : reader.GetString(reader.GetOrdinal("printed_at")),
+            CreatedAt: reader.IsDBNull(reader.GetOrdinal("created_at")) ? null : reader.GetString(reader.GetOrdinal("created_at")));
     }
 
     public void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates)
@@ -825,8 +828,9 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_printed = @val, updated_at = datetime('now') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET is_printed = @val, printed_at = @pat, updated_at = datetime('now') WHERE id = @id";
         cmd.Parameters.AddWithValue("@val", printed ? 1 : 0);
+        cmd.Parameters.AddWithValue("@pat", printed ? DateTime.Now.ToString("o") : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
     }
@@ -1157,7 +1161,7 @@ public class OrderRepository : IOrderRepository
         {
             using var markDone = conn.CreateCommand();
             markDone.Transaction = transaction;
-            markDone.CommandText = "UPDATE orders SET is_printed = 1, updated_at = datetime('now') WHERE id = @id";
+            markDone.CommandText = "UPDATE orders SET is_printed = 1, printed_at = datetime('now'), updated_at = datetime('now') WHERE id = @id";
             markDone.Parameters.AddWithValue("@id", sourceOrderId);
             markDone.ExecuteNonQuery();
         }

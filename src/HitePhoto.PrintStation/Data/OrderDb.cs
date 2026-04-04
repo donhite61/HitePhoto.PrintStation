@@ -322,6 +322,8 @@ public class OrderDb
             is_received_pushed        INTEGER NOT NULL DEFAULT 0,
             is_notified               INTEGER NOT NULL DEFAULT 0,
             notified_at               TEXT DEFAULT NULL,
+            is_printed                INTEGER NOT NULL DEFAULT 0,
+            printed_at                TEXT DEFAULT NULL,
             created_at                TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at                TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(external_order_id, pickup_store_id)
@@ -728,6 +730,9 @@ public class OrderDb
         DropColumnIfExists(conn, "orders", "supersedes");
         DropColumnIfExists(conn, "orders", "alteration_type");
 
+        // Migration 022: printed_at on orders — timestamp when order was marked printed.
+        AddColumnIfMissing(conn, "orders", "printed_at", "TEXT DEFAULT NULL");
+
     }
 
     private static void MigrateToGuidPrimaryKeys(SqliteConnection conn)
@@ -902,6 +907,7 @@ public class OrderDb
                 pixfizz_job_id TEXT DEFAULT NULL, is_received_pushed INTEGER NOT NULL DEFAULT 0,
                 is_notified INTEGER NOT NULL DEFAULT 0, notified_at TEXT DEFAULT NULL,
                 is_printed INTEGER NOT NULL DEFAULT 0,
+                printed_at TEXT DEFAULT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 UNIQUE(external_order_id, pickup_store_id)
             )

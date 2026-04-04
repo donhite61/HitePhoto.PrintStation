@@ -165,7 +165,8 @@ public record OrderRow(
     string? OrderedAt, decimal TotalAmount,
     bool IsHeld, bool IsTransfer,
     string FolderPath, string SpecialInstructions, string DownloadStatus,
-    string StoreName);
+    string StoreName,
+    string? PrintedAt = null, string? CreatedAt = null);
 
 public record ItemRow(
     string Id, string SizeLabel, string MediaType, int Quantity,
