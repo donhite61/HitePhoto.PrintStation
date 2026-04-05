@@ -85,8 +85,9 @@ public class DakisOrderParser
             items = BuildGiftItems(root, info, folderPath);
 
         // ── Multi-fulfiller detection ──
-        // If items span more than one fulfillment store, this is a split order
-        bool isMultiFulfiller = items.Select(i => i.FulfillmentStore).Distinct().Count() > 1;
+        // If any item is fulfilled at a different store than current_store, this is a split order
+        // Includes invoice-only (all items at other store) and mixed (items at multiple stores)
+        bool isMultiFulfiller = items.Any(i => i.FulfillmentStore != info.CurrentStoreId);
 
         // ── Validate ──
         ValidateOrder(info, items, folderPath);
