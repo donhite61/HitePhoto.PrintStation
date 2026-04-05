@@ -477,7 +477,7 @@ public class OrderRepository : IOrderRepository
         return result;
     }
 
-    public string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0, DateTime? createdAt = null)
+    public string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0)
     {
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
@@ -496,7 +496,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, harvested_by_store_id, created_at
+                    is_test, harvested_by_store_id
                 ) VALUES (
                     @id, @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
@@ -507,7 +507,7 @@ public class OrderRepository : IOrderRepository
                     @deliveryMethod, @shipFname, @shipLname,
                     @shipAddr1, @shipAddr2, @shipCity,
                     @shipState, @shipZip, @shipCountry, @shipMethod,
-                    @isTest, @harvestStore, @createdAt
+                    @isTest, @harvestStore
                 )
                 """;
             var srcCode = (order.ExternalSource ?? "").ToLowerInvariant();
@@ -543,7 +543,6 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@shipMethod", (object?)order.ShippingMethod ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@isTest", order.ExternalOrderId.StartsWith("TEST-", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
             cmd.Parameters.AddWithValue("@harvestStore", harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
-            cmd.Parameters.AddWithValue("@createdAt", (createdAt ?? DateTime.Now).ToString("O"));
             cmd.ExecuteNonQuery();
         }
 
@@ -698,8 +697,8 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE (o.display_tab = 1 AND o.harvested_by_store_id = @storeId)
-               OR o.display_tab = 3
+            WHERE o.harvested_by_store_id = @storeId
+              AND o.is_printed = 0
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -715,8 +714,8 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.display_tab = 2
-              AND o.harvested_by_store_id = @storeId
+            WHERE o.harvested_by_store_id = @storeId
+              AND o.is_printed = 1
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -726,7 +725,7 @@ public class OrderRepository : IOrderRepository
         return results;
     }
 
-    // Other Store = orders from another store (via sync), excluding shared parents (display_tab=3).
+    // Other Store = orders harvested at another store (from sync).
     // Empty when sync is disabled.
     public List<OrderRow> LoadOtherStoreOrders(int storeId)
     {
@@ -736,7 +735,6 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = OrderSelectBase + """
             WHERE o.harvested_by_store_id != @storeId
               AND o.harvested_by_store_id > 0
-              AND o.display_tab NOT IN (2, 3)
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -838,24 +836,13 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
-    public void SetDisplayTab(string orderId, int displayTab)
-    {
-        using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id";
-        cmd.Parameters.AddWithValue("@tab", displayTab);
-        cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.ExecuteNonQuery();
-    }
-
     public void SetOrderPrinted(string orderId, bool printed)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_printed = @val, printed_at = @pat, display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET is_printed = @val, printed_at = @pat, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@val", printed ? 1 : 0);
         cmd.Parameters.AddWithValue("@pat", printed ? DateTime.Now.ToString("o") : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@tab", printed ? 2 : 1);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
     }
@@ -1202,7 +1189,7 @@ public class OrderRepository : IOrderRepository
         {
             using var markDone = conn.CreateCommand();
             markDone.Transaction = transaction;
-            markDone.CommandText = "UPDATE orders SET is_printed = 1, printed_at = datetime('now','localtime'), display_tab = 3, updated_at = datetime('now','localtime') WHERE id = @id";
+            markDone.CommandText = "UPDATE orders SET is_printed = 1, printed_at = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE id = @id";
             markDone.Parameters.AddWithValue("@id", sourceOrderId);
             markDone.ExecuteNonQuery();
         }

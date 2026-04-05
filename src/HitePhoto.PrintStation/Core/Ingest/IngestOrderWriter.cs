@@ -1,4 +1,5 @@
 using System.IO;
+using HitePhoto.PrintStation.Core.Services;
 using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Ingest;
@@ -10,13 +11,16 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 public class IngestOrderWriter
 {
     private readonly IOrderRepository _orders;
+    private readonly IOrderVerifier _verifier;
 
     public IngestOrderWriter(
         IOrderRepository orders,
-        IHistoryRepository history)
+        IHistoryRepository history,
+        IOrderVerifier verifier)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         // history parameter kept for DI compatibility but no longer used — ingest events go to AppLog
+        _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
     }
 
     /// <summary>
@@ -33,18 +37,8 @@ public class IngestOrderWriter
 
         if (existingId == null)
         {
-            // Use folder's LastWriteTime as received date (preserved across DB wipes).
-            // On first-ever ingest the folder has no stamp yet — use now and stamp it.
-            var receivedAt = DateTime.Now;
-            if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
-            {
-                var folderTime = Directory.GetLastWriteTime(folderPath);
-                if (folderTime > DateTime.MinValue && folderTime < receivedAt)
-                    receivedAt = folderTime;
-            }
-
             var harvestStore = harvestedByStoreId > 0 ? harvestedByStoreId : storeId;
-            var orderId = _orders.InsertOrder(order, storeId, harvestStore, receivedAt);
+            var orderId = _orders.InsertOrder(order, storeId, harvestStore);
             if (string.IsNullOrEmpty(orderId))
             {
                 AlertCollector.Error(AlertCategory.Database,
@@ -59,14 +53,15 @@ public class IngestOrderWriter
             // Ingest events go to AppLog, not operator history
             AppLog.Info($"Inserted {sourceCode} order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
 
-            // Stamp folder LastWriteTime to match created_at so verify's filesystem
-            // cutoff and DB cutoff use the same date
+            // Stamp folder LastWriteTime to now (received date) so verify's filesystem
+            // cutoff and DB cutoff (created_at) use the same date
             if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
-                Directory.SetLastWriteTime(folderPath, receivedAt);
+                Directory.SetLastWriteTime(folderPath, DateTime.Now);
         }
         else
         {
             _orders.SetHarvestedBy(existingId, harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
+            _verifier.VerifyOrder(order.ExternalOrderId, folderPath, sourceCode, existingId);
         }
     }
 

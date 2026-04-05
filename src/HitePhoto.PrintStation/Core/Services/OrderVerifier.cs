@@ -1,5 +1,4 @@
 using System.IO;
-using Microsoft.Extensions.DependencyInjection;
 using HitePhoto.PrintStation.Core.Decisions;
 using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Core.Models;
@@ -19,8 +18,7 @@ public class OrderVerifier : IOrderVerifier
 {
     private readonly IOrderRepository _orders;
     private readonly IFilesNeededDecision _filesNeededDecision;
-    private readonly IServiceProvider _serviceProvider;
-    private readonly IngestOrderWriter _writer;
+    private readonly DakisOrderParser _dakisParser;
     private readonly PixfizzOrderParser _pixfizzParser;
     private readonly AppSettings _settings;
 
@@ -28,16 +26,14 @@ public class OrderVerifier : IOrderVerifier
         IOrderRepository orders,
         IHistoryRepository history,
         IFilesNeededDecision filesNeededDecision,
-        IServiceProvider serviceProvider,
-        IngestOrderWriter writer,
+        DakisOrderParser dakisParser,
         PixfizzOrderParser pixfizzParser,
         AppSettings settings)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         // history parameter kept for DI compatibility but no longer used — verify events go to AppLog
         _filesNeededDecision = filesNeededDecision ?? throw new ArgumentNullException(nameof(filesNeededDecision));
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+        _dakisParser = dakisParser ?? throw new ArgumentNullException(nameof(dakisParser));
         _pixfizzParser = pixfizzParser ?? throw new ArgumentNullException(nameof(pixfizzParser));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
@@ -224,7 +220,7 @@ public class OrderVerifier : IOrderVerifier
                 RawData: ymlContent,
                 Metadata: new Dictionary<string, string> { ["folder_path"] = folderPath });
 
-            var parsed = _serviceProvider.GetRequiredService<DakisIngestService>().Parser.Parse(raw);
+            var parsed = _dakisParser.Parse(raw);
             return CompareAndRepair(dbOrderId, parsed.Items, "order.yml");
         }
         catch (Exception ex)
@@ -291,10 +287,9 @@ public class OrderVerifier : IOrderVerifier
     private void InsertPixfizzFromDisk(string dir)
     {
         var txtPath = Path.Combine(dir, "darkroom_ticket.txt");
-        if (!File.Exists(txtPath)) return;
-
         var txtContent = File.ReadAllText(txtPath);
         var folderName = Path.GetFileName(dir);
+
         var raw = new RawOrder(
             ExternalOrderId: folderName,
             SourceName: "pixfizz",
@@ -302,13 +297,40 @@ public class OrderVerifier : IOrderVerifier
             Metadata: new Dictionary<string, string> { ["folder_path"] = dir });
 
         var order = _pixfizzParser.Parse(raw);
-        _writer.WriteToSqlite(order, _settings.StoreId, "pixfizz", order.FolderPath ?? "");
+
+        var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
+        if (existingId != null)
+        {
+            _orders.SetHarvestedBy(existingId, _settings.StoreId);
+            return;
+        }
+
+        var orderId = _orders.InsertOrder(order, _settings.StoreId);
+        AppLog.Info($"Order {orderId} discovered by verify");
     }
 
     private void InsertDakisFromDisk(string externalOrderId, string dir)
     {
-        var dakisIngest = _serviceProvider.GetRequiredService<DakisIngestService>();
-        dakisIngest.IngestOrder(externalOrderId, dir);
+        var ymlContent = File.ReadAllText(Path.Combine(dir, "order.yml"));
+        var raw = new RawOrder(externalOrderId, "dakis", ymlContent,
+            new Dictionary<string, string> { ["folder_path"] = dir });
+        var order = _dakisParser.Parse(raw);
+
+        var billingId = order.BillingStoreId ?? "";
+        var pickupStoreId = _orders.ResolveStoreId("dakis", billingId)
+                            ?? _settings.StoreId;
+
+        AppLog.Info($"Verify insert Dakis {externalOrderId}: billing='{billingId}' → pickup={pickupStoreId}");
+
+        var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
+        if (existingId != null)
+        {
+            _orders.SetHarvestedBy(existingId, _settings.StoreId);
+            return;
+        }
+
+        var orderId = _orders.InsertOrder(order, pickupStoreId);
+        AppLog.Info($"Order {orderId} discovered by verify");
     }
 
     // ── Folder scanning ──

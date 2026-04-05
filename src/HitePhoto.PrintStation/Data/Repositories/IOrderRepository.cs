@@ -24,7 +24,7 @@ public interface IOrderRepository
     /// Insert a new order with items. Returns the new order ID.
     /// Used by both Pixfizz and Dakis ingest.
     /// </summary>
-    string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0, DateTime? createdAt = null);
+    string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0);
 
     /// <summary>
     /// Get all items for an order. Used by verify/repair to compare against source files.
@@ -112,9 +112,6 @@ public interface IOrderRepository
 
     /// <summary>Set order-level is_printed flag (drives Pending vs Printed tab).</summary>
     void SetOrderPrinted(string orderId, bool printed);
-
-    /// <summary>Set display_tab (1=Pending own store, 2=Printed, 3=Pending all stores).</summary>
-    void SetDisplayTab(string orderId, int displayTab);
 
     /// <summary>Check if all items on an order are printed.</summary>
     bool AreAllItemsPrinted(string orderId);

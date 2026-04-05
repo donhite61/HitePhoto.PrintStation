@@ -186,7 +186,6 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            AppLog.Error($"Startup failed: {ex}");
             MessageBox.Show(ex.ToString(), "Startup Error", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
