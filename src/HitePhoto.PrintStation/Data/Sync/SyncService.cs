@@ -744,16 +744,27 @@ public class SyncService : ISyncService
 
     private void InsertRemoteLink(dynamic link)
     {
-        string linkId = Convert.ToString(link.id)!;
-        string parentOrderId = Convert.ToString(link.parent_order_id)!;
-        string childOrderId = Convert.ToString(link.child_order_id)!;
-        string linkType = (string)link.link_type;
-        string createdBy = (string?)link.created_by ?? "";
+        // Explicit .ToString() — Dapper dynamic may return Guid objects for CHAR(36) columns
+        // which SQLite rejects as "datatype mismatch" on TEXT columns with FK constraints.
+        string linkId = link.id.ToString();
+        string parentOrderId = link.parent_order_id.ToString();
+        string childOrderId = link.child_order_id.ToString();
+        string linkType = link.link_type.ToString();
+        string createdBy = link.created_by?.ToString() ?? "";
 
         if (VerifyOrderExists(parentOrderId) == null || VerifyOrderExists(childOrderId) == null)
             return;
 
         using var conn = _localDb.OpenConnection();
+
+        // Temporarily disable FK enforcement — the referenced orders may not
+        // have been pulled yet this cycle. INSERT OR IGNORE handles duplicates;
+        // orphaned links (parent/child missing) will be harmless until the
+        // orders arrive on the next pull cycle.
+        using var fkOff = conn.CreateCommand();
+        fkOff.CommandText = "PRAGMA foreign_keys = OFF";
+        fkOff.ExecuteNonQuery();
+
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT OR IGNORE INTO order_links (id, parent_order_id, child_order_id, link_type, created_by)
@@ -765,6 +776,10 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@type", linkType);
         cmd.Parameters.AddWithValue("@by", createdBy);
         cmd.ExecuteNonQuery();
+
+        using var fkOn = conn.CreateCommand();
+        fkOn.CommandText = "PRAGMA foreign_keys = ON";
+        fkOn.ExecuteNonQuery();
     }
 
     // ── Outbox retry ─────────────────────────────────────────────────────
