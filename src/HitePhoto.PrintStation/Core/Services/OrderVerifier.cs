@@ -1,4 +1,5 @@
 using System.IO;
+using Microsoft.Extensions.DependencyInjection;
 using HitePhoto.PrintStation.Core.Decisions;
 using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Core.Models;
@@ -18,7 +19,7 @@ public class OrderVerifier : IOrderVerifier
 {
     private readonly IOrderRepository _orders;
     private readonly IFilesNeededDecision _filesNeededDecision;
-    private readonly DakisIngestService _dakisIngest;
+    private readonly IServiceProvider _serviceProvider;
     private readonly IngestOrderWriter _writer;
     private readonly PixfizzOrderParser _pixfizzParser;
     private readonly AppSettings _settings;
@@ -27,7 +28,7 @@ public class OrderVerifier : IOrderVerifier
         IOrderRepository orders,
         IHistoryRepository history,
         IFilesNeededDecision filesNeededDecision,
-        DakisIngestService dakisIngest,
+        IServiceProvider serviceProvider,
         IngestOrderWriter writer,
         PixfizzOrderParser pixfizzParser,
         AppSettings settings)
@@ -35,7 +36,7 @@ public class OrderVerifier : IOrderVerifier
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         // history parameter kept for DI compatibility but no longer used — verify events go to AppLog
         _filesNeededDecision = filesNeededDecision ?? throw new ArgumentNullException(nameof(filesNeededDecision));
-        _dakisIngest = dakisIngest ?? throw new ArgumentNullException(nameof(dakisIngest));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _pixfizzParser = pixfizzParser ?? throw new ArgumentNullException(nameof(pixfizzParser));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -223,7 +224,7 @@ public class OrderVerifier : IOrderVerifier
                 RawData: ymlContent,
                 Metadata: new Dictionary<string, string> { ["folder_path"] = folderPath });
 
-            var parsed = _dakisIngest.Parser.Parse(raw);
+            var parsed = _serviceProvider.GetRequiredService<DakisIngestService>().Parser.Parse(raw);
             return CompareAndRepair(dbOrderId, parsed.Items, "order.yml");
         }
         catch (Exception ex)
@@ -306,7 +307,8 @@ public class OrderVerifier : IOrderVerifier
 
     private void InsertDakisFromDisk(string externalOrderId, string dir)
     {
-        _dakisIngest.IngestOrder(externalOrderId, dir);
+        var dakisIngest = _serviceProvider.GetRequiredService<DakisIngestService>();
+        dakisIngest.IngestOrder(externalOrderId, dir);
     }
 
     // ── Folder scanning ──

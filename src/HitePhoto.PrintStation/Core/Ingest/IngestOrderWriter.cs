@@ -1,5 +1,4 @@
 using System.IO;
-using HitePhoto.PrintStation.Core.Services;
 using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Ingest;
@@ -11,16 +10,13 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 public class IngestOrderWriter
 {
     private readonly IOrderRepository _orders;
-    private readonly IOrderVerifier _verifier;
 
     public IngestOrderWriter(
         IOrderRepository orders,
-        IHistoryRepository history,
-        IOrderVerifier verifier)
+        IHistoryRepository history)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         // history parameter kept for DI compatibility but no longer used — ingest events go to AppLog
-        _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
     }
 
     /// <summary>
@@ -71,7 +67,6 @@ public class IngestOrderWriter
         else
         {
             _orders.SetHarvestedBy(existingId, harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
-            _verifier.VerifyOrder(order.ExternalOrderId, folderPath, sourceCode, existingId);
         }
     }
 
