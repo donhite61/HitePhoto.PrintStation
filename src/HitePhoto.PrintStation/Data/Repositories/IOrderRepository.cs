@@ -113,6 +113,9 @@ public interface IOrderRepository
     /// <summary>Set order-level is_printed flag (drives Pending vs Printed tab).</summary>
     void SetOrderPrinted(string orderId, bool printed);
 
+    /// <summary>Set display_tab (1=Pending own store, 2=Printed, 3=Pending all stores).</summary>
+    void SetDisplayTab(string orderId, int displayTab);
+
     /// <summary>Check if all items on an order are printed.</summary>
     bool AreAllItemsPrinted(string orderId);
 

@@ -838,6 +838,16 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
+    public void SetDisplayTab(string orderId, int displayTab)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id";
+        cmd.Parameters.AddWithValue("@tab", displayTab);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        cmd.ExecuteNonQuery();
+    }
+
     public void SetOrderPrinted(string orderId, bool printed)
     {
         using var conn = _db.OpenConnection();

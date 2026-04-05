@@ -223,10 +223,11 @@ public class DakisIngestService : IDisposable
             return;
         }
 
-        // Link child to parent
+        // Link child to parent and mark parent as shared (display_tab=3 = Pending at all stores)
         if (parentId != null)
         {
             _orders.InsertLink(parentId, childId, "dakis_split", "ingest");
+            _orders.SetDisplayTab(parentId, 3);
             AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: created child {childExternalId} linked to parent");
         }
     }
