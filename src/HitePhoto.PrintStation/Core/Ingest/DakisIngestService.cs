@@ -186,7 +186,10 @@ public class DakisIngestService : IDisposable
         // Every multi-fulfiller has a parent — ensure it exists with ALL items, set display_tab=3
         var parentId = EnsureParentOrder(order, pickupStoreId, folderPath);
         if (parentId != null)
+        {
             _orders.SetDisplayTab(parentId, 3);
+            AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: parent {parentId} display_tab=3");
+        }
 
         // Separate local items (this store produces) from remote items
         var localItems = order.Items.Where(i => i.IsLocalProduction).ToList();

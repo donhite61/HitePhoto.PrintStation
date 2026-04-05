@@ -81,12 +81,21 @@ public class OrderVerifier : IOrderVerifier
         int inserted = 0, errors = 0;
         int matchCount = 0;
 
-        // ── Orders in BOTH lists: already in DB, update file statuses ──
+        // ── Orders in BOTH lists: already in DB, update file statuses + re-verify split state ──
         var matched = folderList.Keys.Intersect(dbList.Keys, StringComparer.OrdinalIgnoreCase).ToList();
         foreach (var orderId in matched)
         {
             var dbOrderId = dbList[orderId].Id;
             UpdateFileStatuses(dbOrderId);
+
+            // Re-run ingest for Dakis orders to ensure multi-fulfiller state is correct
+            // (idempotent — EnsureParentOrder finds existing, SetDisplayTab runs, child skipped if exists)
+            if (folderList[orderId].Source == "dakis")
+            {
+                try { InsertDakisFromDisk(orderId, folderList[orderId].Path); }
+                catch (Exception ex) { AppLog.Error($"Verify re-check failed for {orderId}: {ex.Message}"); }
+            }
+
             folderList.Remove(orderId);
             dbList.Remove(orderId);
             matchCount++;
