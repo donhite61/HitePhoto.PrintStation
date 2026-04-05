@@ -719,7 +719,7 @@ public class PrintStationDb
         string? shippingZip = null, string? shippingCountry = null,
         string? shippingMethod = null,
         int harvestedByStoreId = 0, bool isPrinted = false,
-        int displayTab = 1)
+        int displayTab = (int)Core.Models.DisplayTab.Pending)
     {
         const string sql = """
             INSERT INTO orders
@@ -866,7 +866,7 @@ public class PrintStationDb
     }
 
     /// <summary>Upsert order items to MariaDB. Deletes existing items and re-inserts. Retries on deadlock.</summary>
-    public async Task<bool> UpsertOrderItemsAsync(string mariaDbOrderId, List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted, int? FulfillmentStoreId, string? SourceItemId, int? ImageWidth, int? ImageHeight)> items)
+    public async Task<bool> UpsertOrderItemsAsync(string mariaDbOrderId, List<Sync.LocalOrderItem> items)
     {
         const int maxRetries = 3;
         for (int attempt = 1; attempt <= maxRetries; attempt++)
@@ -940,13 +940,38 @@ public class PrintStationDb
         return false;
     }
 
+    public async Task<bool> SetDisplayTabAsync(string mariaDbOrderId, int displayTab)
+    {
+        try
+        {
+            await using var conn = CreateConnection();
+            var rows = await conn.ExecuteAsync(
+                "UPDATE orders SET display_tab = @Tab WHERE id = @Id",
+                new { Tab = displayTab, Id = mariaDbOrderId });
+            return rows > 0;
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                $"Failed to set display_tab on MariaDB order {mariaDbOrderId}",
+                detail: $"Attempted: UPDATE display_tab={displayTab}. Found: {ex.Message}.",
+                ex: ex);
+            return false;
+        }
+    }
+
     public async Task<bool> SetOrderPrintedAsync(string mariaDbOrderId, bool printed, int? displayTab = null)
     {
         const string sql = "UPDATE orders SET is_printed = @Val, display_tab = @Tab WHERE id = @Id";
         try
         {
             await using var conn = CreateConnection();
-            var rows = await conn.ExecuteAsync(sql, new { Val = printed ? 1 : 0, Tab = displayTab ?? (printed ? 2 : 1), Id = mariaDbOrderId });
+            var rows = await conn.ExecuteAsync(sql, new
+            {
+                Val = printed ? 1 : 0,
+                Tab = displayTab ?? (printed ? (int)Core.Models.DisplayTab.Printed : (int)Core.Models.DisplayTab.Pending),
+                Id = mariaDbOrderId
+            });
             return rows > 0;
         }
         catch (Exception ex)

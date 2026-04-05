@@ -882,7 +882,9 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = "UPDATE orders SET is_printed = @val, printed_at = @pat, display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@val", printed ? 1 : 0);
         cmd.Parameters.AddWithValue("@pat", printed ? DateTime.Now.ToString("o") : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@tab", printed ? 2 : 1);
+        cmd.Parameters.AddWithValue("@tab", printed
+            ? (int)Core.Models.DisplayTab.Printed
+            : (int)Core.Models.DisplayTab.Pending);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
     }

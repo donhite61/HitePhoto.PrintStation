@@ -187,7 +187,7 @@ public class DakisIngestService : IDisposable
         var parentId = EnsureParentOrder(order, pickupStoreId, folderPath);
         if (parentId != null)
         {
-            _orders.SetDisplayTab(parentId, 3);
+            _orders.SetDisplayTab(parentId, (int)Models.DisplayTab.PendingAllStores);
             AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: parent {parentId} display_tab=3");
         }
 

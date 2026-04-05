@@ -7,6 +7,12 @@ using HitePhoto.PrintStation.Core;
 
 namespace HitePhoto.PrintStation.Data.Sync;
 
+public record LocalOrderItem(
+    string SizeLabel, string MediaType, int Quantity,
+    string ImageFilename, string ImageFilepath, string OriginalImageFilepath,
+    string OptionsJson, bool IsPrinted,
+    int? FulfillmentStoreId, string? SourceItemId, int? ImageWidth, int? ImageHeight);
+
 public class SyncService : ISyncService
 {
     private readonly OrderDb _localDb;
@@ -76,6 +82,15 @@ public class SyncService : ISyncService
                 if (VerifyOrderExists(orderId) == null) return false;
                 var isHeld = payload["isHeld"].GetBoolean();
                 return await _remoteDb.ToggleHoldAsync(orderId, isHeld);
+            }
+
+            case "set_display_tab":
+            {
+                var orderId = payload["orderId"].GetString()!;
+                var mariaDbId = await EnsureOrderInMariaDbAsync(orderId);
+                if (mariaDbId == null) return false;
+                var displayTab = payload["displayTab"].GetInt32();
+                return await _remoteDb.SetDisplayTabAsync(mariaDbId, displayTab);
             }
 
             case "update_status":
@@ -277,9 +292,9 @@ public class SyncService : ISyncService
         return true;
     }
 
-    private List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted, int? FulfillmentStoreId, string? SourceItemId, int? ImageWidth, int? ImageHeight)> ReadLocalItems(SqliteConnection conn, string orderId)
+    private List<LocalOrderItem> ReadLocalItems(SqliteConnection conn, string orderId)
     {
-        var items = new List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted, int? FulfillmentStoreId, string? SourceItemId, int? ImageWidth, int? ImageHeight)>();
+        var items = new List<LocalOrderItem>();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT size_label, media_type, quantity, image_filename, image_filepath,
@@ -291,19 +306,19 @@ public class SyncService : ISyncService
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            items.Add((
-                reader.IsDBNull(0) ? "" : reader.GetString(0),
-                reader.IsDBNull(1) ? "" : reader.GetString(1),
-                reader.GetInt32(2),
-                reader.IsDBNull(3) ? "" : reader.GetString(3),
-                reader.IsDBNull(4) ? "" : reader.GetString(4),
-                reader.IsDBNull(5) ? "" : reader.GetString(5),
-                reader.IsDBNull(6) ? "[]" : reader.GetString(6),
-                reader.GetInt32(7) == 1,
-                reader.IsDBNull(8) ? null : (int?)reader.GetInt32(8),
-                reader.IsDBNull(9) ? null : reader.GetString(9),
-                reader.IsDBNull(10) ? null : (int?)reader.GetInt32(10),
-                reader.IsDBNull(11) ? null : (int?)reader.GetInt32(11)));
+            items.Add(new LocalOrderItem(
+                SizeLabel: reader.IsDBNull(0) ? "" : reader.GetString(0),
+                MediaType: reader.IsDBNull(1) ? "" : reader.GetString(1),
+                Quantity: reader.GetInt32(2),
+                ImageFilename: reader.IsDBNull(3) ? "" : reader.GetString(3),
+                ImageFilepath: reader.IsDBNull(4) ? "" : reader.GetString(4),
+                OriginalImageFilepath: reader.IsDBNull(5) ? "" : reader.GetString(5),
+                OptionsJson: reader.IsDBNull(6) ? "[]" : reader.GetString(6),
+                IsPrinted: reader.GetInt32(7) == 1,
+                FulfillmentStoreId: reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                SourceItemId: reader.IsDBNull(9) ? null : reader.GetString(9),
+                ImageWidth: reader.IsDBNull(10) ? null : reader.GetInt32(10),
+                ImageHeight: reader.IsDBNull(11) ? null : reader.GetInt32(11)));
         }
         return items;
     }
@@ -604,7 +619,7 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
         cmd.Parameters.AddWithValue("@harvestedBy", row.harvested_by_store_id != null ? (int)row.harvested_by_store_id : 0);
         cmd.Parameters.AddWithValue("@isPrinted", Convert.ToBoolean(row.is_printed) ? 1 : 0);
-        cmd.Parameters.AddWithValue("@displayTab", row.display_tab != null ? (int)row.display_tab : 1);
+        cmd.Parameters.AddWithValue("@displayTab", row.display_tab != null ? (int)row.display_tab : (int)Core.Models.DisplayTab.Pending);
     }
 
     private void UpsertLocalItem(dynamic item)
