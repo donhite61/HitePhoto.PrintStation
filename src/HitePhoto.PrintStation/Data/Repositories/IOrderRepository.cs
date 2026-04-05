@@ -110,7 +110,13 @@ public interface IOrderRepository
     /// <summary>Set harvested_by_store_id flag (1 = this machine ingested the order).</summary>
     void SetHarvestedBy(string orderId, int storeId);
 
-    /// <summary>Set order-level is_printed flag (drives Pending vs Printed tab).</summary>
+    /// <summary>Set source_item_id on child items by matching size_label + image_filename to parent items.</summary>
+    void LinkChildItemsToParent(string parentOrderId, string childOrderId);
+
+    /// <summary>Set display_tab (1=Pending own store, 2=Printed, 3=Pending all stores).</summary>
+    void SetDisplayTab(string orderId, int displayTab);
+
+    /// <summary>Set order-level is_printed flag + display_tab.</summary>
     void SetOrderPrinted(string orderId, bool printed);
 
     /// <summary>Check if all items on an order are printed.</summary>

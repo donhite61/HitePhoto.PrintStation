@@ -185,7 +185,7 @@ public class SyncService : ISyncService
                    total_amount, is_held, is_transfer, transfer_store_id,
                    special_instructions, folder_path, delivery_method_id,
                    ordered_at, pixfizz_job_id, download_status, source_code,
-                   harvested_by_store_id, is_printed
+                   harvested_by_store_id, is_printed, display_tab
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", localOrderId);
@@ -217,7 +217,8 @@ public class SyncService : ISyncService
             orderedAt: reader.IsDBNull(15) ? null : reader.GetString(15),
             pixfizzJobId: reader.IsDBNull(16) ? null : reader.GetString(16),
             harvestedByStoreId: reader.GetInt32(19),
-            isPrinted: reader.GetInt32(20) == 1);
+            isPrinted: reader.GetInt32(20) == 1,
+            displayTab: reader.GetInt32(21));
         reader.Close();
 
         if (string.IsNullOrEmpty(mariaDbId)) return null;
@@ -276,13 +277,14 @@ public class SyncService : ISyncService
         return true;
     }
 
-    private List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted)> ReadLocalItems(SqliteConnection conn, string orderId)
+    private List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted, int? FulfillmentStoreId, string? SourceItemId, int? ImageWidth, int? ImageHeight)> ReadLocalItems(SqliteConnection conn, string orderId)
     {
-        var items = new List<(string, string, int, string, string, string, string, bool)>();
+        var items = new List<(string SizeLabel, string MediaType, int Quantity, string ImageFilename, string ImageFilepath, string OriginalImageFilepath, string OptionsJson, bool IsPrinted, int? FulfillmentStoreId, string? SourceItemId, int? ImageWidth, int? ImageHeight)>();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT size_label, media_type, quantity, image_filename, image_filepath,
-                   original_image_filepath, options_json, is_printed
+                   original_image_filepath, options_json, is_printed,
+                   fulfillment_store_id, source_item_id, image_width, image_height
             FROM order_items WHERE order_id = @id
             """;
         cmd.Parameters.AddWithValue("@id", orderId);
@@ -297,7 +299,11 @@ public class SyncService : ISyncService
                 reader.IsDBNull(4) ? "" : reader.GetString(4),
                 reader.IsDBNull(5) ? "" : reader.GetString(5),
                 reader.IsDBNull(6) ? "[]" : reader.GetString(6),
-                reader.GetInt32(7) == 1));
+                reader.GetInt32(7) == 1,
+                reader.IsDBNull(8) ? null : (int?)reader.GetInt32(8),
+                reader.IsDBNull(9) ? null : reader.GetString(9),
+                reader.IsDBNull(10) ? null : (int?)reader.GetInt32(10),
+                reader.IsDBNull(11) ? null : (int?)reader.GetInt32(11)));
         }
         return items;
     }
@@ -555,7 +561,7 @@ public class SyncService : ISyncService
                     customer_first_name, customer_last_name, customer_email, customer_phone,
                     total_amount, is_held, is_transfer, transfer_store_id,
                     special_instructions, folder_path, delivery_method_id, ordered_at,
-                    harvested_by_store_id, is_printed,
+                    harvested_by_store_id, is_printed, display_tab,
                     created_at, updated_at
                 ) VALUES (
                     @id, @eid, @store, @srcId, @srcCode,
@@ -563,7 +569,7 @@ public class SyncService : ISyncService
                     @fname, @lname, @email, @phone,
                     @total, @held, @transfer, @transferStore,
                     @instructions, @folder, @delivery, @orderedAt,
-                    @harvestedBy, @isPrinted,
+                    @harvestedBy, @isPrinted, @displayTab,
                     @createdAt, @updatedAt
                 )
                 """;
@@ -598,6 +604,7 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
         cmd.Parameters.AddWithValue("@harvestedBy", row.harvested_by_store_id != null ? (int)row.harvested_by_store_id : 0);
         cmd.Parameters.AddWithValue("@isPrinted", Convert.ToBoolean(row.is_printed) ? 1 : 0);
+        cmd.Parameters.AddWithValue("@displayTab", row.display_tab != null ? (int)row.display_tab : 1);
     }
 
     private void UpsertLocalItem(dynamic item)
@@ -631,19 +638,45 @@ public class SyncService : ISyncService
 
         if (existingId != null)
         {
-            // Update existing item
+            // Check item ownership — only accept is_printed from the producing store
+            using var ownerCmd = conn.CreateCommand();
+            ownerCmd.CommandText = "SELECT fulfillment_store_id FROM order_items WHERE id = @id";
+            ownerCmd.Parameters.AddWithValue("@id", Convert.ToString(existingId));
+            var localFulfillStore = ownerCmd.ExecuteScalar();
+            int? fulfillStoreId = localFulfillStore is int fs ? fs : null;
+
+            bool remotePrinted = Convert.ToBoolean(item.is_printed ?? false);
+            int? remoteFulfillStore = item.fulfillment_store_id != null ? (int?)item.fulfillment_store_id : null;
+
+            // Accept is_printed only if fulfillment_store_id matches (producing store owns the update)
+            bool acceptPrinted = fulfillStoreId.HasValue && remoteFulfillStore.HasValue
+                && fulfillStoreId.Value == remoteFulfillStore.Value;
+
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                UPDATE order_items SET
-                    quantity = @qty, image_filepath = @fpath,
-                    options_json = @options,
-                    is_printed = @printed, updated_at = datetime('now','localtime')
-                WHERE id = @id
-                """;
+            if (acceptPrinted)
+            {
+                cmd.CommandText = """
+                    UPDATE order_items SET
+                        quantity = @qty, image_filepath = @fpath,
+                        options_json = @options,
+                        is_printed = @printed, updated_at = datetime('now','localtime')
+                    WHERE id = @id
+                    """;
+                cmd.Parameters.AddWithValue("@printed", remotePrinted ? 1 : 0);
+            }
+            else
+            {
+                cmd.CommandText = """
+                    UPDATE order_items SET
+                        quantity = @qty, image_filepath = @fpath,
+                        options_json = @options,
+                        updated_at = datetime('now','localtime')
+                    WHERE id = @id
+                    """;
+            }
             cmd.Parameters.AddWithValue("@qty", (int)item.quantity);
             cmd.Parameters.AddWithValue("@fpath", (string?)item.image_filepath ?? "");
             cmd.Parameters.AddWithValue("@options", (string?)item.options_json ?? "[]");
-            cmd.Parameters.AddWithValue("@printed", Convert.ToBoolean(item.is_printed ?? false) ? 1 : 0);
             cmd.Parameters.AddWithValue("@id", Convert.ToString(existingId));
             cmd.ExecuteNonQuery();
         }
@@ -655,11 +688,13 @@ public class SyncService : ISyncService
                 INSERT INTO order_items (
                     id, order_id, size_label, media_type, quantity,
                     image_filename, image_filepath,
-                    options_json, is_printed
+                    options_json, is_printed,
+                    fulfillment_store_id, source_item_id, image_width, image_height
                 ) VALUES (
                     @itemId, @oid, @size, @media, @qty,
                     @fname, @fpath,
-                    @options, @printed
+                    @options, @printed,
+                    @fulfillStore, @sourceItem, @imgW, @imgH
                 )
                 """;
             cmd.Parameters.AddWithValue("@itemId", Convert.ToString(item.id)!);
@@ -671,6 +706,10 @@ public class SyncService : ISyncService
             cmd.Parameters.AddWithValue("@fpath", (string?)item.image_filepath ?? "");
             cmd.Parameters.AddWithValue("@options", (string?)item.options_json ?? "[]");
             cmd.Parameters.AddWithValue("@printed", Convert.ToBoolean(item.is_printed ?? false) ? 1 : 0);
+            cmd.Parameters.AddWithValue("@fulfillStore", item.fulfillment_store_id != null ? (object)(int)item.fulfillment_store_id : DBNull.Value);
+            cmd.Parameters.AddWithValue("@sourceItem", item.source_item_id != null ? (object)Convert.ToString(item.source_item_id)! : DBNull.Value);
+            cmd.Parameters.AddWithValue("@imgW", item.image_width != null ? (object)(int)item.image_width : DBNull.Value);
+            cmd.Parameters.AddWithValue("@imgH", item.image_height != null ? (object)(int)item.image_height : DBNull.Value);
             cmd.ExecuteNonQuery();
         }
     }

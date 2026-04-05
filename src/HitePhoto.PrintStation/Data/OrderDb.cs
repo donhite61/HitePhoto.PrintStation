@@ -340,6 +340,7 @@ public class OrderDb
             notified_at               TEXT DEFAULT NULL,
             is_printed                INTEGER NOT NULL DEFAULT 0,
             printed_at                TEXT DEFAULT NULL,
+            display_tab               INTEGER NOT NULL DEFAULT 1,
             created_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             UNIQUE(external_order_id, pickup_store_id)
@@ -758,6 +759,10 @@ public class OrderDb
         AddColumnIfMissing(conn, "order_items", "source_item_id", "TEXT DEFAULT NULL");
         AddColumnIfMissing(conn, "order_items", "image_width", "INTEGER DEFAULT NULL");
         AddColumnIfMissing(conn, "order_items", "image_height", "INTEGER DEFAULT NULL");
+
+        // Migration 024: display_tab on orders — explicit tab control.
+        // 1=Pending (own store), 2=Printed, 3=Pending at all stores (shared parent).
+        AddColumnIfMissing(conn, "orders", "display_tab", "INTEGER NOT NULL DEFAULT 1");
 
     }
 

@@ -288,11 +288,14 @@ public class OrderTreeItem : INotifyPropertyChanged
 
     /// <summary>
     /// What the tree shows when expanded:
-    /// - Parent orders (has ChildOrders) → show child order nodes
-    /// - Normal/leaf orders → show size group nodes
+    /// - Parent orders (has ChildOrders) → show sizes (full order) + child order nodes
+    /// - Normal/leaf orders → show size group nodes only
+    /// WPF picks the right DataTemplate per type automatically.
     /// </summary>
     public IEnumerable<object> TreeChildren =>
-        ChildOrders.Count > 0 ? ChildOrders : Sizes;
+        ChildOrders.Count > 0
+            ? Sizes.Cast<object>().Concat(ChildOrders)
+            : Sizes;
 
     /// <summary>True if this is a parent order with linked children (no items of its own).</summary>
     public bool IsParentOrder => ChildOrders.Count > 0;

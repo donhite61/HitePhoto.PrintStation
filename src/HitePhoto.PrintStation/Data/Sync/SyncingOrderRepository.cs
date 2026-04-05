@@ -127,6 +127,8 @@ public class SyncingOrderRepository : IOrderRepository
     public void SetItemsUnprinted(string orderId) => _inner.SetItemsUnprinted(orderId);
     public void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates) => _inner.BatchUpdateFileStatus(updates);
     public void SetHarvestedBy(string orderId, int storeId) => _inner.SetHarvestedBy(orderId, storeId);
+    public void LinkChildItemsToParent(string parentOrderId, string childOrderId) => _inner.LinkChildItemsToParent(parentOrderId, childOrderId);
+    public void SetDisplayTab(string orderId, int displayTab) => _inner.SetDisplayTab(orderId, displayTab);
     public void SetOrderPrinted(string orderId, bool printed) => _inner.SetOrderPrinted(orderId, printed);
     public bool AreAllItemsPrinted(string orderId) => _inner.AreAllItemsPrinted(orderId);
     public void SetExternallyModified(string orderId, bool modified) => _inner.SetExternallyModified(orderId, modified);

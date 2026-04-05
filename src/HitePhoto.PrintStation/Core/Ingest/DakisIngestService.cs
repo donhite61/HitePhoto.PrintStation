@@ -9,6 +9,7 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 /// </summary>
 public class DakisIngestService : IDisposable
 {
+    public DakisOrderParser Parser => _parser;
     private readonly DakisOrderParser _parser;
     private readonly IngestOrderWriter _writer;
     private readonly Data.Repositories.IOrderRepository _orders;
@@ -126,8 +127,15 @@ public class DakisIngestService : IDisposable
         if (!IngestConstants.MarkerExists(folderPath, IngestConstants.MarkerDownloadComplete))
             return;
 
-        var orderId = Path.GetFileName(folderPath);
+        IngestOrder(Path.GetFileName(folderPath), folderPath);
+    }
 
+    /// <summary>
+    /// Parse and ingest a Dakis order from disk. Handles multi-fulfiller splits.
+    /// Called by both the file watcher and Verify (single code path for all Dakis ingest).
+    /// </summary>
+    public void IngestOrder(string orderId, string folderPath)
+    {
         var ymlPath = Path.Combine(folderPath, "order.yml");
         if (!File.Exists(ymlPath))
         {
@@ -175,14 +183,16 @@ public class DakisIngestService : IDisposable
         var externalOrderId = order.ExternalOrderId;
         var storeCode = _orders.GetStoreName(_settings.StoreId); // "BH" or "WB"
 
+        // Every multi-fulfiller has a parent — ensure it exists with ALL items, set display_tab=3
+        var parentId = EnsureParentOrder(order, pickupStoreId, folderPath);
+        if (parentId != null)
+            _orders.SetDisplayTab(parentId, 3);
+
         // Separate local items (this store produces) from remote items
         var localItems = order.Items.Where(i => i.IsLocalProduction).ToList();
 
         if (localItems.Count == 0)
         {
-            // Invoice-only copy — this store has nothing to produce.
-            // Still ensure parent exists so the order shows up in the tree.
-            EnsureParentOrder(order, pickupStoreId, folderPath);
             AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: invoice-only at {storeCode}, no child created");
             return;
         }
@@ -194,9 +204,6 @@ public class DakisIngestService : IDisposable
             AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: {storeCode} child already exists, skipping");
             return;
         }
-
-        // Ensure parent order exists (no items, tracking hub)
-        var parentId = EnsureParentOrder(order, pickupStoreId, folderPath);
 
         // Generate child external_order_id: "12345-BH1"
         var childExternalId = GenerateChildExternalId(externalOrderId, storeCode);
@@ -223,10 +230,11 @@ public class DakisIngestService : IDisposable
             return;
         }
 
-        // Link child to parent
+        // Link child to parent + set source_item_id on child items
         if (parentId != null)
         {
             _orders.InsertLink(parentId, childId, "dakis_split", "ingest");
+            _orders.LinkChildItemsToParent(parentId, childId);
             AppLog.Info($"Dakis multi-fulfiller {externalOrderId}: created child {childExternalId} linked to parent");
         }
     }
@@ -242,12 +250,8 @@ public class DakisIngestService : IDisposable
         if (parentId != null)
             return parentId;
 
-        // Create parent with no items
-        var parentOrder = order with
-        {
-            Items = [],
-            IsInvoiceOnly = true // allows zero items through validation
-        };
+        // Create parent with ALL items — operator sees the complete order
+        var parentOrder = order;
 
         _writer.WriteToSqlite(parentOrder, pickupStoreId, "dakis", order.FolderPath ?? "", _settings.StoreId);
 

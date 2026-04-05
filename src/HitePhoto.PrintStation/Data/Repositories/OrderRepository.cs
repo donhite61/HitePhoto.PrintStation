@@ -692,18 +692,14 @@ public class OrderRepository : IOrderRepository
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  TAB QUERIES — LOCKED CONTRACTS (Session 76)
+    //  TAB QUERIES — display_tab driven (Session 82 redesign)
     //
-    //  Pending  = harvested here + not printed.
-    //  Printed  = harvested here + printed.
-    //  Other    = harvested at another store (from sync).
+    //  display_tab: 1=Pending (own), 2=Printed, 3=Pending all stores
+    //  Pending  = (tab=1 AND own store) OR tab=3 (shared parents)
+    //  Printed  = tab=2 AND own store
+    //  Other    = harvested at another store (show everything)
     //
-    //  harvested_by_store_id = which store ingested this order.
-    //  is_printed = has the order been printed/completed.
-    //
-    //  DO NOT add status_code, is_local_production, is_transfer,
-    //  pickup_store_id, or item subqueries to these filters.
-    //  See feedback_tab_query_locked.md for why.
+    //  Orders CAN appear on multiple tabs (shared parent on Pending + Other Store).
     // ═══════════════════════════════════════════════════════════════
 
     public List<OrderRow> LoadPendingOrders(int storeId)
@@ -712,8 +708,8 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.harvested_by_store_id = @storeId
-              AND o.is_printed = 0
+            WHERE (o.display_tab = 1 AND o.harvested_by_store_id = @storeId)
+               OR o.display_tab = 3
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -729,8 +725,8 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.harvested_by_store_id = @storeId
-              AND o.is_printed = 1
+            WHERE o.display_tab = 2
+              AND o.harvested_by_store_id = @storeId
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -740,8 +736,7 @@ public class OrderRepository : IOrderRepository
         return results;
     }
 
-    // Other Store = orders harvested at another store (from sync).
-    // Empty when sync is disabled.
+    // Other Store = everything from another store, regardless of display_tab.
     public List<OrderRow> LoadOtherStoreOrders(int storeId)
     {
         var results = new List<OrderRow>();
@@ -851,13 +846,43 @@ public class OrderRepository : IOrderRepository
         cmd.ExecuteNonQuery();
     }
 
+    public void LinkChildItemsToParent(string parentOrderId, string childOrderId)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE order_items SET source_item_id = (
+                SELECT p.id FROM order_items p
+                WHERE p.order_id = @parentId
+                  AND p.size_label = order_items.size_label
+                  AND p.image_filename = order_items.image_filename
+                LIMIT 1
+            )
+            WHERE order_id = @childId AND source_item_id IS NULL
+            """;
+        cmd.Parameters.AddWithValue("@parentId", parentOrderId);
+        cmd.Parameters.AddWithValue("@childId", childOrderId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void SetDisplayTab(string orderId, int displayTab)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id";
+        cmd.Parameters.AddWithValue("@tab", displayTab);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        cmd.ExecuteNonQuery();
+    }
+
     public void SetOrderPrinted(string orderId, bool printed)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_printed = @val, printed_at = @pat, updated_at = datetime('now','localtime') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET is_printed = @val, printed_at = @pat, display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@val", printed ? 1 : 0);
         cmd.Parameters.AddWithValue("@pat", printed ? DateTime.Now.ToString("o") : (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@tab", printed ? 2 : 1);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
     }
