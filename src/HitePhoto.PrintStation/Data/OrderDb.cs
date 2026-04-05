@@ -324,6 +324,7 @@ public class OrderDb
             notified_at               TEXT DEFAULT NULL,
             is_printed                INTEGER NOT NULL DEFAULT 0,
             printed_at                TEXT DEFAULT NULL,
+            display_tab               INTEGER NOT NULL DEFAULT 1,
             created_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             UNIQUE(external_order_id, pickup_store_id)
@@ -732,6 +733,13 @@ public class OrderDb
 
         // Migration 022: printed_at on orders — timestamp when order was marked printed.
         AddColumnIfMissing(conn, "orders", "printed_at", "TEXT DEFAULT NULL");
+
+        // Migration 023: display_tab — explicit tab control (0=hidden, 1=Pending, 2=Printed, 3=Other Store).
+        // Replaces is_printed + harvested_by_store_id for tab visibility.
+        AddColumnIfMissing(conn, "orders", "display_tab", "INTEGER NOT NULL DEFAULT 1");
+        RunOnce(conn, "023_display_tab_backfill", """
+            UPDATE orders SET display_tab = 2 WHERE is_printed = 1 AND display_tab = 1
+            """);
 
     }
 

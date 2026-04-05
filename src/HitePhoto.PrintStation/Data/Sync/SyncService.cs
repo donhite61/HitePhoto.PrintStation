@@ -185,7 +185,7 @@ public class SyncService : ISyncService
                    total_amount, is_held, is_transfer, transfer_store_id,
                    special_instructions, folder_path, delivery_method_id,
                    ordered_at, pixfizz_job_id, download_status, source_code,
-                   harvested_by_store_id, is_printed
+                   harvested_by_store_id, is_printed, display_tab
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", localOrderId);
@@ -217,7 +217,8 @@ public class SyncService : ISyncService
             orderedAt: reader.IsDBNull(15) ? null : reader.GetString(15),
             pixfizzJobId: reader.IsDBNull(16) ? null : reader.GetString(16),
             harvestedByStoreId: reader.GetInt32(19),
-            isPrinted: reader.GetInt32(20) == 1);
+            isPrinted: reader.GetInt32(20) == 1,
+            displayTab: reader.GetInt32(21));
         reader.Close();
 
         if (string.IsNullOrEmpty(mariaDbId)) return null;
@@ -256,16 +257,21 @@ public class SyncService : ISyncService
         var mariaParentId = await EnsureOrderInMariaDbAsync(localParentId);
         if (mariaParentId == null) return false;
 
-        // Sync parent's is_printed state
+        // Sync parent's is_printed + display_tab state
         if (VerifyOrderExists(localParentId) != null)
         {
             using var pConn = _localDb.OpenConnection();
             using var pCmd = pConn.CreateCommand();
-            pCmd.CommandText = "SELECT is_printed FROM orders WHERE id = @id";
+            pCmd.CommandText = "SELECT is_printed, display_tab FROM orders WHERE id = @id";
             pCmd.Parameters.AddWithValue("@id", localParentId);
-            var parentPrinted = Convert.ToInt32(pCmd.ExecuteScalar()) == 1;
-            if (!await _remoteDb.SetOrderPrintedAsync(mariaParentId, parentPrinted))
-                return false;
+            using var pReader = pCmd.ExecuteReader();
+            if (pReader.Read())
+            {
+                var parentPrinted = pReader.GetInt32(0) == 1;
+                var parentDisplayTab = pReader.GetInt32(1);
+                if (!await _remoteDb.SetOrderPrintedAsync(mariaParentId, parentPrinted, parentDisplayTab))
+                    return false;
+            }
         }
 
         // Insert order_links row using MariaDB IDs
@@ -531,7 +537,7 @@ public class SyncService : ISyncService
                     return; // local is newer or same — skip
             }
 
-            // Update existing
+            // Update existing — only is_held + updated_at. display_tab is local authority.
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 UPDATE orders SET
@@ -555,7 +561,7 @@ public class SyncService : ISyncService
                     customer_first_name, customer_last_name, customer_email, customer_phone,
                     total_amount, is_held, is_transfer, transfer_store_id,
                     special_instructions, folder_path, delivery_method_id, ordered_at,
-                    harvested_by_store_id, is_printed,
+                    harvested_by_store_id, is_printed, display_tab,
                     created_at, updated_at
                 ) VALUES (
                     @id, @eid, @store, @srcId, @srcCode,
@@ -563,7 +569,7 @@ public class SyncService : ISyncService
                     @fname, @lname, @email, @phone,
                     @total, @held, @transfer, @transferStore,
                     @instructions, @folder, @delivery, @orderedAt,
-                    @harvestedBy, @isPrinted,
+                    @harvestedBy, @isPrinted, @displayTab,
                     @createdAt, @updatedAt
                 )
                 """;
@@ -578,7 +584,7 @@ public class SyncService : ISyncService
     }
 
     /// <summary>Bind ALL fields for INSERT (new orders from another store). Standalone — not shared with UPDATE.</summary>
-    private static void BindPullInsertParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
+    private void BindPullInsertParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
     {
         cmd.Parameters.AddWithValue("@srcId", orderSourceId);
         cmd.Parameters.AddWithValue("@srcCode", sourceCode);
@@ -596,8 +602,10 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@delivery", row.delivery_method_id != null ? (int)row.delivery_method_id : 1);
         cmd.Parameters.AddWithValue("@orderedAt", row.ordered_at != null ? ((DateTime)row.ordered_at).ToString("o") : DateTime.Now.ToString("o"));
         cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
-        cmd.Parameters.AddWithValue("@harvestedBy", row.harvested_by_store_id != null ? (int)row.harvested_by_store_id : 0);
+        int harvestedBy = row.harvested_by_store_id != null ? (int)row.harvested_by_store_id : 0;
+        cmd.Parameters.AddWithValue("@harvestedBy", harvestedBy);
         cmd.Parameters.AddWithValue("@isPrinted", Convert.ToBoolean(row.is_printed) ? 1 : 0);
+        cmd.Parameters.AddWithValue("@displayTab", harvestedBy != _settings.StoreId && harvestedBy > 0 ? 3 : 1);
     }
 
     private void UpsertLocalItem(dynamic item)

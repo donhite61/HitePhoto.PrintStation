@@ -718,7 +718,8 @@ public class PrintStationDb
         string? shippingCity = null, string? shippingState = null,
         string? shippingZip = null, string? shippingCountry = null,
         string? shippingMethod = null,
-        int harvestedByStoreId = 0, bool isPrinted = false)
+        int harvestedByStoreId = 0, bool isPrinted = false,
+        int displayTab = 1)
     {
         const string sql = """
             INSERT INTO orders
@@ -733,7 +734,7 @@ public class PrintStationDb
                  shipping_first_name, shipping_last_name,
                  shipping_address1, shipping_address2, shipping_city,
                  shipping_state, shipping_zip, shipping_country, shipping_method,
-                 harvested_by_store_id, is_printed,
+                 harvested_by_store_id, is_printed, display_tab,
                  sync_status)
             VALUES
                 (@OrderId, @Eid, @Store, @Store,
@@ -747,7 +748,7 @@ public class PrintStationDb
                  @ShipFname, @ShipLname,
                  @ShipAddr1, @ShipAddr2, @ShipCity,
                  @ShipState, @ShipZip, @ShipCountry, @ShipMethod,
-                 @HarvestedBy, @Printed,
+                 @HarvestedBy, @Printed, @DisplayTab,
                  'synced')
             ON DUPLICATE KEY UPDATE
                 order_status_id = VALUES(order_status_id),
@@ -779,6 +780,7 @@ public class PrintStationDb
                 shipping_method = COALESCE(VALUES(shipping_method), shipping_method),
                 harvested_by_store_id = VALUES(harvested_by_store_id),
                 is_printed = VALUES(is_printed),
+                display_tab = VALUES(display_tab),
                 sync_status = 'synced'
             """;
 
@@ -820,6 +822,7 @@ public class PrintStationDb
                 ShipMethod = shippingMethod,
                 HarvestedBy = harvestedByStoreId,
                 Printed = isPrinted ? 1 : 0,
+                DisplayTab = displayTab,
             });
 
             // On duplicate key update, the generated GUID is discarded — query by natural key to get existing id
@@ -931,13 +934,13 @@ public class PrintStationDb
         return false;
     }
 
-    public async Task<bool> SetOrderPrintedAsync(string mariaDbOrderId, bool printed)
+    public async Task<bool> SetOrderPrintedAsync(string mariaDbOrderId, bool printed, int? displayTab = null)
     {
-        const string sql = "UPDATE orders SET is_printed = @Val WHERE id = @Id";
+        const string sql = "UPDATE orders SET is_printed = @Val, display_tab = @Tab WHERE id = @Id";
         try
         {
             await using var conn = CreateConnection();
-            var rows = await conn.ExecuteAsync(sql, new { Val = printed ? 1 : 0, Id = mariaDbOrderId });
+            var rows = await conn.ExecuteAsync(sql, new { Val = printed ? 1 : 0, Tab = displayTab ?? (printed ? 2 : 1), Id = mariaDbOrderId });
             return rows > 0;
         }
         catch (Exception ex)
