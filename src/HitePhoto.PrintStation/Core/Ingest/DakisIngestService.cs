@@ -9,6 +9,7 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 /// </summary>
 public class DakisIngestService : IDisposable
 {
+    public DakisOrderParser Parser => _parser;
     private readonly DakisOrderParser _parser;
     private readonly IngestOrderWriter _writer;
     private readonly Data.Repositories.IOrderRepository _orders;
@@ -127,7 +128,15 @@ public class DakisIngestService : IDisposable
             return;
 
         var orderId = Path.GetFileName(folderPath);
+        IngestOrder(orderId, folderPath);
+    }
 
+    /// <summary>
+    /// Parse and ingest a Dakis order from disk. Handles multi-fulfiller splits.
+    /// Called by both the file watcher and Verify (single code path for all Dakis ingest).
+    /// </summary>
+    public void IngestOrder(string orderId, string folderPath)
+    {
         var ymlPath = Path.Combine(folderPath, "order.yml");
         if (!File.Exists(ymlPath))
         {
