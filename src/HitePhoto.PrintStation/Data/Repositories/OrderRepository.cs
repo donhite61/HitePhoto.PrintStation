@@ -1061,8 +1061,16 @@ public class OrderRepository : IOrderRepository
 
     public void InsertLink(string parentOrderId, string childOrderId, string linkType, string createdBy)
     {
-        var linkId = Guid.NewGuid().ToString();
         using var conn = _db.OpenConnection();
+
+        // Check if link already exists (idempotent)
+        using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = "SELECT COUNT(*) FROM order_links WHERE parent_order_id = @parent AND child_order_id = @child";
+        checkCmd.Parameters.AddWithValue("@parent", parentOrderId);
+        checkCmd.Parameters.AddWithValue("@child", childOrderId);
+        if (Convert.ToInt32(checkCmd.ExecuteScalar()) > 0) return;
+
+        var linkId = Guid.NewGuid().ToString();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             INSERT INTO order_links (id, parent_order_id, child_order_id, link_type, created_by)
