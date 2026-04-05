@@ -368,7 +368,8 @@ public class OrderRepository : IOrderRepository
     }
 
     private static void InsertItemCore(SqliteConnection conn, SqliteTransaction? transaction,
-        string orderId, UnifiedOrderItem item, bool isPrinted)
+        string orderId, UnifiedOrderItem item, bool isPrinted,
+        int? fulfillmentStoreId = null, int? localStoreId = null, string? sourceItemId = null)
     {
         var itemId = Guid.NewGuid().ToString();
         using var cmd = conn.CreateCommand();
@@ -377,11 +378,13 @@ public class OrderRepository : IOrderRepository
             INSERT INTO order_items (
                 id, order_id, size_label, media_type, category, sub_category,
                 quantity, image_filename, image_filepath, original_image_filepath,
-                is_noritsu, is_local_production, is_printed, options_json
+                is_noritsu, is_local_production, is_printed, options_json,
+                fulfillment_store_id, source_item_id, image_width, image_height
             ) VALUES (
                 @itemId, @oid, @size, @media, @cat, @subcat,
                 @qty, @fname, @fpath, @orig,
-                @noritsu, @localProd, @printed, @options
+                @noritsu, @localProd, @printed, @options,
+                @fulfillStore, @sourceItem, @imgW, @imgH
             )
             """;
         cmd.Parameters.AddWithValue("@itemId", itemId);
@@ -395,11 +398,17 @@ public class OrderRepository : IOrderRepository
         cmd.Parameters.AddWithValue("@fpath", item.ImageFilepath ?? "");
         cmd.Parameters.AddWithValue("@orig", item.OriginalImageFilepath ?? item.ImageFilepath ?? "");
         cmd.Parameters.AddWithValue("@noritsu", item.IsNoritsu ? 1 : 0);
-        cmd.Parameters.AddWithValue("@localProd", item.IsLocalProduction ? 1 : 0);
+        cmd.Parameters.AddWithValue("@localProd", fulfillmentStoreId.HasValue && localStoreId.HasValue
+            ? (fulfillmentStoreId.Value == localStoreId.Value ? 1 : 0)
+            : (item.IsLocalProduction ? 1 : 0));
         cmd.Parameters.AddWithValue("@printed", isPrinted ? 1 : 0);
         cmd.Parameters.AddWithValue("@options", item.Options.Count > 0
             ? System.Text.Json.JsonSerializer.Serialize(item.Options)
             : "[]");
+        cmd.Parameters.AddWithValue("@fulfillStore", (object?)fulfillmentStoreId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@sourceItem", (object?)sourceItemId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@imgW", item.ImageWidth > 0 ? (object)item.ImageWidth : DBNull.Value);
+        cmd.Parameters.AddWithValue("@imgH", item.ImageHeight > 0 ? (object)item.ImageHeight : DBNull.Value);
         var rows = cmd.ExecuteNonQuery();
         if (rows != 1)
             AlertCollector.Error(AlertCategory.Database,
@@ -546,9 +555,15 @@ public class OrderRepository : IOrderRepository
             cmd.ExecuteNonQuery();
         }
 
+        var sourceCode = (order.ExternalSource ?? "").ToLowerInvariant();
         foreach (var item in order.Items)
         {
-            InsertItemCore(conn, transaction, orderId, item, isPrinted: false);
+            int? resolvedFulfillStore = null;
+            if (!string.IsNullOrEmpty(item.FulfillmentStore))
+                resolvedFulfillStore = ResolveStoreId(sourceCode, item.FulfillmentStore) ?? storeId;
+
+            InsertItemCore(conn, transaction, orderId, item, isPrinted: false,
+                fulfillmentStoreId: resolvedFulfillStore, localStoreId: storeId);
         }
 
         transaction.Commit();

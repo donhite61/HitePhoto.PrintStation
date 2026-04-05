@@ -49,6 +49,22 @@ public class OrderDb
     /// <summary>Re-create the database after file deletion.</summary>
     public void Reinitialize() => Initialize();
 
+    /// <summary>Update or insert a store identifier mapping (e.g. dakis "881" → store 1).</summary>
+    public void SetStoreIdentifier(int storeId, string source, string externalId)
+    {
+        using var conn = OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO store_identifiers (store_id, source, external_id)
+            VALUES (@store, @source, @eid)
+            ON CONFLICT(source, external_id) DO UPDATE SET store_id = @store
+            """;
+        cmd.Parameters.AddWithValue("@store", storeId);
+        cmd.Parameters.AddWithValue("@source", source);
+        cmd.Parameters.AddWithValue("@eid", externalId);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>
     /// Wipe all order data but preserve channel mappings and option defaults.
     /// </summary>
@@ -358,6 +374,10 @@ public class OrderDb
             match_key               TEXT DEFAULT NULL,
             files_expected          INTEGER DEFAULT NULL,
             is_local_production     INTEGER NOT NULL DEFAULT 1,
+            fulfillment_store_id    INTEGER DEFAULT NULL,
+            source_item_id          TEXT DEFAULT NULL,
+            image_width             INTEGER DEFAULT NULL,
+            image_height            INTEGER DEFAULT NULL,
             file_status             INTEGER NOT NULL DEFAULT 0,
             created_at              TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at              TEXT NOT NULL DEFAULT (datetime('now','localtime'))
@@ -732,6 +752,12 @@ public class OrderDb
 
         // Migration 022: printed_at on orders — timestamp when order was marked printed.
         AddColumnIfMissing(conn, "orders", "printed_at", "TEXT DEFAULT NULL");
+
+        // Migration 023: Item-level fulfillment tracking + image dimensions.
+        AddColumnIfMissing(conn, "order_items", "fulfillment_store_id", "INTEGER DEFAULT NULL");
+        AddColumnIfMissing(conn, "order_items", "source_item_id", "TEXT DEFAULT NULL");
+        AddColumnIfMissing(conn, "order_items", "image_width", "INTEGER DEFAULT NULL");
+        AddColumnIfMissing(conn, "order_items", "image_height", "INTEGER DEFAULT NULL");
 
     }
 

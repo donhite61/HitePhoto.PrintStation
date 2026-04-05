@@ -90,6 +90,11 @@ public record UnifiedOrderItem
     public bool IsLocalProduction { get; init; } = true;
 
     public string? FulfillmentStore { get; init; }
+
+    /// <summary>Source image dimensions in pixels (from Dakis YML :width:/:height:).</summary>
+    public int ImageWidth { get; init; }
+    public int ImageHeight { get; init; }
+
     public int ExpectedPrintCount { get; init; }
     public int OutlabCount { get; init; }
 

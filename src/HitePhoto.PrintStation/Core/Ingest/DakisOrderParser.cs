@@ -85,8 +85,8 @@ public class DakisOrderParser
             items = BuildGiftItems(root, info, folderPath);
 
         // ── Multi-fulfiller detection ──
-        // If any item is fulfilled at a different store, this is a split order
-        bool isMultiFulfiller = items.Any(i => !i.IsLocalProduction);
+        // If items span more than one fulfillment store, this is a split order
+        bool isMultiFulfiller = items.Select(i => i.FulfillmentStore).Distinct().Count() > 1;
 
         // ── Validate ──
         ValidateOrder(info, items, folderPath);
@@ -365,6 +365,9 @@ public class DakisOrderParser
                     continue;
                 }
 
+                var imgWidth = YInt(photo, ":width:");
+                var imgHeight = YInt(photo, ":height:");
+
                 var printsList = YList(photo, ":prints:");
                 if (printsList == null) continue;
 
@@ -402,8 +405,8 @@ public class DakisOrderParser
                     var diskSizeLabel = YRaw(print, ":text:").Replace(".", "");
                     var printFilename = filename;
                     var expectedPath = "";
-                    bool localItem = string.IsNullOrEmpty(fulfillmentStoreId) ||
-                                     fulfillmentStoreId == info.CurrentStoreId;
+                    var itemFulfillmentStore = !string.IsNullOrEmpty(fulfillmentStoreId) ? fulfillmentStoreId : info.CurrentStoreId;
+                    bool isLocalItem = itemFulfillmentStore == info.CurrentStoreId;
 
                     if (!string.IsNullOrEmpty(folderPath))
                     {
@@ -417,7 +420,7 @@ public class DakisOrderParser
                             printFilename = Path.ChangeExtension(printFilename, ".jpg");
                             expectedPath = Path.Combine(printDir, printFilename);
                         }
-                        if (localItem)
+                        if (isLocalItem)
                         {
                             var verifyError = OrderHelpers.VerifyFile(expectedPath);
                             if (verifyError != null)
@@ -443,8 +446,10 @@ public class DakisOrderParser
                         ImageFilename = printFilename,
                         ImageFilepath = expectedPath,
                         IsNoritsu = true,
-                        IsLocalProduction = localItem,
-                        FulfillmentStore = !string.IsNullOrEmpty(fulfillmentStoreId) ? fulfillmentStoreId : info.CurrentStoreId,
+                        IsLocalProduction = isLocalItem,
+                        FulfillmentStore = itemFulfillmentStore,
+                        ImageWidth = imgWidth,
+                        ImageHeight = imgHeight,
                         Options = options
                     });
                 }
@@ -536,8 +541,8 @@ public class DakisOrderParser
                 }
             }
 
-            bool localGift = string.IsNullOrEmpty(fulfillmentStoreId) ||
-                             fulfillmentStoreId == info.CurrentStoreId;
+            var giftFulfillmentStore = !string.IsNullOrEmpty(fulfillmentStoreId) ? fulfillmentStoreId : info.CurrentStoreId;
+            bool isLocalGift = giftFulfillmentStore == info.CurrentStoreId;
 
             items.Add(new UnifiedOrderItem
             {
@@ -549,8 +554,8 @@ public class DakisOrderParser
                 ImageFilepath = imageFilepath,
                 ImageFilename = imageFilename,
                 IsNoritsu = false,
-                IsLocalProduction = localGift,
-                FulfillmentStore = fulfillmentStoreId,
+                IsLocalProduction = isLocalGift,
+                FulfillmentStore = giftFulfillmentStore,
                 Options = giftOptions
             });
         }

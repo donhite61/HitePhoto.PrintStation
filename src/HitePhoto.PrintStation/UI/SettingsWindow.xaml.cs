@@ -53,6 +53,7 @@ public partial class SettingsWindow : Window
     {
         // Sources
         DakisEnabledCheck.IsChecked = _settings.DakisEnabled;
+        DakisStoreIdBox.Text = _settings.DakisStoreId;
         DakisWatchBox.Text = _settings.DakisWatchFolder;
         NoritsuOutputBox.Text = _settings.NoritsuOutputRoot;
         ChannelsCsvBox.Text = _settings.ChannelsCsvPath;
@@ -68,6 +69,7 @@ public partial class SettingsWindow : Window
         DaysToLoadBox.Text = _settings.DaysToVerify.ToString();
 
         // Pixfizz
+        PixfizzStoreIdBox.Text = _settings.PixfizzStoreId;
         PixfizzEnabledCheck.IsChecked = _settings.PixfizzEnabled;
         PixfizzApiUrlBox.Text = _settings.PixfizzApiUrl;
         PixfizzApiKeyBox.Password = _settings.PixfizzApiKey;
@@ -170,6 +172,7 @@ public partial class SettingsWindow : Window
     {
         // Sources
         _settings.DakisEnabled = DakisEnabledCheck.IsChecked == true;
+        _settings.DakisStoreId = DakisStoreIdBox.Text.Trim();
         _settings.DakisWatchFolder = DakisWatchBox.Text.Trim();
         _settings.NoritsuOutputRoot = NoritsuOutputBox.Text.Trim();
         _settings.ChannelsCsvPath = ChannelsCsvBox.Text.Trim();
@@ -185,6 +188,7 @@ public partial class SettingsWindow : Window
         _settings.DaysToVerify = int.TryParse(DaysToLoadBox.Text.Trim(), out int dtl) && dtl >= 0 ? dtl : 14;
 
         // Pixfizz
+        _settings.PixfizzStoreId = PixfizzStoreIdBox.Text.Trim();
         _settings.PixfizzEnabled = PixfizzEnabledCheck.IsChecked == true;
         _settings.PixfizzApiUrl = PixfizzApiUrlBox.Text.Trim();
         _settings.PixfizzApiKey = PixfizzApiKeyBox.Password;
@@ -287,6 +291,23 @@ public partial class SettingsWindow : Window
         AppLog.Enabled = _settings.EnableLogging;
 
         _settingsManager.Save(_settings);
+
+        // Update store_identifiers in SQLite when Dakis/Pixfizz store IDs change
+        try
+        {
+            var db = App.Services.GetRequiredService<Data.OrderDb>();
+            if (!string.IsNullOrWhiteSpace(_settings.DakisStoreId))
+                db.SetStoreIdentifier(_settings.StoreId, "dakis", _settings.DakisStoreId);
+            if (!string.IsNullOrWhiteSpace(_settings.PixfizzStoreId))
+                db.SetStoreIdentifier(_settings.StoreId, "pixfizz", _settings.PixfizzStoreId);
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to update store identifiers",
+                detail: $"Attempted: update store_identifiers. Found: {ex.Message}.",
+                ex: ex);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════

@@ -95,6 +95,8 @@ public class AppSettings
     // ── Dakis ──
     public bool   DakisEnabled           { get; set; } = true;
     public string DakisWatchFolder       { get; set; } = "";
+    public string DakisStoreId           { get; set; } = "";
+    public string PixfizzStoreId         { get; set; } = "";
 
     // ── Ingest ──
     public string OrderOutputPath        { get; set; } = "";
