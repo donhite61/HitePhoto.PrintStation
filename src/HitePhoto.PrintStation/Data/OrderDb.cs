@@ -740,6 +740,10 @@ public class OrderDb
         RunOnce(conn, "023_display_tab_backfill", """
             UPDATE orders SET display_tab = 2 WHERE is_printed = 1 AND display_tab = 1
             """);
+        RunOnce(conn, "024_display_tab_parents", """
+            UPDATE orders SET display_tab = 3
+            WHERE id IN (SELECT DISTINCT parent_order_id FROM order_links)
+            """);
 
     }
 
