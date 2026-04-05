@@ -135,7 +135,12 @@ public class SyncingOrderRepository : IOrderRepository
         var payload = JsonSerializer.Serialize(new { orderId, displayTab });
         _ = Task.Run(() => _sync.PushAsync("orders", orderId, "set_display_tab", payload));
     }
-    public void SetOrderPrinted(string orderId, bool printed) => _inner.SetOrderPrinted(orderId, printed);
+    public void SetOrderPrinted(string orderId, bool printed)
+    {
+        _inner.SetOrderPrinted(orderId, printed);
+        var payload = JsonSerializer.Serialize(new { orderId, printed });
+        _ = Task.Run(() => _sync.PushAsync("orders", orderId, "set_printed", payload));
+    }
     public bool AreAllItemsPrinted(string orderId) => _inner.AreAllItemsPrinted(orderId);
     public void SetExternallyModified(string orderId, bool modified) => _inner.SetExternallyModified(orderId, modified);
     public void SetFolderPath(string orderId, string folderPath) => _inner.SetFolderPath(orderId, folderPath);

@@ -764,6 +764,12 @@ public class OrderDb
         // 1=Pending (own store), 2=Printed, 3=Pending at all stores (shared parent).
         AddColumnIfMissing(conn, "orders", "display_tab", "INTEGER NOT NULL DEFAULT 1");
 
+        // Migration 025: Unique constraint on order_links (parent + child).
+        RunOnce(conn, "025_order_links_unique", """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_order_links_parent_child
+            ON order_links(parent_order_id, child_order_id)
+            """);
+
     }
 
     private static void MigrateToGuidPrimaryKeys(SqliteConnection conn)

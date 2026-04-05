@@ -406,8 +406,7 @@ public class DakisOrderParser
                     var diskSizeLabel = YRaw(print, ":text:").Replace(".", "");
                     var printFilename = filename;
                     var expectedPath = "";
-                    var itemFulfillmentStore = !string.IsNullOrEmpty(fulfillmentStoreId) ? fulfillmentStoreId : info.CurrentStoreId;
-                    bool isLocalItem = itemFulfillmentStore == info.CurrentStoreId;
+                    var (itemFulfillmentStore, isLocalItem) = ResolveFulfillment(fulfillmentStoreId, info.CurrentStoreId);
 
                     if (!string.IsNullOrEmpty(folderPath))
                     {
@@ -542,8 +541,7 @@ public class DakisOrderParser
                 }
             }
 
-            var giftFulfillmentStore = !string.IsNullOrEmpty(fulfillmentStoreId) ? fulfillmentStoreId : info.CurrentStoreId;
-            bool isLocalGift = giftFulfillmentStore == info.CurrentStoreId;
+            var (giftFulfillmentStore, isLocalGift) = ResolveFulfillment(fulfillmentStoreId, info.CurrentStoreId);
 
             items.Add(new UnifiedOrderItem
             {
@@ -711,6 +709,12 @@ public class DakisOrderParser
                 return YStr(store, ":id:");
         }
         return null;
+    }
+
+    private static (string Store, bool IsLocal) ResolveFulfillment(string? fulfillmentStoreId, string currentStoreId)
+    {
+        var store = !string.IsNullOrEmpty(fulfillmentStoreId) ? fulfillmentStoreId : currentStoreId;
+        return (store, store == currentStoreId);
     }
 
     private static bool IsImageFile(string path)

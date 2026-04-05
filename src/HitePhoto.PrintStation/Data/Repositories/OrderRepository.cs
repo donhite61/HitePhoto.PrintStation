@@ -556,11 +556,18 @@ public class OrderRepository : IOrderRepository
         }
 
         var sourceCode = (order.ExternalSource ?? "").ToLowerInvariant();
+        var fulfillStoreCache = new Dictionary<string, int?>();
         foreach (var item in order.Items)
         {
             int? resolvedFulfillStore = null;
             if (!string.IsNullOrEmpty(item.FulfillmentStore))
-                resolvedFulfillStore = ResolveStoreId(sourceCode, item.FulfillmentStore) ?? storeId;
+            {
+                if (!fulfillStoreCache.TryGetValue(item.FulfillmentStore, out resolvedFulfillStore))
+                {
+                    resolvedFulfillStore = ResolveStoreId(sourceCode, item.FulfillmentStore) ?? storeId;
+                    fulfillStoreCache[item.FulfillmentStore] = resolvedFulfillStore;
+                }
+            }
 
             InsertItemCore(conn, transaction, orderId, item, isPrinted: false,
                 fulfillmentStoreId: resolvedFulfillStore, localStoreId: storeId);
@@ -869,7 +876,8 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id";
+        // Only update if value differs — prevents no-op sync pushes during verify
+        cmd.CommandText = "UPDATE orders SET display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id AND display_tab != @tab";
         cmd.Parameters.AddWithValue("@tab", displayTab);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
@@ -879,12 +887,15 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_printed = @val, printed_at = @pat, display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id";
-        cmd.Parameters.AddWithValue("@val", printed ? 1 : 0);
-        cmd.Parameters.AddWithValue("@pat", printed ? DateTime.Now.ToString("o") : (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@tab", printed
-            ? (int)Core.Models.DisplayTab.Printed
-            : (int)Core.Models.DisplayTab.Pending);
+        // When un-printing, preserve PendingAllStores (3) for shared parents — don't reset to Pending (1)
+        cmd.CommandText = printed
+            ? "UPDATE orders SET is_printed = 1, printed_at = @pat, display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id"
+            : "UPDATE orders SET is_printed = 0, printed_at = NULL, display_tab = CASE WHEN display_tab = 3 THEN 3 ELSE 1 END, updated_at = datetime('now','localtime') WHERE id = @id";
+        if (printed)
+        {
+            cmd.Parameters.AddWithValue("@pat", DateTime.Now.ToString("o"));
+            cmd.Parameters.AddWithValue("@tab", (int)Core.Models.DisplayTab.Printed);
+        }
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
     }
@@ -1063,19 +1074,11 @@ public class OrderRepository : IOrderRepository
 
     public void InsertLink(string parentOrderId, string childOrderId, string linkType, string createdBy)
     {
-        using var conn = _db.OpenConnection();
-
-        // Check if link already exists (idempotent)
-        using var checkCmd = conn.CreateCommand();
-        checkCmd.CommandText = "SELECT COUNT(*) FROM order_links WHERE parent_order_id = @parent AND child_order_id = @child";
-        checkCmd.Parameters.AddWithValue("@parent", parentOrderId);
-        checkCmd.Parameters.AddWithValue("@child", childOrderId);
-        if (Convert.ToInt32(checkCmd.ExecuteScalar()) > 0) return;
-
         var linkId = Guid.NewGuid().ToString();
+        using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO order_links (id, parent_order_id, child_order_id, link_type, created_by)
+            INSERT OR IGNORE INTO order_links (id, parent_order_id, child_order_id, link_type, created_by)
             VALUES (@linkId, @parent, @child, @type, @by)
             """;
         cmd.Parameters.AddWithValue("@linkId", linkId);

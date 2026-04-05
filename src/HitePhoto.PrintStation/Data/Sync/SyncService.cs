@@ -93,6 +93,15 @@ public class SyncService : ISyncService
                 return await _remoteDb.SetDisplayTabAsync(mariaDbId, displayTab);
             }
 
+            case "set_printed":
+            {
+                var orderId = payload["orderId"].GetString()!;
+                var mariaDbId = await EnsureOrderInMariaDbAsync(orderId);
+                if (mariaDbId == null) return false;
+                var printed = payload["printed"].GetBoolean();
+                return await _remoteDb.SetOrderPrintedAsync(mariaDbId, printed);
+            }
+
             case "update_status":
             {
                 var orderId = payload["orderId"].GetString()!;

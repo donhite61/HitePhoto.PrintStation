@@ -315,8 +315,7 @@ public class OrderVerifier : IOrderVerifier
 
     private void InsertDakisFromDisk(string externalOrderId, string dir)
     {
-        var dakisIngest = _dakisIngest;
-        dakisIngest.IngestOrder(externalOrderId, dir);
+        _dakisIngest.IngestOrder(externalOrderId, dir);
     }
 
     // ── Folder scanning ──

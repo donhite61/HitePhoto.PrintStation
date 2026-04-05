@@ -9,3 +9,10 @@ public enum DisplayTab
     Printed = 2,
     PendingAllStores = 3
 }
+
+public static class DisplayTabExtensions
+{
+    /// <summary>Map printed state to display_tab. Does NOT handle PendingAllStores (shared parents).</summary>
+    public static int FromPrinted(bool printed) =>
+        (int)(printed ? DisplayTab.Printed : DisplayTab.Pending);
+}

@@ -969,7 +969,7 @@ public class PrintStationDb
             var rows = await conn.ExecuteAsync(sql, new
             {
                 Val = printed ? 1 : 0,
-                Tab = displayTab ?? (printed ? (int)Core.Models.DisplayTab.Printed : (int)Core.Models.DisplayTab.Pending),
+                Tab = displayTab ?? Core.Models.DisplayTabExtensions.FromPrinted(printed),
                 Id = mariaDbOrderId
             });
             return rows > 0;
