@@ -17,10 +17,11 @@ public class PixfizzIngestService
 {
     private readonly OhdApiSource _apiSource;
     private readonly PixfizzArtworkDownloader _downloader;
+    public PixfizzOrderParser Parser => _parser;
     private readonly PixfizzOrderParser _parser;
     private readonly OhdReceivedPusher _receivedPusher;
     private readonly IngestOrderWriter _writer;
-    private readonly IOrderVerifier _verifier;
+    private readonly Lazy<IOrderVerifier> _verifier;
     private readonly IOrderRepository _orders;
     private readonly AppSettings _settings;
 
@@ -30,7 +31,7 @@ public class PixfizzIngestService
         PixfizzOrderParser parser,
         OhdReceivedPusher receivedPusher,
         IngestOrderWriter writer,
-        IOrderVerifier verifier,
+        Lazy<IOrderVerifier> verifier,
         IOrderRepository orders,
         AppSettings settings)
     {
@@ -148,12 +149,42 @@ public class PixfizzIngestService
         _writer.WriteToSqlite(order, _settings.StoreId, "pixfizz", order.FolderPath ?? "");
     }
 
+    /// <summary>
+    /// Parse and ingest a Pixfizz order from disk. Called by both the download
+    /// pipeline and Verify (single code path for all Pixfizz ingest).
+    /// </summary>
+    public void IngestFromDisk(string folderPath)
+    {
+        var orderNumber = Path.GetFileName(folderPath);
+        var txtPath = Path.Combine(folderPath, "darkroom_ticket.txt");
+        if (!File.Exists(txtPath))
+        {
+            AlertCollector.Error(AlertCategory.DataQuality,
+                $"Pixfizz darkroom_ticket.txt missing",
+                orderId: orderNumber,
+                detail: $"Attempted: read TXT from '{txtPath}'. Expected: file exists. " +
+                        $"Found: file missing. Context: order {orderNumber}. " +
+                        $"State: cannot parse order without TXT.");
+            return;
+        }
+
+        var txtContent = File.ReadAllText(txtPath);
+        var raw = new RawOrder(
+            ExternalOrderId: orderNumber,
+            SourceName: "pixfizz",
+            RawData: txtContent,
+            Metadata: new Dictionary<string, string> { ["folder_path"] = folderPath });
+
+        var order = _parser.Parse(raw);
+        _writer.WriteToSqlite(order, _settings.StoreId, "pixfizz", order.FolderPath ?? "");
+    }
+
     private void VerifyAndRepair(string orderNumber, string folderPath)
     {
         var existingId = _orders.FindOrderId(orderNumber, _settings.StoreId);
         if (existingId == null) return;
 
-        _verifier.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId);
+        _verifier.Value.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId);
     }
 
     /// <summary>

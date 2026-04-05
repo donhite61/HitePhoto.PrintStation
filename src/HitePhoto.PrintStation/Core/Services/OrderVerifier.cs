@@ -19,7 +19,7 @@ public class OrderVerifier : IOrderVerifier
     private readonly IOrderRepository _orders;
     private readonly IFilesNeededDecision _filesNeededDecision;
     private readonly DakisIngestService _dakisIngest;
-    private readonly PixfizzOrderParser _pixfizzParser;
+    private readonly PixfizzIngestService _pixfizzIngest;
     private readonly AppSettings _settings;
 
     public OrderVerifier(
@@ -27,14 +27,14 @@ public class OrderVerifier : IOrderVerifier
         IHistoryRepository history,
         IFilesNeededDecision filesNeededDecision,
         DakisIngestService dakisIngest,
-        PixfizzOrderParser pixfizzParser,
+        PixfizzIngestService pixfizzIngest,
         AppSettings settings)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         // history parameter kept for DI compatibility but no longer used — verify events go to AppLog
         _filesNeededDecision = filesNeededDecision ?? throw new ArgumentNullException(nameof(filesNeededDecision));
         _dakisIngest = dakisIngest ?? throw new ArgumentNullException(nameof(dakisIngest));
-        _pixfizzParser = pixfizzParser ?? throw new ArgumentNullException(nameof(pixfizzParser));
+        _pixfizzIngest = pixfizzIngest ?? throw new ArgumentNullException(nameof(pixfizzIngest));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
@@ -194,7 +194,7 @@ public class OrderVerifier : IOrderVerifier
                 RawData: txtContent,
                 Metadata: new Dictionary<string, string> { ["folder_path"] = folderPath });
 
-            var parsed = _pixfizzParser.Parse(raw);
+            var parsed = _pixfizzIngest.Parser.Parse(raw);
             return CompareAndRepair(dbOrderId, parsed.Items, "darkroom_ticket.txt");
         }
         catch (Exception ex)
@@ -286,27 +286,7 @@ public class OrderVerifier : IOrderVerifier
 
     private void InsertPixfizzFromDisk(string dir)
     {
-        var txtPath = Path.Combine(dir, "darkroom_ticket.txt");
-        var txtContent = File.ReadAllText(txtPath);
-        var folderName = Path.GetFileName(dir);
-
-        var raw = new RawOrder(
-            ExternalOrderId: folderName,
-            SourceName: "pixfizz",
-            RawData: txtContent,
-            Metadata: new Dictionary<string, string> { ["folder_path"] = dir });
-
-        var order = _pixfizzParser.Parse(raw);
-
-        var existingId = _orders.FindOrderIdAnyStore(order.ExternalOrderId);
-        if (existingId != null)
-        {
-            _orders.SetHarvestedBy(existingId, _settings.StoreId);
-            return;
-        }
-
-        var orderId = _orders.InsertOrder(order, _settings.StoreId);
-        AppLog.Info($"Order {orderId} discovered by verify");
+        _pixfizzIngest.IngestFromDisk(dir);
     }
 
     private void InsertDakisFromDisk(string externalOrderId, string dir)

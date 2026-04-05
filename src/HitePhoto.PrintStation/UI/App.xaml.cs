@@ -105,6 +105,7 @@ public partial class App : Application
 
         // Services
         services.AddSingleton<IOrderVerifier, OrderVerifier>();
+        services.AddSingleton(sp => new Lazy<IOrderVerifier>(() => sp.GetRequiredService<IOrderVerifier>()));
         services.AddSingleton<IHoldService, HoldService>();
         services.AddSingleton<INotificationService>(sp => new NotificationService(
             sp.GetRequiredService<IOrderRepository>(),
