@@ -697,9 +697,11 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.display_tab = 1
+            WHERE (o.display_tab = 1 AND o.harvested_by_store_id = @storeId)
+               OR o.display_tab = 3
             ORDER BY o.ordered_at DESC
             """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
@@ -713,15 +715,17 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
             WHERE o.display_tab = 2
+              AND o.harvested_by_store_id = @storeId
             ORDER BY o.ordered_at DESC
             """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
         return results;
     }
 
-    // Other Store = orders from another store (via sync).
+    // Other Store = orders from another store (via sync), excluding shared parents (display_tab=3).
     // Empty when sync is disabled.
     public List<OrderRow> LoadOtherStoreOrders(int storeId)
     {
@@ -729,9 +733,12 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.display_tab = 3
+            WHERE o.harvested_by_store_id != @storeId
+              AND o.harvested_by_store_id > 0
+              AND o.display_tab NOT IN (2, 3)
             ORDER BY o.ordered_at DESC
             """;
+        cmd.Parameters.AddWithValue("@storeId", storeId);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
@@ -1184,7 +1191,7 @@ public class OrderRepository : IOrderRepository
         {
             using var markDone = conn.CreateCommand();
             markDone.Transaction = transaction;
-            markDone.CommandText = "UPDATE orders SET is_printed = 1, printed_at = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE id = @id";
+            markDone.CommandText = "UPDATE orders SET is_printed = 1, printed_at = datetime('now','localtime'), display_tab = 3, updated_at = datetime('now','localtime') WHERE id = @id";
             markDone.Parameters.AddWithValue("@id", sourceOrderId);
             markDone.ExecuteNonQuery();
         }

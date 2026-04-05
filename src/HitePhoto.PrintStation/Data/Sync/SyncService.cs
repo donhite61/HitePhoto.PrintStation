@@ -584,7 +584,7 @@ public class SyncService : ISyncService
     }
 
     /// <summary>Bind ALL fields for INSERT (new orders from another store). Standalone — not shared with UPDATE.</summary>
-    private void BindPullInsertParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
+    private static void BindPullInsertParams(SqliteCommand cmd, dynamic row, string sourceCode, int orderSourceId, string statusCode, int orderStatusId)
     {
         cmd.Parameters.AddWithValue("@srcId", orderSourceId);
         cmd.Parameters.AddWithValue("@srcCode", sourceCode);
@@ -602,10 +602,9 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@delivery", row.delivery_method_id != null ? (int)row.delivery_method_id : 1);
         cmd.Parameters.AddWithValue("@orderedAt", row.ordered_at != null ? ((DateTime)row.ordered_at).ToString("o") : DateTime.Now.ToString("o"));
         cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
-        int harvestedBy = row.harvested_by_store_id != null ? (int)row.harvested_by_store_id : 0;
-        cmd.Parameters.AddWithValue("@harvestedBy", harvestedBy);
+        cmd.Parameters.AddWithValue("@harvestedBy", row.harvested_by_store_id != null ? (int)row.harvested_by_store_id : 0);
         cmd.Parameters.AddWithValue("@isPrinted", Convert.ToBoolean(row.is_printed) ? 1 : 0);
-        cmd.Parameters.AddWithValue("@displayTab", harvestedBy != _settings.StoreId && harvestedBy > 0 ? 3 : 1);
+        cmd.Parameters.AddWithValue("@displayTab", row.display_tab != null ? (int)row.display_tab : 1);
     }
 
     private void UpsertLocalItem(dynamic item)
