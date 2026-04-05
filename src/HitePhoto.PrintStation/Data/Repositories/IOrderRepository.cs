@@ -24,7 +24,7 @@ public interface IOrderRepository
     /// Insert a new order with items. Returns the new order ID.
     /// Used by both Pixfizz and Dakis ingest.
     /// </summary>
-    string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0);
+    string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0, DateTime? createdAt = null);
 
     /// <summary>
     /// Get all items for an order. Used by verify/repair to compare against source files.

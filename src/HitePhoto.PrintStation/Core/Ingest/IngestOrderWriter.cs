@@ -37,8 +37,18 @@ public class IngestOrderWriter
 
         if (existingId == null)
         {
+            // Use folder's LastWriteTime as received date (preserved across DB wipes).
+            // On first-ever ingest the folder has no stamp yet — use now and stamp it.
+            var receivedAt = DateTime.Now;
+            if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
+            {
+                var folderTime = Directory.GetLastWriteTime(folderPath);
+                if (folderTime > DateTime.MinValue && folderTime < receivedAt)
+                    receivedAt = folderTime;
+            }
+
             var harvestStore = harvestedByStoreId > 0 ? harvestedByStoreId : storeId;
-            var orderId = _orders.InsertOrder(order, storeId, harvestStore);
+            var orderId = _orders.InsertOrder(order, storeId, harvestStore, receivedAt);
             if (string.IsNullOrEmpty(orderId))
             {
                 AlertCollector.Error(AlertCategory.Database,
@@ -53,10 +63,10 @@ public class IngestOrderWriter
             // Ingest events go to AppLog, not operator history
             AppLog.Info($"Inserted {sourceCode} order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
 
-            // Stamp folder LastWriteTime to now (received date) so verify's filesystem
-            // cutoff and DB cutoff (created_at) use the same date
+            // Stamp folder LastWriteTime to match created_at so verify's filesystem
+            // cutoff and DB cutoff use the same date
             if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
-                Directory.SetLastWriteTime(folderPath, DateTime.Now);
+                Directory.SetLastWriteTime(folderPath, receivedAt);
         }
         else
         {

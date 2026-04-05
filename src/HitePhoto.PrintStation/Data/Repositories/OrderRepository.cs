@@ -477,7 +477,7 @@ public class OrderRepository : IOrderRepository
         return result;
     }
 
-    public string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0)
+    public string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0, DateTime? createdAt = null)
     {
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
@@ -496,7 +496,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, harvested_by_store_id
+                    is_test, harvested_by_store_id, created_at
                 ) VALUES (
                     @id, @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
@@ -507,7 +507,7 @@ public class OrderRepository : IOrderRepository
                     @deliveryMethod, @shipFname, @shipLname,
                     @shipAddr1, @shipAddr2, @shipCity,
                     @shipState, @shipZip, @shipCountry, @shipMethod,
-                    @isTest, @harvestStore
+                    @isTest, @harvestStore, @createdAt
                 )
                 """;
             var srcCode = (order.ExternalSource ?? "").ToLowerInvariant();
@@ -543,6 +543,7 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@shipMethod", (object?)order.ShippingMethod ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@isTest", order.ExternalOrderId.StartsWith("TEST-", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
             cmd.Parameters.AddWithValue("@harvestStore", harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
+            cmd.Parameters.AddWithValue("@createdAt", (createdAt ?? DateTime.Now).ToString("O"));
             cmd.ExecuteNonQuery();
         }
 

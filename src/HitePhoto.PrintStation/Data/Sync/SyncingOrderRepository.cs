@@ -25,9 +25,9 @@ public class SyncingOrderRepository : IOrderRepository
 
     // ── Decorated (push after write) ────────────────────────────────────
 
-    public string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0)
+    public string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0, DateTime? createdAt = null)
     {
-        var id = _inner.InsertOrder(order, storeId, harvestedByStoreId);
+        var id = _inner.InsertOrder(order, storeId, harvestedByStoreId, createdAt);
         var payload = JsonSerializer.Serialize(new { localOrderId = id });
         _ = Task.Run(() => _sync.PushAsync("orders", id, "insert_order", payload));
         return id;
