@@ -227,7 +227,7 @@ public class MainViewModel : ViewModelBase
 
             DiffAndPatch(PendingOrders, pending);
             DiffAndPatch(PrintedOrders, printed);
-            DiffAndPatch(OtherStoreOrders, otherStore, fromStore: true);
+            DiffAndPatch(OtherStoreOrders, otherStore);
 
             // Nest child orders under parents (split orders, alterations)
             NestChildOrders(PendingOrders);
@@ -255,7 +255,7 @@ public class MainViewModel : ViewModelBase
     /// In-place diff-and-patch: updates existing tree items instead of clear-and-rebuild.
     /// Preserves WPF selection, expansion, and scroll position.
     /// </summary>
-    private void DiffAndPatch(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders, bool fromStore = false)
+    private void DiffAndPatch(ObservableCollection<OrderTreeItem> target, List<OrderRow> orders)
     {
         var filtered = ApplyFilters(orders);
         var sorted = ApplySort(filtered);
@@ -293,7 +293,7 @@ public class MainViewModel : ViewModelBase
             else
             {
                 // New item — create and insert
-                var treeItem = CreateOrderTreeItem(row, fromStore);
+                var treeItem = CreateOrderTreeItem(row);
                 BuildSizeGroups(treeItem, items);
                 target.Insert(i, treeItem);
             }
@@ -358,7 +358,7 @@ public class MainViewModel : ViewModelBase
         }
     }
 
-    private static OrderTreeItem CreateOrderTreeItem(OrderRow order, bool fromStore = false) => new()
+    private static OrderTreeItem CreateOrderTreeItem(OrderRow order) => new()
     {
         DbId = order.Id,
         ExternalOrderId = order.ExternalOrderId,
@@ -373,7 +373,7 @@ public class MainViewModel : ViewModelBase
         IsHeld = order.IsHeld,
         IsTransfer = order.IsTransfer,
         FolderPath = order.FolderPath,
-        StoreTag = fromStore ? $"From {order.StoreName}" : order.IsTransfer ? "Transferred" : "",
+        StoreTag = order.IsTransfer ? $"From {order.StoreName}" : "",
         IsExpanded = true
     };
 

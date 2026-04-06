@@ -49,10 +49,11 @@ public class IngestOrderWriter
             // Ingest events go to AppLog, not operator history
             AppLog.Info($"Inserted {sourceCode} order {order.ExternalOrderId} (id={orderId}, {order.Items.Count} items)");
 
-            // Stamp folder LastWriteTime to now (received date) so verify's filesystem
+            // Stamp folder LastWriteTime to ordered_at so verify's filesystem
             // cutoff and DB cutoff (created_at) use the same date
+            var stampDate = order.OrderedAt ?? DateTime.Now;
             if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
-                Directory.SetLastWriteTime(folderPath, DateTime.Now);
+                Directory.SetLastWriteTime(folderPath, stampDate);
         }
         else
         {

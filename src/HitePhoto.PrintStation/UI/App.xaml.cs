@@ -163,6 +163,9 @@ public partial class App : Application
 
         Services = services.BuildServiceProvider();
 
+        // Run store-dependent migrations
+        Services.GetRequiredService<OrderDb>().FixLocalProductionFlags(settings.StoreId);
+
         // Wire alert sinks and purge old alerts
         var alertRepo = Services.GetRequiredService<IAlertRepository>();
         AlertCollector.AddSink(new SqliteAlertSink(alertRepo));

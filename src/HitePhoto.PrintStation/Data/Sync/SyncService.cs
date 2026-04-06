@@ -713,12 +713,14 @@ public class SyncService : ISyncService
                     id, order_id, size_label, media_type, quantity,
                     image_filename, image_filepath,
                     options_json, is_printed,
-                    fulfillment_store_id, source_item_id, image_width, image_height
+                    fulfillment_store_id, source_item_id, image_width, image_height,
+                    is_local_production
                 ) VALUES (
                     @itemId, @oid, @size, @media, @qty,
                     @fname, @fpath,
                     @options, @printed,
-                    @fulfillStore, @sourceItem, @imgW, @imgH
+                    @fulfillStore, @sourceItem, @imgW, @imgH,
+                    @isLocal
                 )
                 """;
             cmd.Parameters.AddWithValue("@itemId", Convert.ToString(item.id)!);
@@ -734,6 +736,8 @@ public class SyncService : ISyncService
             cmd.Parameters.AddWithValue("@sourceItem", item.source_item_id != null ? (object)Convert.ToString(item.source_item_id)! : DBNull.Value);
             cmd.Parameters.AddWithValue("@imgW", item.image_width != null ? (object)(int)item.image_width : DBNull.Value);
             cmd.Parameters.AddWithValue("@imgH", item.image_height != null ? (object)(int)item.image_height : DBNull.Value);
+            var fulfillStore = item.fulfillment_store_id != null ? (int)item.fulfillment_store_id : (int?)null;
+            cmd.Parameters.AddWithValue("@isLocal", fulfillStore == _settings.StoreId ? 1 : 0);
             cmd.ExecuteNonQuery();
         }
     }

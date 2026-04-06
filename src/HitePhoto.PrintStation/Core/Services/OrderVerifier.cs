@@ -145,6 +145,11 @@ public class OrderVerifier : IOrderVerifier
     /// </summary>
     public int RepairOrder(string dbOrderId, string folderPath, string sourceCode)
     {
+        // Child orders share the parent's folder — the parent's verify covers the files.
+        // Repairing a child against the parent's source file would add items from other stores.
+        if (_orders.GetParentOrder(dbOrderId) != null)
+            return 0;
+
         int repairs = 0;
         if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
         {

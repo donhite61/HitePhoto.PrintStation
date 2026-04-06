@@ -474,20 +474,19 @@ public partial class MainWindow : Window
     private void ClearAllSelections()
     {
         foreach (var o in _vm.PendingOrders)
-        {
-            o.IsSelected = false;
-            foreach (var s in o.Sizes) s.IsSelected = false;
-        }
+            ClearOrderSelection(o);
         foreach (var o in _vm.PrintedOrders)
-        {
-            o.IsSelected = false;
-            foreach (var s in o.Sizes) s.IsSelected = false;
-        }
+            ClearOrderSelection(o);
         foreach (var o in _vm.OtherStoreOrders)
-        {
-            o.IsSelected = false;
-            foreach (var s in o.Sizes) s.IsSelected = false;
-        }
+            ClearOrderSelection(o);
+    }
+
+    private static void ClearOrderSelection(OrderTreeItem order)
+    {
+        order.IsSelected = false;
+        foreach (var s in order.Sizes) s.IsSelected = false;
+        foreach (var child in order.ChildOrders)
+            ClearOrderSelection(child);
     }
 
     private List<OrderTreeItem> GetSelectedOrders()
@@ -546,7 +545,7 @@ public partial class MainWindow : Window
         DetailStatus.Text = treeItem.StatusCode;
         DetailSource.Text = treeItem.SourceCode;
         DetailStore.Text = treeItem.StoreName;
-        DetailOrderedAt.Text = treeItem.OrderedAt?.ToString("yyyy-MM-dd HH:mm") ?? "";
+        DetailOrderedAt.Text = treeItem.OrderedAt?.ToString("M/d/yyyy h:mm tt") ?? "";
         DetailItemCount.Text = $"{treeItem.TotalImages}";
 
         // Order options (Glossy, Matte, etc.)

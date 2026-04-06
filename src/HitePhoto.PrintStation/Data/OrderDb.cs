@@ -770,6 +770,8 @@ public class OrderDb
             ON order_links(parent_order_id, child_order_id)
             """);
 
+        // Migration 026: see FixLocalProductionFlags — needs store ID, runs after settings loaded.
+
     }
 
     private static void MigrateToGuidPrimaryKeys(SqliteConnection conn)
@@ -1025,6 +1027,38 @@ public class OrderDb
         }
         if (found)
             Execute(conn, $"ALTER TABLE {table} DROP COLUMN {column}");
+    }
+
+    /// <summary>
+    /// Fix is_local_production based on fulfillment_store_id for existing items.
+    /// Must be called after settings are loaded so we know the local store ID.
+    /// </summary>
+    public void FixLocalProductionFlags(int localStoreId)
+    {
+        using var conn = OpenConnection();
+        Execute(conn, """
+            CREATE TABLE IF NOT EXISTS migrations_applied (
+                id TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+            )
+            """);
+        using var check = conn.CreateCommand();
+        check.CommandText = "SELECT 1 FROM migrations_applied WHERE id = '026_fix_local_production'";
+        if (check.ExecuteScalar() != null) return;
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE order_items SET is_local_production = 0
+            WHERE fulfillment_store_id IS NOT NULL
+              AND fulfillment_store_id != @storeId;
+            UPDATE order_items SET is_local_production = 1
+            WHERE fulfillment_store_id = @storeId;
+            """;
+        cmd.Parameters.AddWithValue("@storeId", localStoreId);
+        cmd.ExecuteNonQuery();
+
+        Execute(conn, "INSERT OR IGNORE INTO migrations_applied (id) VALUES ('026_fix_local_production')");
+        AppLog.Info($"Migration 026: fixed is_local_production for store {localStoreId}");
     }
 
     private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)
