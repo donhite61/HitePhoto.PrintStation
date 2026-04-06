@@ -664,6 +664,8 @@
                             <Button Content="Open Log File" Width="120" Click="OpenLog_Click"/>
                             <Button Content="Clear Log" Width="90" Margin="8,0,0,0" Click="ClearLog_Click"/>
                             <Button Content="Alert History" Width="110" Margin="8,0,0,0" Click="AlertHistory_Click"/>
+                            <Button Content="Send Logs to NAS" Width="140" Margin="8,0,0,0" Click="SendLogs_Click"/>
+                            <TextBlock x:Name="SendLogsStatus" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11"/>
                         </StackPanel>
 
                         <TextBlock Text="Database" Foreground="{DynamicResource TextHeading}"

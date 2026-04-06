@@ -80,8 +80,10 @@ public class SyncService : ISyncService
             {
                 var orderId = payload["orderId"].GetString()!;
                 if (VerifyOrderExists(orderId) == null) return false;
+                var mariaDbId = await EnsureOrderInMariaDbAsync(orderId);
+                if (mariaDbId == null) return false;
                 var isHeld = payload["isHeld"].GetBoolean();
-                return await _remoteDb.ToggleHoldAsync(orderId, isHeld);
+                return await _remoteDb.ToggleHoldAsync(mariaDbId, isHeld);
             }
 
             case "set_display_tab":
@@ -106,16 +108,20 @@ public class SyncService : ISyncService
             {
                 var orderId = payload["orderId"].GetString()!;
                 if (VerifyOrderExists(orderId) == null) return false;
+                var mariaDbId = await EnsureOrderInMariaDbAsync(orderId);
+                if (mariaDbId == null) return false;
                 var statusCode = payload["statusCode"].GetString()!;
                 var statusId = SyncMapper.StatusCodeToStatusId(statusCode);
-                return await _remoteDb.UpdateOrderStatusAsync(orderId, statusId);
+                return await _remoteDb.UpdateOrderStatusAsync(mariaDbId, statusId);
             }
 
             case "set_notified":
             {
                 var orderId = payload["orderId"].GetString()!;
                 if (VerifyOrderExists(orderId) == null) return false;
-                return await _remoteDb.UpdateOrderStatusAsync(orderId, 5); // notified
+                var mariaDbId = await EnsureOrderInMariaDbAsync(orderId);
+                if (mariaDbId == null) return false;
+                return await _remoteDb.UpdateOrderStatusAsync(mariaDbId, 5); // notified
             }
 
             case "set_items_printed":
@@ -140,8 +146,10 @@ public class SyncService : ISyncService
             {
                 var orderId = payload["orderId"].GetString()!;
                 if (VerifyOrderExists(orderId) == null) return false;
+                var mariaDbId = await EnsureOrderInMariaDbAsync(orderId);
+                if (mariaDbId == null) return false;
                 var note = payload["note"].GetString()!;
-                var mariaDbNoteId = await _remoteDb.AddNoteAsync(orderId, null, note);
+                var mariaDbNoteId = await _remoteDb.AddNoteAsync(mariaDbId, null, note);
                 if (string.IsNullOrEmpty(mariaDbNoteId)) return false;
 
                 // Set remote_id on the local note so sync pull won't duplicate it.

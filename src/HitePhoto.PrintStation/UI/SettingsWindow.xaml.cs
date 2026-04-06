@@ -834,6 +834,20 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void SendLogs_Click(object sender, RoutedEventArgs e)
+    {
+        SendLogsStatus.Text = "Sending...";
+        try
+        {
+            var result = await Task.Run(() => SftpAlertSink.SendLogsNow(_settings));
+            SendLogsStatus.Text = result;
+        }
+        catch (Exception ex)
+        {
+            SendLogsStatus.Text = $"Failed: {ex.Message}";
+        }
+    }
+
     private async void Publish_Click(object sender, RoutedEventArgs e)
     {
         // Find publish.ps1 — walk up from exe dir

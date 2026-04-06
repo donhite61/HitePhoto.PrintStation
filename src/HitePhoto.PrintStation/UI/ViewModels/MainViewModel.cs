@@ -36,6 +36,9 @@ public class MainViewModel : ViewModelBase
     public ObservableCollection<OrderTreeItem> PrintedOrders { get; } = new();
     public ObservableCollection<OrderTreeItem> OtherStoreOrders { get; } = new();
 
+    /// <summary>When true, Other Store tab only shows orders for pickup at this store.</summary>
+    public bool OtherStorePickupHereOnly { get; set; }
+
     private Dictionary<int, string> _channelNames = new();
     private bool _csvChannelNamesLoaded;
     private Dictionary<string, int> _channelByRoutingKey = new();
@@ -224,6 +227,12 @@ public class MainViewModel : ViewModelBase
             var pending = _orders.LoadPendingOrders(_settings.StoreId);
             var printed = _orders.LoadPrintedOrders(_settings.StoreId);
             var otherStore = _orders.LoadOtherStoreOrders(_settings.StoreId);
+
+            if (OtherStorePickupHereOnly)
+            {
+                var localStore = GetLocalStoreName();
+                otherStore = otherStore.Where(o => string.Equals(o.StoreName, localStore, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
 
             DiffAndPatch(PendingOrders, pending);
             DiffAndPatch(PrintedOrders, printed);

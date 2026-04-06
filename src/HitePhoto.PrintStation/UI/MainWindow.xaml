@@ -327,7 +327,16 @@
                                   ScrollViewer.CanContentScroll="True"/>
                     </TabItem>
 
-                    <TabItem x:Name="OtherStoreTab" Header="Other Store">
+                    <TabItem x:Name="OtherStoreTab">
+                        <TabItem.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="OtherStoreLabel" Text="Other Store" VerticalAlignment="Center"/>
+                                <CheckBox x:Name="PickupHereCheck" VerticalAlignment="Center"
+                                          Margin="8,0,0,0"
+                                          Checked="PickupHereCheck_Changed"
+                                          Unchecked="PickupHereCheck_Changed"/>
+                            </StackPanel>
+                        </TabItem.Header>
                         <TreeView x:Name="OtherStoreTree"
                                   PreviewMouseLeftButtonDown="Tree_PreviewMouseDown"
                                   VirtualizingPanel.IsVirtualizing="True"

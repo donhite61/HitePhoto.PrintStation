@@ -89,6 +89,9 @@ public partial class MainWindow : Window
         PrintedTree.ItemsSource = _vm.PrintedOrders;
         OtherStoreTree.ItemsSource = _vm.OtherStoreOrders;
 
+        // Set checkbox label to current store name (e.g. "WB" or "BH")
+        PickupHereCheck.Content = _vm.GetLocalStoreName();
+
         // Refresh timer — sync → scan → poll → load
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds) };
         _refreshTimer.Tick += async (_, _) =>
@@ -235,6 +238,13 @@ public partial class MainWindow : Window
         UpdateTabHeaders();
     }
 
+    private void PickupHereCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        _vm.OtherStorePickupHereOnly = PickupHereCheck.IsChecked == true;
+        _vm.LoadOrders();
+        UpdateTabHeaders();
+    }
+
     private void UpdateTabHeaders()
     {
         var hasSearch = !string.IsNullOrWhiteSpace(_vm.SearchText);
@@ -244,7 +254,7 @@ public partial class MainWindow : Window
 
         PendingTab.Header = hasSearch && pc > 0 ? $"Pending Orders ({pc})" : "Pending Orders";
         PrintedTab.Header = hasSearch && prc > 0 ? $"Printed Orders ({prc})" : "Printed Orders";
-        OtherStoreTab.Header = hasSearch && oc > 0 ? $"Other Store ({oc})" : "Other Store";
+        OtherStoreLabel.Text = hasSearch && oc > 0 ? $"Other Store ({oc})" : "Other Store";
     }
 
     private void DrainAlerts()

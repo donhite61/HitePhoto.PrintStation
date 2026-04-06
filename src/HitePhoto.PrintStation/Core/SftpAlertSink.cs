@@ -201,6 +201,83 @@ public sealed class SftpAlertSink : IAlertSink, IDisposable
         }
     }
 
+    /// <summary>
+    /// Send the current log file to NAS on demand. Tries direct file copy first;
+    /// falls back to SFTP if the NAS path isn't reachable.
+    /// Returns a status message for the UI.
+    /// </summary>
+    public static string SendLogsNow(AppSettings settings)
+    {
+        var logPath = AppLog.CurrentLogPath;
+        if (!File.Exists(logPath))
+            return "No log file found.";
+
+        var storeCode = settings.StoreId == 1 ? "BH" : "WB";
+
+        // Try NAS direct copy first
+        if (!string.IsNullOrWhiteSpace(settings.NasLogFolder))
+        {
+            try
+            {
+                Directory.CreateDirectory(settings.NasLogFolder);
+                var destPath = Path.Combine(settings.NasLogFolder, "printstation.log");
+                using var src = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var dst = new FileStream(destPath, FileMode.Create, FileAccess.Write);
+                src.CopyTo(dst);
+
+                // Also copy rotated log if it exists
+                var rotatedPath = logPath + ".1";
+                if (File.Exists(rotatedPath))
+                {
+                    var rotatedDest = Path.Combine(settings.NasLogFolder, "printstation.log.1");
+                    File.Copy(rotatedPath, rotatedDest, overwrite: true);
+                }
+
+                AppLog.Info($"SendLogsNow: copied log to {destPath}");
+                return $"Sent to {destPath}";
+            }
+            catch (Exception ex)
+            {
+                AppLog.Info($"SendLogsNow: NAS copy failed ({ex.Message}), trying SFTP...");
+            }
+        }
+
+        // Fallback: SFTP
+        if (string.IsNullOrWhiteSpace(settings.UpdateSftpHost)
+            || string.IsNullOrWhiteSpace(settings.UpdateSftpFolder))
+            return "NAS path failed and no SFTP configured.";
+
+        try
+        {
+            var basePath = settings.UpdateSftpFolder;
+            var updatesIdx = basePath.IndexOf("/updates/PrintStation", StringComparison.OrdinalIgnoreCase);
+            var root = updatesIdx >= 0 ? basePath[..updatesIdx] : basePath;
+            var remoteLogPath = $"{root}/logs/PrintStation/{storeCode}/printstation.log";
+            var remoteLogDir = $"{root}/logs/PrintStation/{storeCode}";
+
+            using var client = new SftpClient(
+                settings.UpdateSftpHost, settings.UpdateSftpPort,
+                settings.UpdateSftpUsername, settings.UpdateSftpPassword);
+            client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(15);
+            client.OperationTimeout = TimeSpan.FromSeconds(30);
+            client.Connect();
+
+            EnsureSftpDirectory(client, remoteLogDir);
+
+            using var logStream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            client.UploadFile(logStream, remoteLogPath);
+
+            client.Disconnect();
+            AppLog.Info($"SendLogsNow: uploaded log via SFTP to {remoteLogPath}");
+            return $"Sent via SFTP to {remoteLogPath}";
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"SendLogsNow: SFTP upload failed: {ex.Message}");
+            return $"Failed: {ex.Message}";
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

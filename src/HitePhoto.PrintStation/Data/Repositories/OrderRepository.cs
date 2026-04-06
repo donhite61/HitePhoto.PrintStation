@@ -877,8 +877,9 @@ public class OrderRepository : IOrderRepository
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        // Only update if value differs — prevents no-op sync pushes during verify
-        cmd.CommandText = "UPDATE orders SET display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id AND display_tab != @tab";
+        // Only update if value differs AND order hasn't been printed — verify re-ingest must not
+        // reset a printed order's display_tab back to PendingAllStores (3)
+        cmd.CommandText = "UPDATE orders SET display_tab = @tab, updated_at = datetime('now','localtime') WHERE id = @id AND display_tab != @tab AND is_printed = 0";
         cmd.Parameters.AddWithValue("@tab", displayTab);
         cmd.Parameters.AddWithValue("@id", orderId);
         cmd.ExecuteNonQuery();
