@@ -66,7 +66,7 @@ public class MainViewModel : ViewModelBase
         set { SetField(ref _sourceFilter, value); }
     }
 
-    private string _sortMode = "Date Received";
+    private string _sortMode = "Date Ordered";
     public string SortMode
     {
         get => _sortMode;
@@ -584,7 +584,7 @@ public class MainViewModel : ViewModelBase
             "Customer Name" => orders.OrderBy(o => o.CustomerLastName, StringComparer.OrdinalIgnoreCase)
                                      .ThenBy(o => o.CustomerFirstName, StringComparer.OrdinalIgnoreCase).ToList(),
             "Order ID" => orders.OrderByDescending(o => o.ExternalOrderId).ToList(),
-            _ => orders.OrderByDescending(o => o.CreatedAt ?? "").ToList()
+            _ => orders.OrderByDescending(o => o.OrderedAt ?? "").ToList()
         };
     }
 

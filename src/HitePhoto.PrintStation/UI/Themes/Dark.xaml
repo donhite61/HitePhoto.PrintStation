@@ -37,4 +37,5 @@
     <SolidColorBrush x:Key="TabHoverBg"      Color="#2A2A2A"/>
     <SolidColorBrush x:Key="HeldBg"          Color="#3A2A1A"/>
     <SolidColorBrush x:Key="MissingBg"       Color="#3A1A1A"/>
+    <SolidColorBrush x:Key="ParentBrown"    Color="#C4A06A"/>
 </ResourceDictionary>

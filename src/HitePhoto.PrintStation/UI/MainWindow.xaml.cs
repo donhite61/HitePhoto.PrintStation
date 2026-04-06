@@ -892,7 +892,7 @@ public partial class MainWindow : Window
         if (_vm == null) return;
         if (SortCombo.SelectedItem is ComboBoxItem item)
         {
-            _vm.SortMode = item.Content?.ToString() ?? "Date Received";
+            _vm.SortMode = item.Content?.ToString() ?? "Date Ordered";
             _vm.LoadOrders();
         }
     }
@@ -1306,6 +1306,10 @@ public partial class MainWindow : Window
             orders = new List<OrderTreeItem> { _selectedOrderItem };
         if (orders.Count == 0) return;
 
+        // Block printing from parent orders — work from child orders instead
+        orders = orders.Where(o => !o.IsParentOrder).ToList();
+        if (orders.Count == 0) return;
+
         // Size filter only applies when printing a single order with specific sizes selected
         var selectedSizes = GetSelectedSizes();
         var sizeFilter = orders.Count == 1 && selectedSizes.Count > 0
@@ -1377,6 +1381,7 @@ public partial class MainWindow : Window
     private void ChangeSizeButton_Click(object sender, RoutedEventArgs e)
     {
         if (_selectedOrderItem == null || _selectedSizeItem == null) return;
+        if (_selectedOrderItem.IsParentOrder) return;
 
         var order = _selectedOrderItem.Order;
         if (order == null)

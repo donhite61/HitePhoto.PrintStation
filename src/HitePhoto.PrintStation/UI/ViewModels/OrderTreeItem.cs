@@ -87,6 +87,9 @@ public class SizeTreeItem : INotifyPropertyChanged
         set { _isSelected = value; OnPropertyChanged(); }
     }
 
+    /// <summary>True if this size belongs to a parent order (not printable, reference only).</summary>
+    public bool IsParentSize => ParentOrder?.IsParentOrder == true;
+
     // ── Computed display properties ──
 
     public string DisplayLabel =>

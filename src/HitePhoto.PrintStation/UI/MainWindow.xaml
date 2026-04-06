@@ -133,6 +133,12 @@
                 </StackPanel>
             </Border>
             <HierarchicalDataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsParentOrder}" Value="True">
+                    <Setter TargetName="NameText" Property="Foreground" Value="{DynamicResource ParentBrown}"/>
+                    <Setter TargetName="NameText" Property="FontSize" Value="12"/>
+                    <Setter TargetName="NameText" Property="FontWeight" Value="Normal"/>
+                    <Setter TargetName="SrcTag" Property="Foreground" Value="{DynamicResource ParentBrown}"/>
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsHeld}" Value="True">
                     <Setter TargetName="SelectionBorder" Property="Background" Value="#D32F2F"/>
                     <Setter TargetName="NameText" Property="Foreground" Value="White"/>
@@ -164,6 +170,10 @@
                            Visibility="Collapsed"/>
             </StackPanel>
             <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsParentSize}" Value="True">
+                    <Setter TargetName="SzText" Property="Foreground" Value="{DynamicResource ParentBrown}"/>
+                    <Setter TargetName="SzText" Property="FontSize" Value="11"/>
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsUnmapped}" Value="True">
                     <Setter TargetName="SzText" Property="Foreground" Value="{DynamicResource TextMuted}"/>
                 </DataTrigger>
@@ -272,8 +282,7 @@
                 <ComboBox x:Name="SortCombo" Width="120" FontSize="11"
                           VerticalAlignment="Center"
                           SelectionChanged="SortCombo_SelectionChanged">
-                    <ComboBoxItem Content="Date Received" IsSelected="True"/>
-                    <ComboBoxItem Content="Date Ordered"/>
+                    <ComboBoxItem Content="Date Ordered" IsSelected="True"/>
                     <ComboBoxItem Content="Date Printed"/>
                     <ComboBoxItem Content="Customer Name"/>
                     <ComboBoxItem Content="Order ID"/>

@@ -40,4 +40,5 @@
     <SolidColorBrush x:Key="AlertPanelBg"   Color="#F8F0F0"/>
     <SolidColorBrush x:Key="AlertErrorBg"   Color="#FFEBEE"/>
     <SolidColorBrush x:Key="AlertWarnBg"    Color="#FFF8E1"/>
+    <SolidColorBrush x:Key="ParentBrown"    Color="#A0845A"/>
 </ResourceDictionary>
