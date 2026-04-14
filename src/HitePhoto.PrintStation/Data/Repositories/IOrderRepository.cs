@@ -24,7 +24,7 @@ public interface IOrderRepository
     /// Insert a new order with items. Returns the new order ID.
     /// Used by both Pixfizz and Dakis ingest.
     /// </summary>
-    string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0);
+    string InsertOrder(UnifiedOrder order, int storeId, int currentLocationStoreId = 0);
 
     /// <summary>
     /// Get all items for an order. Used by verify/repair to compare against source files.
@@ -95,20 +95,17 @@ public interface IOrderRepository
     /// <summary>Batch update file_status on order_items. 0=unchecked, 1=OK, -1=error.</summary>
     void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates);
 
-    /// <summary>Pending tab: harvested here + not printed. See feedback_tab_query_locked.md.</summary>
+    /// <summary>Pending tab: located here + not printed. See feedback_tab_query_locked.md.</summary>
     List<OrderRow> LoadPendingOrders(int storeId);
 
-    /// <summary>Printed tab: harvested here + printed. See feedback_tab_query_locked.md.</summary>
+    /// <summary>Printed tab: located here + printed. See feedback_tab_query_locked.md.</summary>
     List<OrderRow> LoadPrintedOrders(int storeId);
 
-    /// <summary>Other Store tab: harvested at another store. Empty when sync disabled.</summary>
+    /// <summary>Other Store tab: located at another store. Empty when sync disabled.</summary>
     List<OrderRow> LoadOtherStoreOrders(int storeId);
 
     /// <summary>Batch-load items for multiple orders. Keyed by order ID.</summary>
     Dictionary<string, List<ItemRow>> BatchLoadItems(List<string> orderIds);
-
-    /// <summary>Set harvested_by_store_id flag (1 = this machine ingested the order).</summary>
-    void SetHarvestedBy(string orderId, int storeId);
 
     /// <summary>Set source_item_id on child items by matching size_label + image_filename to parent items.</summary>
     void LinkChildItemsToParent(string parentOrderId, string childOrderId);

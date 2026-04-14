@@ -7,7 +7,7 @@ public interface ISyncService
     /// <summary>
     /// Push a single change to MariaDB. Returns true if pushed successfully,
     /// false if queued in sync_outbox for retry.
-    /// Only pushes if the order's pickup_store_id matches settings.StoreId.
+    /// Only pushes insert_order if the order's current_location_store_id matches settings.StoreId.
     /// </summary>
     Task<bool> PushAsync(string tableName, string recordId, string operation, string payloadJson);
 

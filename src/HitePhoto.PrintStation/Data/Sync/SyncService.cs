@@ -34,13 +34,20 @@ public class SyncService : ISyncService
     {
         try
         {
-            // Only the pickup store pushes new order inserts (prevents duplicates).
-            // All other operations (hold, status, notes, printed) push from any store.
+            // Only the store where the order is located pushes new order inserts (prevents duplicates).
             if (operation == "insert_order")
             {
                 var orderId = GetOrderIdFromPayload(payloadJson);
-                if (!string.IsNullOrEmpty(orderId) && !IsOurOrder(orderId))
-                    return true; // not our order to insert — treat as success
+                if (!string.IsNullOrEmpty(orderId))
+                {
+                    using var conn = _localDb.OpenConnection();
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "SELECT current_location_store_id FROM orders WHERE id = @id";
+                    cmd.Parameters.AddWithValue("@id", orderId);
+                    var result = cmd.ExecuteScalar();
+                    if (result != null && Convert.ToInt32(result) != _settings.StoreId)
+                        return true; // order is at another store — skip
+                }
             }
 
             var success = await ExecutePushAsync(operation, payloadJson);
@@ -217,7 +224,7 @@ public class SyncService : ISyncService
                    total_amount, is_held, is_transfer, transfer_store_id,
                    special_instructions, folder_path, delivery_method_id,
                    ordered_at, pixfizz_job_id, download_status, source_code,
-                   harvested_by_store_id, is_printed, display_tab
+                   current_location_store_id, is_printed, display_tab
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", localOrderId);
@@ -248,7 +255,7 @@ public class SyncService : ISyncService
             deliveryMethodId: reader.GetInt32(14),
             orderedAt: reader.IsDBNull(15) ? null : reader.GetString(15),
             pixfizzJobId: reader.IsDBNull(16) ? null : reader.GetString(16),
-            harvestedByStoreId: reader.GetInt32(19),
+            currentLocationStoreId: reader.GetInt32(19),
             isPrinted: reader.GetInt32(20) == 1,
             displayTab: reader.GetInt32(21));
         reader.Close();
@@ -365,14 +372,13 @@ public class SyncService : ISyncService
                 try
                 {
                     var externalOrderId = (string)row.external_order_id;
-                    var pickupStoreId = (int)row.pickup_store_id;
                     var mariaDbOrderId = Convert.ToString(row.id)!;
 
                     if (pendingOrderIds.Contains(mariaDbOrderId))
                         continue;
 
                     // Check if order already exists locally
-                    var existingLocalId = FindLocalOrderId(externalOrderId, pickupStoreId);
+                    var existingLocalId = FindLocalOrderId(externalOrderId);
                     UpsertLocalOrder(row, existingLocalId);
                     pulledMariaDbOrderIds.Add(mariaDbOrderId);
                 }
@@ -520,13 +526,12 @@ public class SyncService : ISyncService
         }
     }
 
-    private string? FindLocalOrderId(string externalOrderId, int pickupStoreId)
+    private string? FindLocalOrderId(string externalOrderId)
     {
         using var conn = _localDb.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id FROM orders WHERE external_order_id = @eid AND pickup_store_id = @store";
+        cmd.CommandText = "SELECT id FROM orders WHERE external_order_id = @eid";
         cmd.Parameters.AddWithValue("@eid", externalOrderId);
-        cmd.Parameters.AddWithValue("@store", pickupStoreId);
         var result = cmd.ExecuteScalar();
         return result != null ? Convert.ToString(result) : null;
     }
@@ -593,7 +598,7 @@ public class SyncService : ISyncService
                     customer_first_name, customer_last_name, customer_email, customer_phone,
                     total_amount, is_held, is_transfer, transfer_store_id,
                     special_instructions, folder_path, delivery_method_id, ordered_at,
-                    harvested_by_store_id, is_printed, display_tab,
+                    current_location_store_id, is_printed, display_tab,
                     created_at, updated_at
                 ) VALUES (
                     @id, @eid, @store, @srcId, @srcCode,
@@ -601,7 +606,7 @@ public class SyncService : ISyncService
                     @fname, @lname, @email, @phone,
                     @total, @held, @transfer, @transferStore,
                     @instructions, @folder, @delivery, @orderedAt,
-                    @harvestedBy, @isPrinted, @displayTab,
+                    @locationStore, @isPrinted, @displayTab,
                     @createdAt, @updatedAt
                 )
                 """;
@@ -634,7 +639,7 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@delivery", row.delivery_method_id != null ? (int)row.delivery_method_id : 1);
         cmd.Parameters.AddWithValue("@orderedAt", row.ordered_at != null ? ((DateTime)row.ordered_at).ToString("o") : DateTime.Now.ToString("o"));
         cmd.Parameters.AddWithValue("@folder", (string?)row.folder_path ?? "");
-        cmd.Parameters.AddWithValue("@harvestedBy", row.harvested_by_store_id != null ? (int)row.harvested_by_store_id : 0);
+        cmd.Parameters.AddWithValue("@locationStore", row.current_location_store_id != null ? (int)row.current_location_store_id : 0);
         cmd.Parameters.AddWithValue("@isPrinted", Convert.ToBoolean(row.is_printed) ? 1 : 0);
         cmd.Parameters.AddWithValue("@displayTab", row.display_tab != null ? (int)row.display_tab : (int)Core.Models.DisplayTab.Pending);
     }
@@ -922,17 +927,6 @@ public class SyncService : ISyncService
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────
-
-    private bool IsOurOrder(string localOrderId)
-    {
-        using var conn = _localDb.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT pickup_store_id FROM orders WHERE id = @id";
-        cmd.Parameters.AddWithValue("@id", localOrderId);
-        var result = cmd.ExecuteScalar();
-        if (result == null) return false;
-        return Convert.ToInt32(result) == _settings.StoreId;
-    }
 
     /// <summary>Verify the order exists locally. Returns the order ID if found, null otherwise.</summary>
     private string? VerifyOrderExists(string orderId)

@@ -220,13 +220,12 @@ public class OrderRepository : IOrderRepository
         return (string?)cmd.ExecuteScalar() ?? $"store {storeId}";
     }
 
-    public string? FindOrderId(string externalOrderId, int storeId)
+    public string? FindOrderId(string externalOrderId, int storeId = 0)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id FROM orders WHERE external_order_id = @eid AND pickup_store_id = @store";
+        cmd.CommandText = "SELECT id FROM orders WHERE external_order_id = @eid";
         cmd.Parameters.AddWithValue("@eid", externalOrderId);
-        cmd.Parameters.AddWithValue("@store", storeId);
         var result = cmd.ExecuteScalar();
         return result?.ToString();
     }
@@ -468,7 +467,7 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = """
             SELECT o.id, o.external_order_id, o.folder_path, o.source_code
             FROM orders o
-            WHERE o.harvested_by_store_id = @storeId
+            WHERE o.current_location_store_id = @storeId
               AND (@daysBack = 0 OR o.created_at >= @cutoff)
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -486,7 +485,7 @@ public class OrderRepository : IOrderRepository
         return result;
     }
 
-    public string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0)
+    public string InsertOrder(UnifiedOrder order, int storeId, int currentLocationStoreId = 0)
     {
         using var conn = _db.OpenConnection();
         using var transaction = conn.BeginTransaction();
@@ -505,7 +504,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, harvested_by_store_id, created_at
+                    is_test, current_location_store_id, created_at
                 ) VALUES (
                     @id, @eid, @srcId, @srcCode,
                     @fname, @lname, @email, @phone,
@@ -516,7 +515,7 @@ public class OrderRepository : IOrderRepository
                     @deliveryMethod, @shipFname, @shipLname,
                     @shipAddr1, @shipAddr2, @shipCity,
                     @shipState, @shipZip, @shipCountry, @shipMethod,
-                    @isTest, @harvestStore, @createdAt
+                    @isTest, @locationStore, @createdAt
                 )
                 """;
             var srcCode = (order.ExternalSource ?? "").ToLowerInvariant();
@@ -551,7 +550,7 @@ public class OrderRepository : IOrderRepository
             cmd.Parameters.AddWithValue("@shipCountry", (object?)order.ShippingCountry ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@shipMethod", (object?)order.ShippingMethod ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@isTest", order.ExternalOrderId.StartsWith("TEST-", StringComparison.OrdinalIgnoreCase) ? 1 : 0);
-            cmd.Parameters.AddWithValue("@harvestStore", harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
+            cmd.Parameters.AddWithValue("@locationStore", currentLocationStoreId > 0 ? currentLocationStoreId : storeId);
             cmd.Parameters.AddWithValue("@createdAt", order.OrderedAt?.ToString("O") ?? DateTime.Now.ToString("O"));
             cmd.ExecuteNonQuery();
         }
@@ -705,7 +704,7 @@ public class OrderRepository : IOrderRepository
     //  display_tab: 1=Pending (own), 2=Printed, 3=Pending all stores
     //  Pending  = (tab=1 AND own store) OR tab=3 (shared parents)
     //  Printed  = tab=2 AND own store
-    //  Other    = harvested at another store (show everything)
+    //  Other    = located at another store (show everything)
     //
     //  Orders CAN appear on multiple tabs (shared parent on Pending + Other Store).
     // ═══════════════════════════════════════════════════════════════
@@ -716,7 +715,7 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE (o.display_tab = 1 AND o.harvested_by_store_id = @storeId)
+            WHERE (o.display_tab = 1 AND o.current_location_store_id = @storeId)
                OR o.display_tab = 3
             ORDER BY o.ordered_at DESC
             """;
@@ -734,7 +733,7 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
             WHERE o.display_tab = 2
-              AND o.harvested_by_store_id = @storeId
+              AND o.current_location_store_id = @storeId
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -751,8 +750,8 @@ public class OrderRepository : IOrderRepository
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE o.harvested_by_store_id != @storeId
-              AND o.harvested_by_store_id > 0
+            WHERE o.current_location_store_id != @storeId
+              AND o.current_location_store_id > 0
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
@@ -844,15 +843,7 @@ public class OrderRepository : IOrderRepository
         }
     }
 
-    public void SetHarvestedBy(string orderId, int storeId)
-    {
-        using var conn = _db.OpenConnection();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET harvested_by_store_id = @val, updated_at = datetime('now','localtime') WHERE id = @id AND harvested_by_store_id != @val";
-        cmd.Parameters.AddWithValue("@val", storeId);
-        cmd.Parameters.AddWithValue("@id", orderId);
-        cmd.ExecuteNonQuery();
-    }
+
 
     public void LinkChildItemsToParent(string parentOrderId, string childOrderId)
     {
@@ -1180,7 +1171,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, harvested_by_store_id
+                    is_test, current_location_store_id
                 )
                 SELECT
                     @newId, @newEid, order_source_id, source_code,
@@ -1192,7 +1183,7 @@ public class OrderRepository : IOrderRepository
                     delivery_method_id, shipping_first_name, shipping_last_name,
                     shipping_address1, shipping_address2, shipping_city,
                     shipping_state, shipping_zip, shipping_country, shipping_method,
-                    is_test, {(newPickupStoreId.HasValue ? "@newStore" : "harvested_by_store_id")}
+                    is_test, {(newPickupStoreId.HasValue ? "@newStore" : "current_location_store_id")}
                 FROM orders WHERE id = @srcId
                 """;
             copyCmd.Parameters.AddWithValue("@newId", newOrderId);

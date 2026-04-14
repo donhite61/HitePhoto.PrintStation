@@ -5,7 +5,7 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 
 /// <summary>
 /// Shared write-to-SQLite logic for all ingest pipelines.
-/// FindOrderId → InsertOrder. If order exists, sets harvested_by only.
+/// FindOrderId → InsertOrder. If order exists, sets current_location only.
 /// </summary>
 public class IngestOrderWriter
 {
@@ -23,7 +23,7 @@ public class IngestOrderWriter
     /// Insert order if new, then verify. If already exists, just re-verify.
     /// Validates all fields before writing — bad data stops here, not downstream.
     /// </summary>
-    public void WriteToSqlite(UnifiedOrder order, int storeId, string sourceCode, string folderPath, int harvestedByStoreId = 0)
+    public void WriteToSqlite(UnifiedOrder order, int storeId, string sourceCode, string folderPath, int currentLocationStoreId = 0)
     {
         ValidateOrder(order, storeId, sourceCode);
         ValidateItems(order, sourceCode);
@@ -33,8 +33,8 @@ public class IngestOrderWriter
 
         if (existingId == null)
         {
-            var harvestStore = harvestedByStoreId > 0 ? harvestedByStoreId : storeId;
-            var orderId = _orders.InsertOrder(order, storeId, harvestStore);
+            var locationStore = currentLocationStoreId > 0 ? currentLocationStoreId : storeId;
+            var orderId = _orders.InsertOrder(order, storeId, locationStore);
             if (string.IsNullOrEmpty(orderId))
             {
                 AlertCollector.Error(AlertCategory.Database,
@@ -57,7 +57,7 @@ public class IngestOrderWriter
         }
         else
         {
-            _orders.SetHarvestedBy(existingId, harvestedByStoreId > 0 ? harvestedByStoreId : storeId);
+            _orders.SetCurrentLocation(existingId, currentLocationStoreId > 0 ? currentLocationStoreId : storeId);
         }
     }
 

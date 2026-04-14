@@ -25,9 +25,9 @@ public class SyncingOrderRepository : IOrderRepository
 
     // ── Decorated (push after write) ────────────────────────────────────
 
-    public string InsertOrder(UnifiedOrder order, int storeId, int harvestedByStoreId = 0)
+    public string InsertOrder(UnifiedOrder order, int storeId, int currentLocationStoreId = 0)
     {
-        var id = _inner.InsertOrder(order, storeId, harvestedByStoreId);
+        var id = _inner.InsertOrder(order, storeId, currentLocationStoreId);
         var payload = JsonSerializer.Serialize(new { localOrderId = id });
         _ = Task.Run(() => _sync.PushAsync("orders", id, "insert_order", payload));
         return id;
@@ -126,7 +126,6 @@ public class SyncingOrderRepository : IOrderRepository
     public Dictionary<string, List<ItemRow>> BatchLoadItems(List<string> orderIds) => _inner.BatchLoadItems(orderIds);
     public void SetItemsUnprinted(string orderId) => _inner.SetItemsUnprinted(orderId);
     public void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates) => _inner.BatchUpdateFileStatus(updates);
-    public void SetHarvestedBy(string orderId, int storeId) => _inner.SetHarvestedBy(orderId, storeId);
     public void LinkChildItemsToParent(string parentOrderId, string childOrderId) => _inner.LinkChildItemsToParent(parentOrderId, childOrderId);
 
     public void SetDisplayTab(string orderId, int displayTab)

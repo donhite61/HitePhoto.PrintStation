@@ -311,8 +311,7 @@ public class OrderDb
             is_held                   INTEGER NOT NULL DEFAULT 0,
             hold_reason               TEXT DEFAULT NULL,
             pickup_store_id           INTEGER NOT NULL,
-            current_location_store_id INTEGER,
-            harvested_by_store_id     INTEGER NOT NULL DEFAULT 0,
+            current_location_store_id INTEGER NOT NULL DEFAULT 0,
             total_amount              REAL DEFAULT 0,
             payment_status            TEXT DEFAULT '',
             special_instructions      TEXT DEFAULT '',
@@ -343,7 +342,7 @@ public class OrderDb
             display_tab               INTEGER NOT NULL DEFAULT 1,
             created_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             updated_at                TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-            UNIQUE(external_order_id, pickup_store_id)
+            UNIQUE(external_order_id)
         );
         """;
 
@@ -672,7 +671,7 @@ public class OrderDb
         // When set, PrintService scans disk vs DB before printing and offers choice if mismatch.
         AddColumnIfMissing(conn, "orders", "is_externally_modified", "INTEGER NOT NULL DEFAULT 0");
 
-        // Migration 012: harvested_by_store_id — 1 = this machine ingested/harvested the order.
+        // Migration 012: harvested_by_store_id (now dropped — replaced by current_location_store_id in 027).
         // 0 = came from sync (other store's order). Used by Other Store tab + verify.
         AddColumnIfMissing(conn, "orders", "harvested_by_store_id", "INTEGER NOT NULL DEFAULT 0");
 
@@ -771,6 +770,19 @@ public class OrderDb
             """);
 
         // Migration 026: see FixLocalProductionFlags — needs store ID, runs after settings loaded.
+
+        // Migration 027: Drop harvested_by_store_id — replaced by current_location_store_id.
+        // Also change UNIQUE constraint from (external_order_id, pickup_store_id) to (external_order_id).
+        RunOnce(conn, "027_drop_harvested_by", """
+            UPDATE orders SET current_location_store_id = harvested_by_store_id
+            WHERE current_location_store_id IS NULL AND harvested_by_store_id > 0;
+
+            ALTER TABLE orders DROP COLUMN harvested_by_store_id;
+
+            DROP INDEX IF EXISTS sqlite_autoindex_orders_1;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_external_id
+            ON orders(external_order_id);
+            """);
 
     }
 

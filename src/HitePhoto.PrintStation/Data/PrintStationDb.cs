@@ -718,7 +718,7 @@ public class PrintStationDb
         string? shippingCity = null, string? shippingState = null,
         string? shippingZip = null, string? shippingCountry = null,
         string? shippingMethod = null,
-        int harvestedByStoreId = 0, bool isPrinted = false,
+        int currentLocationStoreId = 0, bool isPrinted = false,
         int displayTab = (int)Core.Models.DisplayTab.Pending)
     {
         const string sql = """
@@ -734,10 +734,10 @@ public class PrintStationDb
                  shipping_first_name, shipping_last_name,
                  shipping_address1, shipping_address2, shipping_city,
                  shipping_state, shipping_zip, shipping_country, shipping_method,
-                 harvested_by_store_id, is_printed, display_tab,
+                 is_printed, display_tab,
                  sync_status)
             VALUES
-                (@OrderId, @Eid, @Store, @Store,
+                (@OrderId, @Eid, @Store, @LocationStore,
                  @SourceId, @StatusId,
                  @FirstName, @LastName, @Email, @Phone,
                  @Total, @PaymentStatus,
@@ -748,7 +748,7 @@ public class PrintStationDb
                  @ShipFname, @ShipLname,
                  @ShipAddr1, @ShipAddr2, @ShipCity,
                  @ShipState, @ShipZip, @ShipCountry, @ShipMethod,
-                 @HarvestedBy, @Printed, @DisplayTab,
+                 @Printed, @DisplayTab,
                  'synced')
             ON DUPLICATE KEY UPDATE
                 order_status_id = VALUES(order_status_id),
@@ -778,7 +778,7 @@ public class PrintStationDb
                 shipping_zip = COALESCE(VALUES(shipping_zip), shipping_zip),
                 shipping_country = COALESCE(VALUES(shipping_country), shipping_country),
                 shipping_method = COALESCE(VALUES(shipping_method), shipping_method),
-                harvested_by_store_id = VALUES(harvested_by_store_id),
+                current_location_store_id = VALUES(current_location_store_id),
                 is_printed = VALUES(is_printed),
                 display_tab = VALUES(display_tab),
                 sync_status = 'synced'
@@ -820,21 +820,21 @@ public class PrintStationDb
                 ShipZip = shippingZip,
                 ShipCountry = shippingCountry,
                 ShipMethod = shippingMethod,
-                HarvestedBy = harvestedByStoreId,
+                LocationStore = currentLocationStoreId,
                 Printed = isPrinted ? 1 : 0,
                 DisplayTab = displayTab,
             });
 
             // On duplicate key update, the generated GUID is discarded — query by natural key to get existing id
             var id = await conn.ExecuteScalarAsync<string?>(
-                "SELECT id FROM orders WHERE external_order_id = @Eid AND pickup_store_id = @Store",
-                new { Eid = externalOrderId, Store = pickupStoreId });
+                "SELECT id FROM orders WHERE external_order_id = @Eid",
+                new { Eid = externalOrderId });
 
             if (string.IsNullOrEmpty(id))
             {
                 AlertCollector.Error(AlertCategory.Database,
                     "UpsertOrderAsync: could not retrieve order id after upsert",
-                    detail: $"Attempted: upsert order '{externalOrderId}' store {pickupStoreId}. " +
+                    detail: $"Attempted: upsert order '{externalOrderId}'. " +
                             $"Expected: non-empty id from SELECT. Found: null/empty.");
                 return string.Empty;
             }
