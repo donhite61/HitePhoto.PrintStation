@@ -781,10 +781,6 @@ public class OrderDb
             WHERE current_location_store_id IS NULL AND harvested_by_store_id > 0;
 
             ALTER TABLE orders DROP COLUMN harvested_by_store_id;
-
-            DROP INDEX IF EXISTS sqlite_autoindex_orders_1;
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_external_id
-            ON orders(external_order_id);
             """);
 
     }
