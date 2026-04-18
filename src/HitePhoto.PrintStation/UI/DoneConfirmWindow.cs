@@ -6,22 +6,22 @@ using System.Windows.Media;
 
 namespace HitePhoto.PrintStation.UI;
 
-public enum DoneAction { None, MarkDone, MarkDoneAndEmail }
+public enum DoneAction { None, MarkDone, MarkDoneAndReady }
 
 public class DoneConfirmWindow : Window
 {
     private readonly Button _markDoneBtn;
-    private readonly Button _markDoneEmailBtn;
+    private readonly Button _markDoneReadyBtn;
     private readonly Point _cursorAtCreate;
-    private readonly bool _cursorOverEmail;
+    private readonly bool _cursorOverReady;
 
     public DoneAction Result { get; private set; } = DoneAction.None;
 
-    public DoneConfirmWindow(string customerName, string orderId, bool alreadyDone, bool alreadyEmailed,
-        bool cursorOverEmail = false)
+    public DoneConfirmWindow(string customerName, string orderId, bool alreadyDone, bool alreadyNotified,
+        bool cursorOverReady = false)
     {
         _cursorAtCreate = GetMouseScreenPosition();
-        _cursorOverEmail = cursorOverEmail;
+        _cursorOverReady = cursorOverReady;
 
         Title = "Mark Done";
         Width = 380;
@@ -36,7 +36,7 @@ public class DoneConfirmWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var status = alreadyDone ? " (already done)" : "";
-        var emailStatus = alreadyEmailed ? " (already sent)" : "";
+        var notifiedStatus = alreadyNotified ? " (already sent)" : "";
 
         var msg = new TextBlock
         {
@@ -65,14 +65,14 @@ public class DoneConfirmWindow : Window
         _markDoneBtn.Click += (_, _) => { Result = DoneAction.MarkDone; DialogResult = true; };
         btnPanel.Children.Add(_markDoneBtn);
 
-        _markDoneEmailBtn = new Button
+        _markDoneReadyBtn = new Button
         {
-            Content = $"Printed + Email{emailStatus}",
+            Content = $"Printed + Ready{notifiedStatus}",
             Width = 140,
             Margin = new Thickness(0, 0, 8, 0)
         };
-        _markDoneEmailBtn.Click += (_, _) => { Result = DoneAction.MarkDoneAndEmail; DialogResult = true; };
-        btnPanel.Children.Add(_markDoneEmailBtn);
+        _markDoneReadyBtn.Click += (_, _) => { Result = DoneAction.MarkDoneAndReady; DialogResult = true; };
+        btnPanel.Children.Add(_markDoneReadyBtn);
 
         var cancelBtn = new Button { Content = "Cancel", Width = 80, IsCancel = true };
         cancelBtn.Click += (_, _) => { DialogResult = false; };
@@ -93,7 +93,7 @@ public class DoneConfirmWindow : Window
         double cursorX = _cursorAtCreate.X * dpiScale;
         double cursorY = _cursorAtCreate.Y * dpiScale;
 
-        var targetBtn = _cursorOverEmail ? _markDoneEmailBtn : _markDoneBtn;
+        var targetBtn = _cursorOverReady ? _markDoneReadyBtn : _markDoneBtn;
         var btnScreen = targetBtn.PointToScreen(
             new Point(targetBtn.ActualWidth / 2, targetBtn.ActualHeight / 2));
 

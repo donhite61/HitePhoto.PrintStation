@@ -1024,7 +1024,7 @@ public partial class MainWindow : Window
         if (IsPrintedTabActive)
             MarkSelectedUnprinted();
         else
-            OpenDoneConfirmForSelected(cursorOverEmail: false);
+            OpenDoneConfirmForSelected(cursorOverReady: false);
     }
 
     private void MarkSelectedUnprinted()
@@ -1053,7 +1053,7 @@ public partial class MainWindow : Window
         UpdateStatusBar();
     }
 
-    private void OpenDoneConfirmForSelected(bool cursorOverEmail)
+    private async void OpenDoneConfirmForSelected(bool cursorOverReady)
     {
         var selected = GetSelectedOrders();
         if (selected.Count == 0 && _selectedOrderItem != null)
@@ -1067,12 +1067,12 @@ public partial class MainWindow : Window
             var win = new DoneConfirmWindow(
                 order.CustomerName, order.ExternalOrderId,
                 alreadyDone: order.StatusCode == OrderStatusCode.PickedUp,
-                alreadyEmailed: false,
-                cursorOverEmail: cursorOverEmail)
+                alreadyNotified: order.NotifiedAt.HasValue,
+                cursorOverReady: cursorOverReady)
             { Owner = this };
 
             if (win.ShowDialog() == true)
-                ApplyDoneAction(selected, win.Result);
+                await ApplyDoneAction(selected, win.Result);
         }
         else
         {
@@ -1080,33 +1080,33 @@ public partial class MainWindow : Window
             var names = string.Join(", ", selected.Take(5).Select(o => o.ExternalOrderId));
             if (selected.Count > 5) names += $" +{selected.Count - 5} more";
 
-            var action = cursorOverEmail ? "mark printed + email" : "mark printed";
+            var action = cursorOverReady ? "mark printed + ready" : "mark printed";
             var result = MessageBox.Show(
                 $"{action.ToUpperInvariant()} {selected.Count} orders?\n\n{names}",
                 "Batch Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
 
             if (result == MessageBoxResult.Yes)
-                ApplyDoneAction(selected, cursorOverEmail ? DoneAction.MarkDoneAndEmail : DoneAction.MarkDone);
+                await ApplyDoneAction(selected, cursorOverReady ? DoneAction.MarkDoneAndReady : DoneAction.MarkDone);
         }
 
         _vm.LoadOrders();
         UpdateStatusBar();
     }
 
-    private void ApplyDoneAction(List<OrderTreeItem> orders, DoneAction action)
+    private async Task ApplyDoneAction(List<OrderTreeItem> orders, DoneAction action)
     {
         foreach (var order in orders)
         {
-            if (action == DoneAction.MarkDone || action == DoneAction.MarkDoneAndEmail)
+            if (action == DoneAction.MarkDone || action == DoneAction.MarkDoneAndReady)
             {
                 _vm.MarkDone(order.DbId);
                 order.StatusCode = OrderStatusCode.PickedUp;
             }
-            if (action == DoneAction.MarkDoneAndEmail)
+            if (action == DoneAction.MarkDoneAndReady)
             {
                 try
                 {
-                    _notificationService.NotifyCustomer(order.DbId, "operator");
+                    await _notificationService.NotifyCustomerAsync(order.DbId, "operator");
                 }
                 catch (Exception ex)
                 {
@@ -1116,7 +1116,7 @@ public partial class MainWindow : Window
                         detail: $"Attempted: send notification via NotificationService. " +
                                 $"Expected: customer notified. " +
                                 $"Found: {ex.GetType().Name}. " +
-                                $"Context: ApplyDoneAction with MarkDoneAndEmail. " +
+                                $"Context: ApplyDoneAction with MarkDoneAndReady. " +
                                 $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
                         ex: ex);
                 }
@@ -1124,9 +1124,43 @@ public partial class MainWindow : Window
         }
     }
 
-    private void NotifyButton_Click(object sender, RoutedEventArgs e)
+    private async void MarkReadyButton_Click(object sender, RoutedEventArgs e)
     {
-        OpenDoneConfirmForSelected(cursorOverEmail: true);
+        var selected = GetSelectedOrders();
+        if (selected.Count == 0 && _selectedOrderItem != null)
+            selected = new List<OrderTreeItem> { _selectedOrderItem };
+        if (selected.Count == 0) return;
+
+        foreach (var order in selected)
+        {
+            // Pickup store warning
+            if (!string.IsNullOrEmpty(order.StoreName) && order.StoreName != _vm.GetLocalStoreName())
+            {
+                var result = MessageBox.Show(
+                    $"Order {order.ExternalOrderId} is for pickup at {order.StoreName}, not this store. Mark ready anyway?",
+                    "Different Pickup Store", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (result != MessageBoxResult.Yes) continue;
+            }
+
+            try
+            {
+                await _notificationService.NotifyCustomerAsync(order.DbId, "operator");
+            }
+            catch (Exception ex)
+            {
+                AlertCollector.Error(AlertCategory.Network,
+                    $"Failed to notify customer for order {order.ExternalOrderId}",
+                    orderId: order.ExternalOrderId,
+                    detail: $"Attempted: mark ready + notify. " +
+                            $"Expected: customer notified. " +
+                            $"Found: {ex.GetType().Name}. " +
+                            $"Context: Mark Ready button. " +
+                            $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
+                    ex: ex);
+            }
+        }
+        _vm.LoadOrders();
+        UpdateStatusBar();
     }
 
     // ── Context menu handlers (right-click on order header) ──
@@ -1138,14 +1172,23 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private void ContextMenu_Email_Click(object sender, RoutedEventArgs e)
+    private async void ContextMenu_MarkReady_Click(object sender, RoutedEventArgs e)
     {
         var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
         if (order == null) return;
 
+        // Pickup store warning
+        if (!string.IsNullOrEmpty(order.StoreName) && order.StoreName != _vm.GetLocalStoreName())
+        {
+            var result = MessageBox.Show(
+                $"Order {order.ExternalOrderId} is for pickup at {order.StoreName}, not this store. Mark ready anyway?",
+                "Different Pickup Store", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes) return;
+        }
+
         try
         {
-            _notificationService.NotifyCustomer(order.DbId, "operator");
+            await _notificationService.NotifyCustomerAsync(order.DbId, "operator");
             _vm.LoadOrders();
             UpdateStatusBar();
         }
@@ -1154,16 +1197,16 @@ public partial class MainWindow : Window
             AlertCollector.Error(AlertCategory.Network,
                 $"Failed to notify customer for order {order.ExternalOrderId}",
                 orderId: order.ExternalOrderId,
-                detail: $"Attempted: send default email via NotificationService. " +
+                detail: $"Attempted: mark ready via context menu. " +
                         $"Expected: customer notified. " +
                         $"Found: {ex.GetType().Name}. " +
-                        $"Context: right-click Email on order. " +
+                        $"Context: right-click Mark Ready on order. " +
                         $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
                 ex: ex);
         }
     }
 
-    private void ContextMenu_OpenTemplate_Click(object sender, RoutedEventArgs e)
+    private async void ContextMenu_OpenTemplate_Click(object sender, RoutedEventArgs e)
     {
         var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
         if (order == null) return;
@@ -1201,7 +1244,7 @@ public partial class MainWindow : Window
         // Step 3: Send through NotificationService
         try
         {
-            _notificationService.NotifyCustomer(order.DbId, "operator", template);
+            await _notificationService.NotifyCustomerAsync(order.DbId, "operator", template);
             _vm.LoadOrders();
             UpdateStatusBar();
         }
@@ -1227,7 +1270,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            OpenDoneConfirmForSelected(cursorOverEmail: false);
+            OpenDoneConfirmForSelected(cursorOverReady: false);
         }
     }
 

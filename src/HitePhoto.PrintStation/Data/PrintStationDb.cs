@@ -309,6 +309,28 @@ public class PrintStationDb
         }
     }
 
+    /// <summary>Set notified_at timestamp on a MariaDB order.</summary>
+    public async Task<bool> UpdateNotifiedAtAsync(string orderId)
+    {
+        try
+        {
+            await using var conn = CreateConnection();
+            await conn.ExecuteAsync(
+                "UPDATE orders SET notified_at = NOW(), updated_at = NOW() WHERE id = @OrderId",
+                new { OrderId = orderId });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                "Failed to update notified_at on MariaDB",
+                detail: $"Attempted: UPDATE orders SET notified_at WHERE id={orderId}. " +
+                        $"Expected: notified_at set. Found: exception.",
+                ex: ex);
+            return false;
+        }
+    }
+
     /// <summary>Toggle hold on an order and write a note.</summary>
     public async Task<bool> ToggleHoldAsync(string orderId, bool isHeld, string? reason = null, int? employeeId = null)
     {
@@ -712,7 +734,7 @@ public class PrintStationDb
         string? specialInstructions, string? folderPath, int deliveryMethodId,
         string? orderedAt, string? pixfizzJobId,
         bool isRush = false, string? paymentStatus = null,
-        bool isNotified = false, string? notifiedAt = null,
+        string? notifiedAt = null,
         string? shippingFirstName = null, string? shippingLastName = null,
         string? shippingAddress1 = null, string? shippingAddress2 = null,
         string? shippingCity = null, string? shippingState = null,
@@ -727,7 +749,7 @@ public class PrintStationDb
                  order_source_id, order_status_id,
                  customer_first_name, customer_last_name, customer_email, customer_phone,
                  total_amount, payment_status,
-                 is_held, is_notified, notified_at,
+                 is_held, notified_at,
                  is_transfer, transfer_store_id,
                  special_instructions, folder_path, delivery_method_id,
                  ordered_at, pixfizz_job_id, is_rush,
@@ -741,7 +763,7 @@ public class PrintStationDb
                  @SourceId, @StatusId,
                  @FirstName, @LastName, @Email, @Phone,
                  @Total, @PaymentStatus,
-                 @Held, @Notified, @NotifiedAt,
+                 @Held, @NotifiedAt,
                  @Transfer, @TransferStore,
                  @Instructions, @Folder, @Delivery,
                  @OrderedAt, @PixfizzJobId, @Rush,
@@ -759,7 +781,6 @@ public class PrintStationDb
                 total_amount = COALESCE(VALUES(total_amount), total_amount),
                 payment_status = COALESCE(VALUES(payment_status), payment_status),
                 is_held = VALUES(is_held),
-                is_notified = VALUES(is_notified),
                 notified_at = COALESCE(VALUES(notified_at), notified_at),
                 is_transfer = VALUES(is_transfer),
                 transfer_store_id = VALUES(transfer_store_id),
@@ -801,7 +822,6 @@ public class PrintStationDb
                 Total = totalAmount,
                 PaymentStatus = paymentStatus,
                 Held = isHeld ? 1 : 0,
-                Notified = isNotified ? 1 : 0,
                 NotifiedAt = DateTime.TryParse(notifiedAt, out var parsedNotified) ? parsedNotified.ToString("yyyy-MM-dd HH:mm:ss") : (object?)null,
                 Transfer = isTransfer ? 1 : 0,
                 TransferStore = transferStoreId,

@@ -379,6 +379,7 @@ public class MainViewModel : ViewModelBase
         StoreName = order.StoreName,
         OrderedAt = order.OrderedAt != null && DateTime.TryParse(order.OrderedAt, out var dt) ? dt : null,
         PrintedAt = order.PrintedAt != null && DateTime.TryParse(order.PrintedAt, out var pt) ? pt : null,
+        NotifiedAt = order.NotifiedAt != null && DateTime.TryParse(order.NotifiedAt, out var nt) ? nt : null,
         IsHeld = order.IsHeld,
         IsTransfer = order.IsTransfer,
         FolderPath = order.FolderPath,
@@ -405,6 +406,9 @@ public class MainViewModel : ViewModelBase
 
         var printedAt = row.PrintedAt != null && DateTime.TryParse(row.PrintedAt, out var pt) ? pt : (DateTime?)null;
         if (existing.PrintedAt != printedAt) existing.PrintedAt = printedAt;
+
+        var notifiedAt = row.NotifiedAt != null && DateTime.TryParse(row.NotifiedAt, out var nt) ? nt : (DateTime?)null;
+        if (existing.NotifiedAt != notifiedAt) existing.NotifiedAt = notifiedAt;
     }
 
     private record SizeGroupResult(

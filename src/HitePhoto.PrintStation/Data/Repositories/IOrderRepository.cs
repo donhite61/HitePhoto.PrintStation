@@ -14,7 +14,7 @@ public interface IOrderRepository
     string? FindOrderIdByPattern(string pattern);
     List<OrderItemRecord> GetNoritsuItems(string orderId);
     void SetHold(string orderId, bool isHeld);
-    void SetNotified(string orderId);
+    void SetNotifiedAt(string orderId);
     void SetCurrentLocation(string orderId, int storeId);
     void SetItemsPrinted(List<string> itemIds);
     string? GetOrderIdForItem(string itemId);
@@ -179,7 +179,7 @@ public record OrderRow(
     bool IsHeld, bool IsTransfer,
     string FolderPath, string SpecialInstructions, string DownloadStatus,
     string StoreName,
-    string? PrintedAt = null, string? CreatedAt = null);
+    string? PrintedAt = null, string? NotifiedAt = null, string? CreatedAt = null);
 
 public record ItemRow(
     string Id, string SizeLabel, string MediaType, int Quantity,
@@ -195,7 +195,8 @@ public record OrderRecord(
     string CustomerEmail,
     string FolderPath,
     bool IsHeld,
-    bool IsExternallyModified = false);
+    bool IsExternallyModified = false,
+    string? PixfizzJobId = null);
 
 public record OrderItemRecord(
     string Id,

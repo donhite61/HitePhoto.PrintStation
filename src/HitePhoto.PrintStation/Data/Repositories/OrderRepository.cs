@@ -16,7 +16,7 @@ public class OrderRepository : IOrderRepository
                o.ordered_at, o.total_amount, o.is_held, o.is_transfer,
                o.folder_path, o.special_instructions, o.download_status,
                s.short_name AS store_name,
-               o.printed_at, o.created_at
+               o.printed_at, o.notified_at, o.created_at
         FROM orders o
         LEFT JOIN stores s ON s.id = o.pickup_store_id
 
@@ -33,7 +33,8 @@ public class OrderRepository : IOrderRepository
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, external_order_id, source_code, pickup_store_id,
-                   customer_email, folder_path, is_held, is_externally_modified
+                   customer_email, folder_path, is_held, is_externally_modified,
+                   pixfizz_job_id
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", orderId);
@@ -49,7 +50,8 @@ public class OrderRepository : IOrderRepository
             CustomerEmail: reader.IsDBNull(4) ? "" : reader.GetString(4),
             FolderPath: reader.IsDBNull(5) ? "" : reader.GetString(5),
             IsHeld: reader.GetInt32(6) == 1,
-            IsExternallyModified: reader.GetInt32(7) == 1);
+            IsExternallyModified: reader.GetInt32(7) == 1,
+            PixfizzJobId: reader.IsDBNull(8) ? null : reader.GetString(8));
     }
 
     public HitePhoto.Shared.Models.Order? GetFullOrder(string orderId)
@@ -138,18 +140,18 @@ public class OrderRepository : IOrderRepository
                         $"Context: isHeld={isHeld}. State: no matching order in SQLite");
     }
 
-    public void SetNotified(string orderId)
+    public void SetNotifiedAt(string orderId)
     {
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE orders SET is_notified = 1, updated_at = datetime('now','localtime') WHERE id = @id";
+        cmd.CommandText = "UPDATE orders SET notified_at = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", orderId);
         var rows = cmd.ExecuteNonQuery();
         if (rows == 0)
             AlertCollector.Error(AlertCategory.Database,
-                $"SetNotified: order {orderId} not found",
+                $"SetNotifiedAt: order {orderId} not found",
                 orderId: orderId.ToString(),
-                detail: $"Attempted: UPDATE orders SET is_notified=1 WHERE id={orderId}. " +
+                detail: $"Attempted: UPDATE orders SET notified_at WHERE id={orderId}. " +
                         $"Expected: 1 row updated. Found: 0 rows. " +
                         $"Context: marking order notified. State: no matching order in SQLite");
     }
@@ -826,6 +828,7 @@ public class OrderRepository : IOrderRepository
             DownloadStatus: reader.IsDBNull(reader.GetOrdinal("download_status")) ? "" : reader.GetString(reader.GetOrdinal("download_status")),
             StoreName: reader.IsDBNull(reader.GetOrdinal("store_name")) ? "" : reader.GetString(reader.GetOrdinal("store_name")),
             PrintedAt: reader.IsDBNull(reader.GetOrdinal("printed_at")) ? null : reader.GetString(reader.GetOrdinal("printed_at")),
+            NotifiedAt: reader.IsDBNull(reader.GetOrdinal("notified_at")) ? null : reader.GetString(reader.GetOrdinal("notified_at")),
             CreatedAt: reader.IsDBNull(reader.GetOrdinal("created_at")) ? null : reader.GetString(reader.GetOrdinal("created_at")));
     }
 

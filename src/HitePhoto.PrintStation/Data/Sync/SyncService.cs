@@ -128,7 +128,7 @@ public class SyncService : ISyncService
                 if (VerifyOrderExists(orderId) == null) return false;
                 var mariaDbId = await EnsureOrderInMariaDbAsync(orderId);
                 if (mariaDbId == null) return false;
-                return await _remoteDb.UpdateOrderStatusAsync(mariaDbId, 5); // notified
+                return await _remoteDb.UpdateNotifiedAtAsync(mariaDbId);
             }
 
             case "set_items_printed":
@@ -224,7 +224,8 @@ public class SyncService : ISyncService
                    total_amount, is_held, is_transfer, transfer_store_id,
                    special_instructions, folder_path, delivery_method_id,
                    ordered_at, pixfizz_job_id, download_status, source_code,
-                   current_location_store_id, is_printed, display_tab
+                   current_location_store_id, is_printed, display_tab,
+                   notified_at
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", localOrderId);
@@ -257,7 +258,8 @@ public class SyncService : ISyncService
             pixfizzJobId: reader.IsDBNull(16) ? null : reader.GetString(16),
             currentLocationStoreId: reader.GetInt32(19),
             isPrinted: reader.GetInt32(20) == 1,
-            displayTab: reader.GetInt32(21));
+            displayTab: reader.GetInt32(21),
+            notifiedAt: reader.IsDBNull(22) ? null : reader.GetString(22));
         reader.Close();
 
         if (string.IsNullOrEmpty(mariaDbId)) return null;

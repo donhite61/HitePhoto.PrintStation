@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using HitePhoto.PrintStation.Core.Services;
 
 namespace HitePhoto.PrintStation.Core.Processing;
 
@@ -9,7 +10,7 @@ namespace HitePhoto.PrintStation.Core.Processing;
 /// Slim Pixfizz API client for PrintStation — only mark-completed.
 /// PrintStation doesn't poll or download orders (IngestService does that).
 /// </summary>
-public class PixfizzNotifier
+public class PixfizzNotifier : IPixfizzNotifier
 {
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
 

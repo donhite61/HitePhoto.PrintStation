@@ -105,7 +105,7 @@
                     CornerRadius="3" Padding="2,0" Margin="0,8,4,1">
                 <Border.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="Email" Click="ContextMenu_Email_Click"/>
+                        <MenuItem Header="Mark Ready" Click="ContextMenu_MarkReady_Click"/>
                         <MenuItem Header="Open Email Template" Click="ContextMenu_OpenTemplate_Click"/>
                         <Separator/>
                         <MenuItem Header="Mark Done" Click="ContextMenu_MarkDone_Click"/>
@@ -138,6 +138,10 @@
                     <Setter TargetName="NameText" Property="FontSize" Value="12"/>
                     <Setter TargetName="NameText" Property="FontWeight" Value="Normal"/>
                     <Setter TargetName="SrcTag" Property="Foreground" Value="{DynamicResource ParentBrown}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsUnnotifiedPrinted}" Value="True">
+                    <Setter TargetName="NameText" Property="Foreground" Value="{DynamicResource AccentOrange}"/>
+                    <Setter TargetName="SrcTag" Property="Foreground" Value="{DynamicResource AccentOrange}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsHeld}" Value="True">
                     <Setter TargetName="SelectionBorder" Property="Background" Value="#D32F2F"/>
@@ -231,8 +235,8 @@
                         Click="PrintSelectedButton_Click"/>
                 <Button x:Name="DoneBtn" Content="Mark Printed" Width="100" Margin="0,0,6,0"
                         Click="DoneButton_Click"/>
-                <Button Content="Email" Width="60" Margin="0,0,6,0"
-                        Click="NotifyButton_Click"/>
+                <Button Content="Ready" Width="60" Margin="0,0,6,0"
+                        Click="MarkReadyButton_Click"/>
                 <Button Content="Change Size" Width="100" Margin="0,0,6,0"
                         Click="ChangeSizeButton_Click"/>
                 <Button Content="Open Folder" Width="100" Margin="0,0,6,0"

@@ -26,7 +26,7 @@ public class NotificationService : INotificationService
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
-    public void NotifyCustomer(string orderId, string operatorName, EmailTemplate? templateOverride = null)
+    public async Task NotifyCustomerAsync(string orderId, string operatorName, EmailTemplate? templateOverride = null)
     {
         var order = _orders.GetOrder(orderId);
         if (order is null)
@@ -38,16 +38,38 @@ public class NotificationService : INotificationService
         string method;
         if (usePixfizz)
         {
-            // TODO: need pixfizz job_id to call API
+            if (string.IsNullOrEmpty(order.PixfizzJobId))
+            {
+                AlertCollector.Error(AlertCategory.Network,
+                    $"Cannot notify via Pixfizz — no job_id for order {order.ExternalOrderId}",
+                    orderId: order.ExternalOrderId,
+                    detail: $"Attempted: mark Pixfizz job completed. " +
+                            $"Expected: pixfizz_job_id on order. " +
+                            $"Found: null/empty. " +
+                            $"Context: Pixfizz notify mode enabled. " +
+                            $"State: order {order.ExternalOrderId}, dbId={orderId}.");
+                return;
+            }
+
+            var success = await _pixfizzNotifier.MarkCompletedAsync(order.PixfizzJobId);
+            if (!success)
+            {
+                AlertCollector.Error(AlertCategory.Network,
+                    $"Pixfizz mark-completed failed for order {order.ExternalOrderId}",
+                    orderId: order.ExternalOrderId);
+                return;
+            }
+
             method = "Pixfizz";
         }
         else
         {
             if (string.IsNullOrEmpty(order.CustomerEmail))
             {
-                AlertCollector.Error(AlertCategory.Network,
-                    $"Cannot notify — no email address for order {order.ExternalOrderId}",
-                    orderId: order.ExternalOrderId);
+                // No email address — not an error, just skip notification silently.
+                // Order still gets marked notified so it doesn't show as "needs attention."
+                _orders.SetNotifiedAt(orderId);
+                _history.AddNote(orderId, "Marked ready (no customer email)", operatorName);
                 return;
             }
 
@@ -67,7 +89,7 @@ public class NotificationService : INotificationService
 
             var template = templateOverride
                 ?? _settings.GetDefaultTemplate(fullOrder.DeliveryMethodId == DeliveryMethodId.Ship);
-            var result = _emailSender.SendOrderReadyEmailAsync(fullOrder, template).GetAwaiter().GetResult();
+            var result = await _emailSender.SendOrderReadyEmailAsync(fullOrder, template);
             if (!result.Success)
             {
                 AlertCollector.Error(AlertCategory.Network,
@@ -79,7 +101,7 @@ public class NotificationService : INotificationService
             method = "Email";
         }
 
-        _orders.SetNotified(orderId);
+        _orders.SetNotifiedAt(orderId);
         _history.AddNote(orderId, $"Customer notified via {method}", operatorName);
     }
 }

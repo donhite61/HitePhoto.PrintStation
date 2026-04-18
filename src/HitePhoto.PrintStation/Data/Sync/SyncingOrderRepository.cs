@@ -40,9 +40,9 @@ public class SyncingOrderRepository : IOrderRepository
         _ = Task.Run(() => _sync.PushAsync("orders", orderId, "set_hold", payload));
     }
 
-    public void SetNotified(string orderId)
+    public void SetNotifiedAt(string orderId)
     {
-        _inner.SetNotified(orderId);
+        _inner.SetNotifiedAt(orderId);
         var payload = JsonSerializer.Serialize(new { orderId });
         _ = Task.Run(() => _sync.PushAsync("orders", orderId, "set_notified", payload));
     }

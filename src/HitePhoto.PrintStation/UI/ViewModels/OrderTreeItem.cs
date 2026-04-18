@@ -148,6 +148,7 @@ public class OrderTreeItem : INotifyPropertyChanged
     private string _storeName = "";
     private DateTime? _orderedAt;
     private DateTime? _printedAt;
+    private DateTime? _notifiedAt;
     private bool _isHeld;
     private bool _isTransfer;
     private bool _isExpanded;
@@ -215,8 +216,17 @@ public class OrderTreeItem : INotifyPropertyChanged
     public DateTime? PrintedAt
     {
         get => _printedAt;
-        set { _printedAt = value; OnPropertyChanged(); }
+        set { _printedAt = value; OnPropertyChanged(); OnPropertyChanged(nameof(IsUnnotifiedPrinted)); }
     }
+
+    public DateTime? NotifiedAt
+    {
+        get => _notifiedAt;
+        set { _notifiedAt = value; OnPropertyChanged(); OnPropertyChanged(nameof(IsUnnotifiedPrinted)); }
+    }
+
+    /// <summary>True if order is printed but customer has not been notified yet.</summary>
+    public bool IsUnnotifiedPrinted => PrintedAt.HasValue && !NotifiedAt.HasValue;
 
     public bool IsHeld
     {
