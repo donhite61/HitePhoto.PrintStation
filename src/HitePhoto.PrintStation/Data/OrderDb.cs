@@ -769,6 +769,9 @@ public class OrderDb
             ON order_links(parent_order_id, child_order_id)
             """);
 
+        // Migration 028: Ensure notified_at column exists (may be missing on older DBs).
+        AddColumnIfMissing(conn, "orders", "notified_at", "TEXT DEFAULT NULL");
+
         // Migration 026: see FixLocalProductionFlags — needs store ID, runs after settings loaded.
 
         // Migration 027: Drop harvested_by_store_id — replaced by current_location_store_id.
