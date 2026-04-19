@@ -775,7 +775,6 @@ public class OrderDb
         // Migration 026: see FixLocalProductionFlags — needs store ID, runs after settings loaded.
 
         // Migration 027: Drop harvested_by_store_id — replaced by current_location_store_id.
-        // Also change UNIQUE constraint from (external_order_id, pickup_store_id) to (external_order_id).
         RunOnce(conn, "027_drop_harvested_by", """
             UPDATE orders SET current_location_store_id = harvested_by_store_id
             WHERE current_location_store_id IS NULL AND harvested_by_store_id > 0;
@@ -783,6 +782,12 @@ public class OrderDb
             ALTER TABLE orders DROP COLUMN harvested_by_store_id;
             """);
 
+        // Migration 029: Tighten UNIQUE to (external_order_id) only. Child orders
+        // use suffixed IDs (-BH1, -WB1) so plain external_order_id is the global
+        // order identity — same ID = same order across all stores. The old
+        // compound UNIQUE(external_order_id, pickup_store_id) becomes redundant
+        // but remains on migrated DBs; fresh schemas use only the single UNIQUE.
+        TryCreateUniqueIndex(conn, "idx_orders_external_order_id", "orders", "external_order_id");
     }
 
     private static void MigrateToGuidPrimaryKeys(SqliteConnection conn)
@@ -1083,6 +1088,50 @@ public class OrderDb
                 return;
         }
         Execute(conn, $"ALTER TABLE {table} ADD COLUMN {column} {definition}");
+    }
+
+    private static void TryCreateUniqueIndex(SqliteConnection conn, string indexName, string table, string column)
+    {
+        using (var check = conn.CreateCommand())
+        {
+            check.CommandText = "SELECT 1 FROM sqlite_master WHERE type='index' AND name=@name";
+            check.Parameters.AddWithValue("@name", indexName);
+            if (check.ExecuteScalar() != null) return;
+        }
+
+        var dupes = new List<string>();
+        using (var dup = conn.CreateCommand())
+        {
+            dup.CommandText = $"SELECT {column}, COUNT(*) c FROM {table} GROUP BY {column} HAVING c > 1 LIMIT 20";
+            using var reader = dup.ExecuteReader();
+            while (reader.Read())
+                dupes.Add($"{reader.GetValue(0)}(x{reader.GetInt32(1)})");
+        }
+        if (dupes.Count > 0)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                $"Cannot create unique index {indexName} — duplicate values in {table}.{column}",
+                detail: $"Attempted: CREATE UNIQUE INDEX {indexName} ON {table}({column}). " +
+                        $"Expected: no duplicate {column} values. " +
+                        $"Found: {dupes.Count}+ duplicates: {string.Join(", ", dupes)}. " +
+                        $"Context: tightening UNIQUE constraint. " +
+                        $"State: index NOT created, table unchanged. Reconcile duplicates manually.");
+            return;
+        }
+
+        try
+        {
+            Execute(conn, $"CREATE UNIQUE INDEX {indexName} ON {table}({column})");
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(AlertCategory.Database,
+                $"Failed to create unique index {indexName}",
+                detail: $"Attempted: CREATE UNIQUE INDEX {indexName} ON {table}({column}). " +
+                        $"Found: {ex.GetType().Name}: {ex.Message}. " +
+                        $"Context: startup migration. State: index NOT created.",
+                ex: ex);
+        }
     }
 
     private static void RunOnce(SqliteConnection conn, string migrationId, string sql)
