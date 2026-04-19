@@ -601,6 +601,7 @@ public class SyncService : ISyncService
                     total_amount, is_held, is_transfer, transfer_store_id,
                     special_instructions, folder_path, delivery_method_id, ordered_at,
                     current_location_store_id, is_printed, display_tab,
+                    notified_at,
                     created_at, updated_at
                 ) VALUES (
                     @id, @eid, @store, @srcId, @srcCode,
@@ -609,6 +610,7 @@ public class SyncService : ISyncService
                     @total, @held, @transfer, @transferStore,
                     @instructions, @folder, @delivery, @orderedAt,
                     @locationStore, @isPrinted, @displayTab,
+                    @notifiedAt,
                     @createdAt, @updatedAt
                 )
                 """;
@@ -644,6 +646,7 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@locationStore", row.current_location_store_id != null ? (int)row.current_location_store_id : 0);
         cmd.Parameters.AddWithValue("@isPrinted", Convert.ToBoolean(row.is_printed) ? 1 : 0);
         cmd.Parameters.AddWithValue("@displayTab", row.display_tab != null ? (int)row.display_tab : (int)Core.Models.DisplayTab.Pending);
+        cmd.Parameters.AddWithValue("@notifiedAt", row.notified_at != null ? (object)((DateTime)row.notified_at).ToString("o") : DBNull.Value);
     }
 
     private void UpsertLocalItem(dynamic item)
