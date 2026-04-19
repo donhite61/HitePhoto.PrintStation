@@ -151,6 +151,12 @@ public class SyncingOrderRepository : IOrderRepository
 
     public void InsertServiceItem(string orderId, string sizeLabel, string? filepath = null) => _inner.InsertServiceItem(orderId, sizeLabel, filepath);
 
+    public void RebaseChildItemPaths(string childOrderId, string oldFolder, string newFolder)
+    {
+        _inner.RebaseChildItemPaths(childOrderId, oldFolder, newFolder);
+        // Item path rewrites — captured by the next full order push for childOrderId.
+    }
+
     // Link table — reads pass through, writes push to sync
     public HashSet<string> GetSupersededOrderIds(List<string> orderIds) => _inner.GetSupersededOrderIds(orderIds);
     public List<(string ParentOrderId, string ChildOrderId, string LinkType)> GetLinksForOrders(List<string> orderIds) => _inner.GetLinksForOrders(orderIds);

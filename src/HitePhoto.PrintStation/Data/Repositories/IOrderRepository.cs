@@ -151,6 +151,12 @@ public interface IOrderRepository
     /// <summary>Insert a Transfer service item (for orders with no real printable items).</summary>
     void InsertServiceItem(string orderId, string sizeLabel, string? filepath = null);
 
+    /// <summary>
+    /// Rewrites every item's image_filepath on a child order from oldFolder to newFolder.
+    /// Used after GetFromProduction so the receiver's R-child points at locally-downloaded files.
+    /// </summary>
+    void RebaseChildItemPaths(string childOrderId, string oldFolder, string newFolder);
+
     /// <summary>Get order IDs that have been superseded (have children in order_links).</summary>
     HashSet<string> GetSupersededOrderIds(List<string> orderIds);
 

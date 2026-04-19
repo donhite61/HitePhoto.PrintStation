@@ -9,12 +9,15 @@ public class TransferService : ITransferService
 {
     private readonly IOrderRepository _orders;
     private readonly IHistoryRepository _history;
+    private readonly InvoicePrinter _invoice;
     private readonly AppSettings _settings;
 
-    public TransferService(IOrderRepository orders, IHistoryRepository history, AppSettings settings)
+    public TransferService(IOrderRepository orders, IHistoryRepository history,
+        InvoicePrinter invoice, AppSettings settings)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _history = history ?? throw new ArgumentNullException(nameof(history));
+        _invoice = invoice ?? throw new ArgumentNullException(nameof(invoice));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
@@ -241,8 +244,13 @@ public class TransferService : ITransferService
         var parentNote = string.IsNullOrEmpty(comment)
             ? $"Sent to {targetStoreName} for production by {operatorName}{itemCountNote}"
             : $"Sent to {targetStoreName} for production by {operatorName}{itemCountNote}: {comment}";
+        var childNote = string.IsNullOrEmpty(comment)
+            ? $"Received from {fromStoreName} for production"
+            : $"Received from {fromStoreName} for production: {comment}";
         _history.AddNote(orderId, parentNote, operatorName);
-        _history.AddNote(childId, $"Received from {fromStoreName} for production", operatorName);
+        _history.AddNote(childId, childNote, operatorName);
+
+        _invoice.PrintTransferInvoice(childId, fromStoreName, comment);
 
         AppLog.Info($"SendForProduction: order {orderId} → {targetStoreName}, child order {childId}");
         return childId;
@@ -318,6 +326,10 @@ public class TransferService : ITransferService
         var childId = _orders.CreateAlteration(orderId, "receive", comment, operatorName,
             newPickupStoreId: _settings.StoreId, newFolderPath: localBase, itemIds: itemIds);
 
+        // Rebase item paths from sender's folder to our local download folder
+        if (!string.IsNullOrEmpty(fullOrder.FolderPath))
+            _orders.RebaseChildItemPaths(childId, fullOrder.FolderPath, localBase);
+
         // If no real items were selected, insert a Transfer service item
         var allItems = _orders.GetItems(orderId);
         var selectedItems = itemIds is { Count: > 0 }
@@ -338,7 +350,12 @@ public class TransferService : ITransferService
 
         _history.AddNote(orderId, $"Received by {operatorName}" +
             (string.IsNullOrEmpty(comment) ? "" : $": {comment}"), operatorName);
-        _history.AddNote(childId, $"Received from {fromStoreName}", operatorName);
+        var childNote = string.IsNullOrEmpty(comment)
+            ? $"Received from {fromStoreName}"
+            : $"Received from {fromStoreName}: {comment}";
+        _history.AddNote(childId, childNote, operatorName);
+
+        _invoice.PrintTransferInvoice(childId, fromStoreName, comment);
 
         AppLog.Info($"GetFromProduction: order {orderId} → child {childId}, local folder {localBase}");
         return childId;

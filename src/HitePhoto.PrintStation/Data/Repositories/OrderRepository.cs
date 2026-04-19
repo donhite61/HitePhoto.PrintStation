@@ -1263,4 +1263,23 @@ public class OrderRepository : IOrderRepository
         transaction.Commit();
         return newOrderId;
     }
+
+    public void RebaseChildItemPaths(string childOrderId, string oldFolder, string newFolder)
+    {
+        if (string.IsNullOrEmpty(oldFolder) || string.IsNullOrEmpty(newFolder) || oldFolder == newFolder)
+            return;
+
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE order_items
+            SET image_filepath = REPLACE(image_filepath, @old, @new)
+            WHERE order_id = @oid AND image_filepath LIKE @oldLike
+            """;
+        cmd.Parameters.AddWithValue("@old", oldFolder);
+        cmd.Parameters.AddWithValue("@new", newFolder);
+        cmd.Parameters.AddWithValue("@oid", childOrderId);
+        cmd.Parameters.AddWithValue("@oldLike", oldFolder + "%");
+        cmd.ExecuteNonQuery();
+    }
 }
