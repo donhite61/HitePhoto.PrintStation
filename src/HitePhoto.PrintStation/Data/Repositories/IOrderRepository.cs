@@ -96,13 +96,13 @@ public interface IOrderRepository
     void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates);
 
     /// <summary>Pending tab: located here + not printed. See feedback_tab_query_locked.md.</summary>
-    List<OrderRow> LoadPendingOrders(int storeId);
+    List<OrderRow> LoadPendingOrders(int storeId, bool testMode);
 
     /// <summary>Printed tab: located here + printed. See feedback_tab_query_locked.md.</summary>
-    List<OrderRow> LoadPrintedOrders(int storeId);
+    List<OrderRow> LoadPrintedOrders(int storeId, bool testMode);
 
     /// <summary>Other Store tab: located at another store. Empty when sync disabled.</summary>
-    List<OrderRow> LoadOtherStoreOrders(int storeId);
+    List<OrderRow> LoadOtherStoreOrders(int storeId, bool testMode);
 
     /// <summary>Batch-load items for multiple orders. Keyed by order ID.</summary>
     Dictionary<string, List<ItemRow>> BatchLoadItems(List<string> orderIds);

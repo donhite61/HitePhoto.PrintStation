@@ -656,6 +656,12 @@
                         <TextBlock Text="Use when running for development/testing. Prevents this instance from claiming Pixfizz orders or sending prints to Noritsu."
                                    Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="20,0,0,12"/>
 
+                        <TextBlock Text="Test Mode" Foreground="{DynamicResource TextHeading}"
+                                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <CheckBox x:Name="TestModeCheck" Content="Show only test orders (is_test=1)" Margin="0,0,0,4"/>
+                        <TextBlock Text="When on, the order tree shows ONLY orders flagged is_test=1. When off, the tree shows ONLY real orders. Toggle is per-station and persisted. A red TEST MODE banner appears across the main window when active."
+                                   Foreground="{DynamicResource TextSecondary}" FontSize="11" TextWrapping="Wrap" Margin="20,0,0,12"/>
+
                         <TextBlock Text="Debug Logging" Foreground="{DynamicResource TextHeading}"
                                    FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
                         <CheckBox x:Name="LoggingCheck" Content="Enable debug log" Margin="0,0,0,12"/>

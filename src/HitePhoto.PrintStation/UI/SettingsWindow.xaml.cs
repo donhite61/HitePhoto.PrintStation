@@ -127,6 +127,7 @@ public partial class SettingsWindow : Window
         DevModeCheck.IsChecked = _settings.DeveloperMode;
         PublishSection.Visibility = _settings.DeveloperMode ? Visibility.Visible : Visibility.Collapsed;
         LoggingCheck.IsChecked = _settings.EnableLogging;
+        TestModeCheck.IsChecked = _settings.TestMode;
 
         // Correction strengths
         var cs = _settings.CorrectionStrengths;
@@ -288,6 +289,7 @@ public partial class SettingsWindow : Window
         // Diagnostics
         _settings.DeveloperMode = DevModeCheck.IsChecked == true;
         _settings.EnableLogging = LoggingCheck.IsChecked == true;
+        _settings.TestMode = TestModeCheck.IsChecked == true;
         AppLog.Enabled = _settings.EnableLogging;
 
         _settingsManager.Save(_settings);

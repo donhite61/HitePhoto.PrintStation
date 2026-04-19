@@ -220,10 +220,17 @@
                     <TextBlock x:Name="AlertBadgeText" Text="0" Foreground="White"
                                FontSize="10" FontWeight="Bold"/>
                 </Border>
-                <TextBlock x:Name="DevModeText" Grid.Column="3"
-                           Text="DEV MODE" Foreground="{DynamicResource AccentRed}"
-                           FontWeight="Bold" FontSize="11" VerticalAlignment="Center"
-                           Visibility="Collapsed"/>
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="DevModeText"
+                               Text="DEV MODE" Foreground="{DynamicResource AccentRed}"
+                               FontWeight="Bold" FontSize="11" VerticalAlignment="Center"
+                               Visibility="Collapsed"/>
+                    <TextBlock x:Name="TestModeText"
+                               Text="TEST MODE" Foreground="{DynamicResource AccentRed}"
+                               FontWeight="Bold" FontSize="11" VerticalAlignment="Center"
+                               Margin="12,0,0,0"
+                               Visibility="Collapsed"/>
+                </StackPanel>
             </Grid>
         </Border>
 

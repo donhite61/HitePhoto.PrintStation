@@ -120,9 +120,9 @@ public class SyncingOrderRepository : IOrderRepository
     public string? GetLayoutName(string routingKey) => _inner.GetLayoutName(routingKey);
     public List<(string Id, string ExternalOrderId, string PixfizzJobId)> GetUnreceivedPixfizzOrders(DateTime cutoff) => _inner.GetUnreceivedPixfizzOrders(cutoff);
     public void MarkReceivedPushed(string orderId) => _inner.MarkReceivedPushed(orderId);
-    public List<OrderRow> LoadPendingOrders(int storeId) => _inner.LoadPendingOrders(storeId);
-    public List<OrderRow> LoadPrintedOrders(int storeId) => _inner.LoadPrintedOrders(storeId);
-    public List<OrderRow> LoadOtherStoreOrders(int storeId) => _inner.LoadOtherStoreOrders(storeId);
+    public List<OrderRow> LoadPendingOrders(int storeId, bool testMode) => _inner.LoadPendingOrders(storeId, testMode);
+    public List<OrderRow> LoadPrintedOrders(int storeId, bool testMode) => _inner.LoadPrintedOrders(storeId, testMode);
+    public List<OrderRow> LoadOtherStoreOrders(int storeId, bool testMode) => _inner.LoadOtherStoreOrders(storeId, testMode);
     public Dictionary<string, List<ItemRow>> BatchLoadItems(List<string> orderIds) => _inner.BatchLoadItems(orderIds);
     public void SetItemsUnprinted(string orderId) => _inner.SetItemsUnprinted(orderId);
     public void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates) => _inner.BatchUpdateFileStatus(updates);

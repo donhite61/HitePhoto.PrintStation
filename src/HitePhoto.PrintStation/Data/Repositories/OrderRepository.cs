@@ -711,24 +711,26 @@ public class OrderRepository : IOrderRepository
     //  Orders CAN appear on multiple tabs (shared parent on Pending + Other Store).
     // ═══════════════════════════════════════════════════════════════
 
-    public List<OrderRow> LoadPendingOrders(int storeId)
+    public List<OrderRow> LoadPendingOrders(int storeId, bool testMode)
     {
         var results = new List<OrderRow>();
         using var conn = _db.OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = OrderSelectBase + """
-            WHERE (o.display_tab = 1 AND o.current_location_store_id = @storeId)
-               OR o.display_tab = 3
+            WHERE ((o.display_tab = 1 AND o.current_location_store_id = @storeId)
+                OR o.display_tab = 3)
+              AND o.is_test = @testFlag
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
+        cmd.Parameters.AddWithValue("@testFlag", testMode ? 1 : 0);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
         return results;
     }
 
-    public List<OrderRow> LoadPrintedOrders(int storeId)
+    public List<OrderRow> LoadPrintedOrders(int storeId, bool testMode)
     {
         var results = new List<OrderRow>();
         using var conn = _db.OpenConnection();
@@ -736,9 +738,11 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = OrderSelectBase + """
             WHERE o.display_tab = 2
               AND o.current_location_store_id = @storeId
+              AND o.is_test = @testFlag
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
+        cmd.Parameters.AddWithValue("@testFlag", testMode ? 1 : 0);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));
@@ -746,7 +750,7 @@ public class OrderRepository : IOrderRepository
     }
 
     // Other Store = everything from another store, regardless of display_tab.
-    public List<OrderRow> LoadOtherStoreOrders(int storeId)
+    public List<OrderRow> LoadOtherStoreOrders(int storeId, bool testMode)
     {
         var results = new List<OrderRow>();
         using var conn = _db.OpenConnection();
@@ -754,9 +758,11 @@ public class OrderRepository : IOrderRepository
         cmd.CommandText = OrderSelectBase + """
             WHERE o.current_location_store_id != @storeId
               AND o.current_location_store_id > 0
+              AND o.is_test = @testFlag
             ORDER BY o.ordered_at DESC
             """;
         cmd.Parameters.AddWithValue("@storeId", storeId);
+        cmd.Parameters.AddWithValue("@testFlag", testMode ? 1 : 0);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
             results.Add(ReadOrderRow(reader));

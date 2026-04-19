@@ -130,6 +130,10 @@ public class AppSettings
     // ── Developer mode ──
     public bool DeveloperMode { get; set; } = false;
 
+    // ── Test mode ──
+    /// <summary>When true, the tree shows ONLY orders with is_test=1; when false, shows ONLY is_test=0.</summary>
+    public bool TestMode { get; set; } = false;
+
     /// <summary>Build a MySqlConnector connection string from the settings.</summary>
     [JsonIgnore]
     public string ConnectionString =>

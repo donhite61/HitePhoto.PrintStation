@@ -151,7 +151,7 @@ public class MainViewModel : ViewModelBase
     /// </summary>
     public void RepairPendingOrders()
     {
-        var pending = _orders.LoadPendingOrders(_settings.StoreId);
+        var pending = _orders.LoadPendingOrders(_settings.StoreId, _settings.TestMode);
         int totalRepairs = 0;
         foreach (var order in pending)
         {
@@ -224,9 +224,9 @@ public class MainViewModel : ViewModelBase
                 _channelNamesDirty = false;
             }
 
-            var pending = _orders.LoadPendingOrders(_settings.StoreId);
-            var printed = _orders.LoadPrintedOrders(_settings.StoreId);
-            var otherStore = _orders.LoadOtherStoreOrders(_settings.StoreId);
+            var pending = _orders.LoadPendingOrders(_settings.StoreId, _settings.TestMode);
+            var printed = _orders.LoadPrintedOrders(_settings.StoreId, _settings.TestMode);
+            var otherStore = _orders.LoadOtherStoreOrders(_settings.StoreId, _settings.TestMode);
 
             if (OtherStorePickupHereOnly)
             {
