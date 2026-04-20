@@ -1146,6 +1146,7 @@ public class OrderRepository : IOrderRepository
         {
             "change" => "C",
             "split" => "S",
+            "receive" => "R",
             "outlab" => "X",
             "dakis_split" => "W", // store splits use store code, not this path
             _ => "C" // default to change
