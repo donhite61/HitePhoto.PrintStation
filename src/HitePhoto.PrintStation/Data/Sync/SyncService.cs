@@ -11,7 +11,8 @@ public record LocalOrderItem(
     string SizeLabel, string MediaType, int Quantity,
     string ImageFilename, string ImageFilepath, string OriginalImageFilepath,
     string OptionsJson, bool IsPrinted,
-    int? FulfillmentStoreId, string? SourceItemId, int? ImageWidth, int? ImageHeight);
+    int? FulfillmentStoreId, string? SourceItemId, int? ImageWidth, int? ImageHeight,
+    bool IsTest);
 
 public class SyncService : ISyncService
 {
@@ -225,7 +226,7 @@ public class SyncService : ISyncService
                    special_instructions, folder_path, delivery_method_id,
                    ordered_at, pixfizz_job_id, download_status, source_code,
                    current_location_store_id, is_printed, display_tab,
-                   notified_at
+                   notified_at, is_test
             FROM orders WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", localOrderId);
@@ -259,7 +260,8 @@ public class SyncService : ISyncService
             currentLocationStoreId: reader.GetInt32(19),
             isPrinted: reader.GetInt32(20) == 1,
             displayTab: reader.GetInt32(21),
-            notifiedAt: reader.IsDBNull(22) ? null : reader.GetString(22));
+            notifiedAt: reader.IsDBNull(22) ? null : reader.GetString(22),
+            isTest: !reader.IsDBNull(23) && reader.GetInt32(23) == 1);
         reader.Close();
 
         if (string.IsNullOrEmpty(mariaDbId)) return null;
@@ -325,7 +327,8 @@ public class SyncService : ISyncService
         cmd.CommandText = """
             SELECT size_label, media_type, quantity, image_filename, image_filepath,
                    original_image_filepath, options_json, is_printed,
-                   fulfillment_store_id, source_item_id, image_width, image_height
+                   fulfillment_store_id, source_item_id, image_width, image_height,
+                   is_test
             FROM order_items WHERE order_id = @id
             """;
         cmd.Parameters.AddWithValue("@id", orderId);
@@ -344,7 +347,8 @@ public class SyncService : ISyncService
                 FulfillmentStoreId: reader.IsDBNull(8) ? null : reader.GetInt32(8),
                 SourceItemId: reader.IsDBNull(9) ? null : reader.GetString(9),
                 ImageWidth: reader.IsDBNull(10) ? null : reader.GetInt32(10),
-                ImageHeight: reader.IsDBNull(11) ? null : reader.GetInt32(11)));
+                ImageHeight: reader.IsDBNull(11) ? null : reader.GetInt32(11),
+                IsTest: !reader.IsDBNull(12) && reader.GetInt32(12) == 1));
         }
         return items;
     }
@@ -601,7 +605,7 @@ public class SyncService : ISyncService
                     total_amount, is_held, is_transfer, transfer_store_id,
                     special_instructions, folder_path, delivery_method_id, ordered_at,
                     current_location_store_id, is_printed, display_tab,
-                    notified_at,
+                    notified_at, is_test,
                     created_at, updated_at
                 ) VALUES (
                     @id, @eid, @store, @srcId, @srcCode,
@@ -610,7 +614,7 @@ public class SyncService : ISyncService
                     @total, @held, @transfer, @transferStore,
                     @instructions, @folder, @delivery, @orderedAt,
                     @locationStore, @isPrinted, @displayTab,
-                    @notifiedAt,
+                    @notifiedAt, @isTest,
                     @createdAt, @updatedAt
                 )
                 """;
@@ -647,6 +651,7 @@ public class SyncService : ISyncService
         cmd.Parameters.AddWithValue("@isPrinted", Convert.ToBoolean(row.is_printed) ? 1 : 0);
         cmd.Parameters.AddWithValue("@displayTab", row.display_tab != null ? (int)row.display_tab : (int)Core.Models.DisplayTab.Pending);
         cmd.Parameters.AddWithValue("@notifiedAt", row.notified_at != null ? (object)((DateTime)row.notified_at).ToString("o") : DBNull.Value);
+        cmd.Parameters.AddWithValue("@isTest", row.is_test != null && Convert.ToBoolean(row.is_test) ? 1 : 0);
     }
 
     private void UpsertLocalItem(dynamic item)

@@ -741,7 +741,8 @@ public class PrintStationDb
         string? shippingZip = null, string? shippingCountry = null,
         string? shippingMethod = null,
         int currentLocationStoreId = 0, bool isPrinted = false,
-        int displayTab = (int)Core.Models.DisplayTab.Pending)
+        int displayTab = (int)Core.Models.DisplayTab.Pending,
+        bool isTest = false)
     {
         const string sql = """
             INSERT INTO orders
@@ -756,7 +757,7 @@ public class PrintStationDb
                  shipping_first_name, shipping_last_name,
                  shipping_address1, shipping_address2, shipping_city,
                  shipping_state, shipping_zip, shipping_country, shipping_method,
-                 is_printed, display_tab,
+                 is_printed, display_tab, is_test,
                  sync_status)
             VALUES
                 (@OrderId, @Eid, @Store, @LocationStore,
@@ -770,7 +771,7 @@ public class PrintStationDb
                  @ShipFname, @ShipLname,
                  @ShipAddr1, @ShipAddr2, @ShipCity,
                  @ShipState, @ShipZip, @ShipCountry, @ShipMethod,
-                 @Printed, @DisplayTab,
+                 @Printed, @DisplayTab, @IsTest,
                  'synced')
             ON DUPLICATE KEY UPDATE
                 order_status_id = VALUES(order_status_id),
@@ -802,6 +803,7 @@ public class PrintStationDb
                 current_location_store_id = VALUES(current_location_store_id),
                 is_printed = VALUES(is_printed),
                 display_tab = VALUES(display_tab),
+                is_test = VALUES(is_test),
                 sync_status = 'synced'
             """;
 
@@ -843,6 +845,7 @@ public class PrintStationDb
                 LocationStore = currentLocationStoreId,
                 Printed = isPrinted ? 1 : 0,
                 DisplayTab = displayTab,
+                IsTest = isTest ? 1 : 0,
             });
 
             // On duplicate key update, the generated GUID is discarded — query by natural key to get existing id
@@ -909,12 +912,14 @@ public class PrintStationDb
                             (id, order_id, size_label, media_type, quantity,
                              image_filename, image_filepath, original_image_filepath,
                              options_json, is_printed,
-                             fulfillment_store_id, source_item_id, image_width, image_height)
+                             fulfillment_store_id, source_item_id, image_width, image_height,
+                             is_test)
                         VALUES
                             (@ItemId, @OrderId, @Size, @Media, @Qty,
                              @Filename, @Filepath, @OrigFilepath,
                              @Options, @Printed,
-                             @FulfillStore, @SourceItem, @ImgW, @ImgH)
+                             @FulfillStore, @SourceItem, @ImgW, @ImgH,
+                             @IsTest)
                         """,
                         new
                         {
@@ -932,6 +937,7 @@ public class PrintStationDb
                             SourceItem = item.SourceItemId,
                             ImgW = item.ImageWidth,
                             ImgH = item.ImageHeight,
+                            IsTest = item.IsTest ? 1 : 0,
                         }, tx);
                 }
 
