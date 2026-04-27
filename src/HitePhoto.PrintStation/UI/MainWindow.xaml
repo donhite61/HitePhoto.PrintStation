@@ -104,11 +104,12 @@
             <Border x:Name="SelectionBorder" Background="Transparent"
                     CornerRadius="3" Padding="2,0" Margin="0,8,4,1">
                 <Border.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="Mark Ready" Click="ContextMenu_MarkReady_Click"/>
-                        <MenuItem Header="Open Email Template" Click="ContextMenu_OpenTemplate_Click"/>
-                        <Separator/>
-                        <MenuItem Header="Mark Done" Click="ContextMenu_MarkDone_Click"/>
+                    <ContextMenu Opened="OrderContextMenu_Opened">
+                        <MenuItem x:Name="CtxPrint" Header="Print" Click="ContextMenu_Print_Click"/>
+                        <MenuItem x:Name="CtxPrintEmail" Header="Print &amp; Email" Click="ContextMenu_PrintAndEmail_Click"/>
+                        <Separator x:Name="CtxPrintSep"/>
+                        <MenuItem x:Name="CtxMarkPrinted" Header="Mark Printed" Click="ContextMenu_MarkPrinted_Click"/>
+                        <MenuItem x:Name="CtxMarkUnprinted" Header="Mark Unprinted" Click="ContextMenu_MarkUnprinted_Click"/>
                     </ContextMenu>
                 </Border.ContextMenu>
                 <StackPanel Orientation="Horizontal">
@@ -237,13 +238,6 @@
         <!-- Toolbar -->
         <Border DockPanel.Dock="Top" Background="{DynamicResource ToolbarBg}" Padding="8,5">
             <StackPanel Orientation="Horizontal">
-                <Button x:Name="PrintBtn" Content="Print"
-                        Width="100" Margin="0,0,6,0" Background="{DynamicResource ButtonPrintBg}"
-                        Click="PrintSelectedButton_Click"/>
-                <Button x:Name="DoneBtn" Content="Mark Printed" Width="100" Margin="0,0,6,0"
-                        Click="DoneButton_Click"/>
-                <Button Content="Ready" Width="60" Margin="0,0,6,0"
-                        Click="MarkReadyButton_Click"/>
                 <Button Content="Change Size" Width="100" Margin="0,0,6,0"
                         Click="ChangeSizeButton_Click"/>
                 <Button Content="Open Folder" Width="100" Margin="0,0,6,0"

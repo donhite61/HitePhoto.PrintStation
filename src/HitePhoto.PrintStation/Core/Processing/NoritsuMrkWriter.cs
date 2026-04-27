@@ -47,8 +47,9 @@ public class NoritsuMrkWriter
         Directory.CreateDirectory(stagingDir);
         Directory.CreateDirectory(miscDir);
 
-        // Copy images flat into staging folder root
-        var imageEntries = new List<(string relativePath, string originalName, int qty)>();
+        // Build work list sequentially (resolve filenames, check existence)
+        var workItems = new List<(OrderItem item, string destFileName, string destPath, int idx)>();
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         int idx = 0;
         foreach (var item in items)
@@ -66,21 +67,32 @@ public class NoritsuMrkWriter
 
             idx++;
             string destFileName = Path.GetFileName(item.ImageFilepath);
-            string destPath = Path.Combine(stagingDir, destFileName);
 
             // Handle duplicate filenames
-            if (File.Exists(destPath))
+            if (!usedNames.Add(destFileName))
             {
                 string nameNoExt = Path.GetFileNameWithoutExtension(destFileName);
                 string ext = Path.GetExtension(destFileName);
                 destFileName = $"{nameNoExt}_{idx}{ext}";
-                destPath = Path.Combine(stagingDir, destFileName);
+                usedNames.Add(destFileName);
             }
 
-            onProgress?.Invoke(idx, items.Count);
-            ImagePreparer.PrepareForPrint(item.ImageFilepath, destPath);
-            imageEntries.Add(($"../{destFileName}", destFileName, item.Quantity));
+            string destPath = Path.Combine(stagingDir, destFileName);
+            workItems.Add((item, destFileName, destPath, idx));
         }
+
+        // Prepare images in parallel (ICC conversion + orient + strip)
+        int completed = 0;
+        Parallel.ForEach(workItems, work =>
+        {
+            ImagePreparer.PrepareForPrint(work.item.ImageFilepath, work.destPath);
+            int done = Interlocked.Increment(ref completed);
+            onProgress?.Invoke(done, workItems.Count);
+        });
+
+        var imageEntries = workItems
+            .Select(w => (relativePath: $"../{w.destFileName}", originalName: w.destFileName, qty: w.item.Quantity))
+            .ToList();
 
         if (imageEntries.Count == 0)
         {

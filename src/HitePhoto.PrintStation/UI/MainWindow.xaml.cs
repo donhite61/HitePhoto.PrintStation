@@ -918,12 +918,14 @@ public partial class MainWindow : Window
     {
         try
         {
-            // 1. Sync pull (MariaDB → SQLite)
+            // 1. Sync pull (MariaDB → SQLite) — skip if Dell unreachable
             if (_settings.SyncEnabled)
             {
                 var sync = App.Services.GetRequiredService<Data.Sync.ISyncService>();
                 await Task.Run(async () =>
                 {
+                    if (!await sync.IsReachableAsync())
+                        return;
                     await sync.PullAsync();
                     await sync.ProcessOutboxAsync();
                 });
@@ -984,7 +986,6 @@ public partial class MainWindow : Window
     {
         if (e.Source != MainTabs) return;
         ShowOrderDetail(null);
-        DoneBtn.Content = IsPrintedTabActive ? "Mark Unprinted" : "Mark Printed";
         ProductionBtn.Content = IsOtherStoreTabActive ? "Get" : "Send";
     }
 
@@ -1019,14 +1020,6 @@ public partial class MainWindow : Window
         }
         _vm.LoadOrders();
         UpdateStatusBar();
-    }
-
-    private void DoneButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (IsPrintedTabActive)
-            MarkSelectedUnprinted();
-        else
-            OpenDoneConfirmForSelected(cursorOverReady: false);
     }
 
     private void MarkSelectedUnprinted()
@@ -1126,45 +1119,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void MarkReadyButton_Click(object sender, RoutedEventArgs e)
-    {
-        var selected = GetSelectedOrders();
-        if (selected.Count == 0 && _selectedOrderItem != null)
-            selected = new List<OrderTreeItem> { _selectedOrderItem };
-        if (selected.Count == 0) return;
-
-        foreach (var order in selected)
-        {
-            // Pickup store warning
-            if (!string.IsNullOrEmpty(order.StoreName) && order.StoreName != _vm.GetLocalStoreName())
-            {
-                var result = MessageBox.Show(
-                    $"Order {order.ExternalOrderId} is for pickup at {order.StoreName}, not this store. Mark ready anyway?",
-                    "Different Pickup Store", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-                if (result != MessageBoxResult.Yes) continue;
-            }
-
-            try
-            {
-                await _notificationService.NotifyCustomerAsync(order.DbId, "operator");
-            }
-            catch (Exception ex)
-            {
-                AlertCollector.Error(AlertCategory.Network,
-                    $"Failed to notify customer for order {order.ExternalOrderId}",
-                    orderId: order.ExternalOrderId,
-                    detail: $"Attempted: mark ready + notify. " +
-                            $"Expected: customer notified. " +
-                            $"Found: {ex.GetType().Name}. " +
-                            $"Context: Mark Ready button. " +
-                            $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
-                    ex: ex);
-            }
-        }
-        _vm.LoadOrders();
-        UpdateStatusBar();
-    }
-
     // ── Context menu handlers (right-click on order header) ──
 
     private OrderTreeItem? GetContextMenuOrder(object sender)
@@ -1174,53 +1128,44 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private async void ContextMenu_MarkReady_Click(object sender, RoutedEventArgs e)
+    private void OrderContextMenu_Opened(object sender, RoutedEventArgs e)
     {
-        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (order == null) return;
+        if (sender is not ContextMenu cm) return;
+        bool printed = IsPrintedTabActive;
 
-        // Pickup store warning
-        if (!string.IsNullOrEmpty(order.StoreName) && order.StoreName != _vm.GetLocalStoreName())
+        foreach (var item in cm.Items)
         {
-            var result = MessageBox.Show(
-                $"Order {order.ExternalOrderId} is for pickup at {order.StoreName}, not this store. Mark ready anyway?",
-                "Different Pickup Store", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-            if (result != MessageBoxResult.Yes) return;
-        }
-
-        try
-        {
-            await _notificationService.NotifyCustomerAsync(order.DbId, "operator");
-            _vm.LoadOrders();
-            UpdateStatusBar();
-        }
-        catch (Exception ex)
-        {
-            AlertCollector.Error(AlertCategory.Network,
-                $"Failed to notify customer for order {order.ExternalOrderId}",
-                orderId: order.ExternalOrderId,
-                detail: $"Attempted: mark ready via context menu. " +
-                        $"Expected: customer notified. " +
-                        $"Found: {ex.GetType().Name}. " +
-                        $"Context: right-click Mark Ready on order. " +
-                        $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
-                ex: ex);
+            if (item is MenuItem mi)
+            {
+                if (mi.Name == "CtxMarkPrinted")
+                    mi.Visibility = printed ? Visibility.Collapsed : Visibility.Visible;
+                else if (mi.Name == "CtxMarkUnprinted")
+                    mi.Visibility = printed ? Visibility.Visible : Visibility.Collapsed;
+            }
         }
     }
 
-    private async void ContextMenu_OpenTemplate_Click(object sender, RoutedEventArgs e)
+    private async void ContextMenu_Print_Click(object sender, RoutedEventArgs e)
     {
         var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (order == null) return;
+        if (order == null || order.IsParentOrder) return;
 
-        if (_settings.EmailTemplates.Count == 0)
-        {
-            AlertCollector.Error(AlertCategory.Settings,
-                "No email templates configured. Open Settings > Notifications to create templates.");
-            return;
-        }
+        await PrintSingleOrder(order);
+    }
 
-        // Step 1: Choose template
+    private async void ContextMenu_PrintAndEmail_Click(object sender, RoutedEventArgs e)
+    {
+        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (order == null || order.IsParentOrder) return;
+
+        var printResult = await PrintSingleOrder(order);
+        if (printResult.Sent.Count == 0) return;
+
+        await OpenEmailWindow(order);
+    }
+
+    private async Task OpenEmailWindow(OrderTreeItem order)
+    {
         var fullOrder = _orders.GetFullOrder(order.DbId);
         if (fullOrder == null)
         {
@@ -1230,23 +1175,24 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Allow creating first template on the fly if none exist
+        if (_settings.EmailTemplates.Count == 0)
+            _settings.EmailTemplates.Add(new Core.Processing.EmailTemplate
+                { Name = "Pickup", Subject = "Your order {OrderId} is ready!", Body = "Hi {CustomerName},\n\nYour order is ready for pickup.\n\nThank you!" });
+
         var isShipped = fullOrder.DeliveryMethodId == DeliveryMethodId.Ship;
-        var defaultName = _settings.GetDefaultTemplate(isShipped)?.Name;
-        var chooser = new EmailTemplateChooser(_settings.EmailTemplates, defaultName) { Owner = this };
-        if (chooser.ShowDialog() != true || chooser.SelectedTemplate == null) return;
+        var defaultTemplate = _settings.GetDefaultTemplate(isShipped);
 
-        // Step 2: Preview with placeholders filled
-        var template = chooser.SelectedTemplate;
-        var subject = Core.Processing.EmailService.ReplacePlaceholders(template.Subject, fullOrder);
-        var body = Core.Processing.EmailService.ReplacePlaceholders(template.Body, fullOrder);
+        var emailWin = new SendEmailWindow(fullOrder, _settings.EmailTemplates, defaultTemplate) { Owner = this };
+        if (emailWin.ShowDialog() != true || emailWin.SelectedTemplate == null) return;
 
-        var preview = new SendEmailWindow(fullOrder.CustomerEmail ?? "", subject, body) { Owner = this };
-        if (preview.ShowDialog() != true) return;
+        // Persist template changes if any were made
+        if (emailWin.TemplatesChanged)
+            _settingsManager.Save(_settings);
 
-        // Step 3: Send through NotificationService
         try
         {
-            await _notificationService.NotifyCustomerAsync(order.DbId, "operator", template);
+            await _notificationService.NotifyCustomerAsync(order.DbId, "operator", emailWin.SelectedTemplate);
             _vm.LoadOrders();
             UpdateStatusBar();
         }
@@ -1255,24 +1201,84 @@ public partial class MainWindow : Window
             AlertCollector.Error(AlertCategory.Network,
                 $"Failed to notify customer for order {order.ExternalOrderId}",
                 orderId: order.ExternalOrderId,
-                detail: $"Attempted: send email with template '{template.Name}'. " +
+                detail: $"Attempted: send email. " +
                         $"Expected: customer notified. " +
                         $"Found: {ex.GetType().Name}. " +
-                        $"Context: right-click Open Email Template. " +
+                        $"Context: email window for order. " +
                         $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
                 ex: ex);
         }
     }
 
-    private void ContextMenu_MarkDone_Click(object sender, RoutedEventArgs e)
+    private void ContextMenu_MarkPrinted_Click(object sender, RoutedEventArgs e)
     {
-        if (IsPrintedTabActive)
+        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (order == null || order.IsParentOrder) return;
+
+        _vm.MarkDone(order.DbId);
+        _vm.LoadOrders();
+        UpdateStatusBar();
+    }
+
+    private void ContextMenu_MarkUnprinted_Click(object sender, RoutedEventArgs e)
+    {
+        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (order == null) return;
+
+        var result = MessageBox.Show(
+            $"Mark order {order.ExternalOrderId} as UNPRINTED?",
+            "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (result != MessageBoxResult.Yes) return;
+
+        _vm.MarkUnprinted(order.DbId);
+        _vm.LoadOrders();
+        UpdateStatusBar();
+    }
+
+    private async Task<Core.Services.SendResult> PrintSingleOrder(OrderTreeItem order)
+    {
+        // Transfer mismatch check
+        if (order.IsTransfer)
         {
-            MarkSelectedUnprinted();
+            var mismatches = _vm.CheckTransferMismatches(order.DbId);
+            if (mismatches.Count > 0)
+            {
+                var details = string.Join("\n", mismatches.Select(m => $"  {m.ItemDescription}: {m.Issue}"));
+                var proceed = MessageBox.Show(
+                    $"Order {order.ExternalOrderId} was transferred and has {mismatches.Count} mismatch(es):\n\n{details}\n\nPrint anyway?",
+                    "Transfer Mismatch", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (proceed != MessageBoxResult.Yes)
+                    return new Core.Services.SendResult(new List<Core.Services.SentItem>(), new List<Core.Services.SkippedItem>());
+            }
         }
-        else
+
+        try
         {
-            OpenDoneConfirmForSelected(cursorOverReady: false);
+            var result = await Task.Run(() => _vm.PrintOrder(
+                order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode));
+
+            if (result.Sent.Count > 0)
+                _vm.StatusText = $"Sent {result.Sent.Count} item(s) for {order.ExternalOrderId}";
+
+            if (result.Skipped.Count > 0)
+            {
+                var reasons = result.Skipped.Select(s => $"{s.SizeLabel}: {s.Reason}");
+                MessageBox.Show($"Skipped:\n\n{string.Join("\n", reasons)}",
+                    "Print — Some Sizes Skipped", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+
+            _vm.LoadOrders();
+            UpdateStatusBar();
+            return result;
+        }
+        catch (Exception ex)
+        {
+            AlertCollector.Error(Core.AlertCategory.Printing,
+                $"Print failed for {order.ExternalOrderId}",
+                orderId: order.ExternalOrderId, ex: ex);
+            MessageBox.Show($"Print failed: {ex.Message}", "Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return new Core.Services.SendResult(new List<Core.Services.SentItem>(), new List<Core.Services.SkippedItem>());
         }
     }
 
@@ -1351,85 +1357,6 @@ public partial class MainWindow : Window
         {
             _vm.LoadOrders();
             UpdateStatusBar();
-        }
-    }
-
-    private async void PrintSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        var orders = GetSelectedOrders();
-        if (orders.Count == 0 && _selectedOrderItem != null)
-            orders = new List<OrderTreeItem> { _selectedOrderItem };
-        if (orders.Count == 0) return;
-
-        // Block printing from parent orders — work from child orders instead
-        orders = orders.Where(o => !o.IsParentOrder).ToList();
-        if (orders.Count == 0) return;
-
-        // Size filter only applies when printing a single order with specific sizes selected
-        var selectedSizes = GetSelectedSizes();
-        var sizeFilter = orders.Count == 1 && selectedSizes.Count > 0
-            ? selectedSizes.Select(s => $"{s.SizeLabel}|{s.MediaType}").ToHashSet()
-            : null;
-
-        PrintBtn.IsEnabled = false;
-        PrintBtn.Content = "Printing...";
-
-        int totalSent = 0;
-        int totalSkipped = 0;
-        var allSkipReasons = new List<string>();
-
-        try
-        {
-            foreach (var order in orders)
-            {
-                // Transfer mismatch check — warn if files don't match DB after transfer
-                if (order.IsTransfer)
-                {
-                    var mismatches = _vm.CheckTransferMismatches(order.DbId);
-                    if (mismatches.Count > 0)
-                    {
-                        var details = string.Join("\n", mismatches.Select(m => $"  {m.ItemDescription}: {m.Issue}"));
-                        var proceed = MessageBox.Show(
-                            $"Order {order.ExternalOrderId} was transferred and has {mismatches.Count} mismatch(es):\n\n{details}\n\nPrint anyway?",
-                            "Transfer Mismatch", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-                        if (proceed != MessageBoxResult.Yes)
-                            continue;
-                    }
-                }
-
-                var result = await Task.Run(() => _vm.PrintOrder(
-                    order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode, sizeFilter));
-
-                totalSent += result.Sent.Count;
-                totalSkipped += result.Skipped.Count;
-
-                foreach (var s in result.Skipped)
-                    allSkipReasons.Add($"{order.ExternalOrderId} — {s.SizeLabel}: {s.Reason}");
-            }
-
-            if (totalSent > 0)
-                _vm.StatusText = $"Sent {totalSent} item(s) across {orders.Count} order(s)";
-
-            if (totalSkipped > 0)
-            {
-                MessageBox.Show($"Skipped {totalSkipped} size group(s):\n\n{string.Join("\n", allSkipReasons)}",
-                    "Print — Some Sizes Skipped", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-
-            _vm.LoadOrders();
-            UpdateStatusBar();
-        }
-        catch (Exception ex)
-        {
-            AlertCollector.Error(Core.AlertCategory.Printing,
-                "Batch print failed", ex: ex);
-            MessageBox.Show($"Print failed: {ex.Message}", "Error",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            PrintBtn.IsEnabled = true;
-            PrintBtn.Content = "Print Selected";
         }
     }
 
