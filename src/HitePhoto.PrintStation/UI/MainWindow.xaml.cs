@@ -1058,71 +1058,17 @@ public partial class MainWindow : Window
         RefreshTreeAndStatus();
     }
 
-    private async Task MarkPrintedBatch(List<OrderTreeItem> targets, bool cursorOverReady)
+    private void MarkPrintedBatch(List<OrderTreeItem> targets)
     {
         if (targets.Count == 0) return;
 
-        // For single order, show the confirm dialog with cursor positioning
-        if (targets.Count == 1)
+        foreach (var order in targets)
         {
-            var order = targets[0];
-            var win = new DoneConfirmWindow(
-                order.CustomerName, order.ExternalOrderId,
-                alreadyDone: order.StatusCode == OrderStatusCode.PickedUp,
-                alreadyNotified: order.NotifiedAt.HasValue,
-                cursorOverReady: cursorOverReady)
-            { Owner = this };
-
-            if (win.ShowDialog() == true)
-                await ApplyDoneAction(targets, win.Result);
-        }
-        else
-        {
-            // Batch: one confirm for all
-            var names = string.Join(", ", targets.Take(5).Select(o => o.ExternalOrderId));
-            if (targets.Count > 5) names += $" +{targets.Count - 5} more";
-
-            var action = cursorOverReady ? "mark printed + ready" : "mark printed";
-            var result = MessageBox.Show(
-                $"{action.ToUpperInvariant()} {targets.Count} orders?\n\n{names}",
-                "Batch Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
-
-            if (result == MessageBoxResult.Yes)
-                await ApplyDoneAction(targets, cursorOverReady ? DoneAction.MarkDoneAndReady : DoneAction.MarkDone);
+            _vm.MarkDone(order.DbId);
+            order.StatusCode = OrderStatusCode.PickedUp;
         }
 
         RefreshTreeAndStatus();
-    }
-
-    private async Task ApplyDoneAction(List<OrderTreeItem> orders, DoneAction action)
-    {
-        foreach (var order in orders)
-        {
-            if (action == DoneAction.MarkDone || action == DoneAction.MarkDoneAndReady)
-            {
-                _vm.MarkDone(order.DbId);
-                order.StatusCode = OrderStatusCode.PickedUp;
-            }
-            if (action == DoneAction.MarkDoneAndReady)
-            {
-                try
-                {
-                    await _notificationService.NotifyCustomerAsync(order.DbId, "operator");
-                }
-                catch (Exception ex)
-                {
-                    AlertCollector.Error(AlertCategory.Network,
-                        $"Failed to notify customer for order {order.ExternalOrderId}",
-                        orderId: order.ExternalOrderId,
-                        detail: $"Attempted: send notification via NotificationService. " +
-                                $"Expected: customer notified. " +
-                                $"Found: {ex.GetType().Name}. " +
-                                $"Context: ApplyDoneAction with MarkDoneAndReady. " +
-                                $"State: order {order.ExternalOrderId}, DbId={order.DbId}.",
-                        ex: ex);
-                }
-            }
-        }
     }
 
     // ── Context menu handlers (right-click on order header) ──
@@ -1280,10 +1226,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ContextMenu_MarkPrinted_Click(object sender, RoutedEventArgs e)
+    private void ContextMenu_MarkPrinted_Click(object sender, RoutedEventArgs e)
     {
         if (!TryGetContextTargets(sender, out var targets)) return;
-        await MarkPrintedBatch(targets, cursorOverReady: false);
+        MarkPrintedBatch(targets);
     }
 
     private void ContextMenu_MarkUnprinted_Click(object sender, RoutedEventArgs e)
