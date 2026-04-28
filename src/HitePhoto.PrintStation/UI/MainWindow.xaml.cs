@@ -347,6 +347,9 @@ public partial class MainWindow : Window
         // Close channel popup when clicking anywhere in the tree
         if (ChannelPopup.IsOpen) ChannelPopup.IsOpen = false;
 
+        // Right-click should not change selection — context menu reads multi-selection as-is
+        if (e.ChangedButton == MouseButton.Right) return;
+
         // Find the data item that was clicked
         var hit = e.OriginalSource as DependencyObject;
         object? dataItem = null;
@@ -508,6 +511,19 @@ public partial class MainWindow : Window
         selected.AddRange(_vm.PrintedOrders.Where(o => o.IsSelected));
         selected.AddRange(_vm.OtherStoreOrders.Where(o => o.IsSelected));
         return selected;
+    }
+
+    /// <summary>
+    /// Resolve the targets for a right-click action.
+    /// If the right-clicked order is part of a multi-selection, act on all selected.
+    /// Otherwise act on just the right-clicked one.
+    /// </summary>
+    private List<OrderTreeItem> GetActionTargets(OrderTreeItem rightClicked)
+    {
+        var selected = GetSelectedOrders();
+        return selected.Count > 1 && selected.Contains(rightClicked)
+            ? selected
+            : new List<OrderTreeItem> { rightClicked };
     }
 
     private List<SizeTreeItem> GetSelectedSizes()
@@ -1022,23 +1038,20 @@ public partial class MainWindow : Window
         UpdateStatusBar();
     }
 
-    private void MarkSelectedUnprinted()
+    private void MarkUnprintedBatch(List<OrderTreeItem> targets)
     {
-        var selected = GetSelectedOrders();
-        if (selected.Count == 0 && _selectedOrderItem != null)
-            selected = new List<OrderTreeItem> { _selectedOrderItem };
-        if (selected.Count == 0) return;
+        if (targets.Count == 0) return;
 
-        var names = string.Join(", ", selected.Take(5).Select(o => o.ExternalOrderId));
-        if (selected.Count > 5) names += $" +{selected.Count - 5} more";
+        var names = string.Join(", ", targets.Take(5).Select(o => o.ExternalOrderId));
+        if (targets.Count > 5) names += $" +{targets.Count - 5} more";
 
         var result = MessageBox.Show(
-            $"Mark {selected.Count} order(s) as UNPRINTED?\n\n{names}",
+            $"Mark {targets.Count} order(s) as UNPRINTED?\n\n{names}",
             "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
 
         if (result != MessageBoxResult.Yes) return;
 
-        foreach (var order in selected)
+        foreach (var order in targets)
         {
             _vm.MarkUnprinted(order.DbId);
             order.StatusCode = OrderStatusCode.New;
@@ -1048,17 +1061,14 @@ public partial class MainWindow : Window
         UpdateStatusBar();
     }
 
-    private async void OpenDoneConfirmForSelected(bool cursorOverReady)
+    private async Task MarkPrintedBatch(List<OrderTreeItem> targets, bool cursorOverReady)
     {
-        var selected = GetSelectedOrders();
-        if (selected.Count == 0 && _selectedOrderItem != null)
-            selected = new List<OrderTreeItem> { _selectedOrderItem };
-        if (selected.Count == 0) return;
+        if (targets.Count == 0) return;
 
         // For single order, show the confirm dialog with cursor positioning
-        if (selected.Count == 1)
+        if (targets.Count == 1)
         {
-            var order = selected[0];
+            var order = targets[0];
             var win = new DoneConfirmWindow(
                 order.CustomerName, order.ExternalOrderId,
                 alreadyDone: order.StatusCode == OrderStatusCode.PickedUp,
@@ -1067,21 +1077,21 @@ public partial class MainWindow : Window
             { Owner = this };
 
             if (win.ShowDialog() == true)
-                await ApplyDoneAction(selected, win.Result);
+                await ApplyDoneAction(targets, win.Result);
         }
         else
         {
             // Batch: one confirm for all
-            var names = string.Join(", ", selected.Take(5).Select(o => o.ExternalOrderId));
-            if (selected.Count > 5) names += $" +{selected.Count - 5} more";
+            var names = string.Join(", ", targets.Take(5).Select(o => o.ExternalOrderId));
+            if (targets.Count > 5) names += $" +{targets.Count - 5} more";
 
             var action = cursorOverReady ? "mark printed + ready" : "mark printed";
             var result = MessageBox.Show(
-                $"{action.ToUpperInvariant()} {selected.Count} orders?\n\n{names}",
+                $"{action.ToUpperInvariant()} {targets.Count} orders?\n\n{names}",
                 "Batch Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
 
             if (result == MessageBoxResult.Yes)
-                await ApplyDoneAction(selected, cursorOverReady ? DoneAction.MarkDoneAndReady : DoneAction.MarkDone);
+                await ApplyDoneAction(targets, cursorOverReady ? DoneAction.MarkDoneAndReady : DoneAction.MarkDone);
         }
 
         _vm.LoadOrders();
@@ -1147,29 +1157,42 @@ public partial class MainWindow : Window
 
     private async void ContextMenu_Print_Click(object sender, RoutedEventArgs e)
     {
-        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (order == null || order.IsParentOrder) return;
+        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (rightClicked == null || rightClicked.IsParentOrder) return;
 
-        await PrintSingleOrder(order);
+        var targets = GetActionTargets(rightClicked).Where(o => !o.IsParentOrder).ToList();
+        foreach (var order in targets)
+            await PrintSingleOrder(order);
     }
 
     private async void ContextMenu_PrintAndEmail_Click(object sender, RoutedEventArgs e)
     {
-        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (order == null || order.IsParentOrder) return;
+        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (rightClicked == null || rightClicked.IsParentOrder) return;
 
-        var printResult = await PrintSingleOrder(order);
-        if (printResult.Sent.Count == 0) return;
+        var targets = GetActionTargets(rightClicked).Where(o => !o.IsParentOrder).ToList();
 
-        await OpenEmailWindow(order);
+        // Print all first, then email each that produced output
+        var emailable = new List<OrderTreeItem>();
+        foreach (var order in targets)
+        {
+            var printResult = await PrintSingleOrder(order);
+            if (printResult.Sent.Count > 0)
+                emailable.Add(order);
+        }
+
+        foreach (var order in emailable)
+            await OpenEmailWindow(order);
     }
 
     private async void ContextMenu_Email_Click(object sender, RoutedEventArgs e)
     {
-        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (order == null || order.IsParentOrder) return;
+        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (rightClicked == null || rightClicked.IsParentOrder) return;
 
-        await OpenEmailWindow(order);
+        var targets = GetActionTargets(rightClicked).Where(o => !o.IsParentOrder).ToList();
+        foreach (var order in targets)
+            await OpenEmailWindow(order);
     }
 
     private async void SizeContextMenu_Print_Click(object sender, RoutedEventArgs e)
@@ -1226,29 +1249,22 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ContextMenu_MarkPrinted_Click(object sender, RoutedEventArgs e)
+    private async void ContextMenu_MarkPrinted_Click(object sender, RoutedEventArgs e)
     {
-        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (order == null || order.IsParentOrder) return;
+        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (rightClicked == null || rightClicked.IsParentOrder) return;
 
-        _vm.MarkDone(order.DbId);
-        _vm.LoadOrders();
-        UpdateStatusBar();
+        var targets = GetActionTargets(rightClicked).Where(o => !o.IsParentOrder).ToList();
+        await MarkPrintedBatch(targets, cursorOverReady: false);
     }
 
     private void ContextMenu_MarkUnprinted_Click(object sender, RoutedEventArgs e)
     {
-        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (order == null) return;
+        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (rightClicked == null) return;
 
-        var result = MessageBox.Show(
-            $"Mark order {order.ExternalOrderId} as UNPRINTED?",
-            "Confirm", MessageBoxButton.YesNo, MessageBoxImage.Question);
-        if (result != MessageBoxResult.Yes) return;
-
-        _vm.MarkUnprinted(order.DbId);
-        _vm.LoadOrders();
-        UpdateStatusBar();
+        var targets = GetActionTargets(rightClicked);
+        MarkUnprintedBatch(targets);
     }
 
     private Task<Core.Services.SendResult> PrintSingleOrder(OrderTreeItem order)
@@ -1384,7 +1400,7 @@ public partial class MainWindow : Window
         if (_selectedOrderItem == null || _selectedSizeItem == null) return;
         if (_selectedOrderItem.IsParentOrder) return;
 
-        var order = _selectedOrderItem.Order;
+        var order = _orders.GetFullOrder(_selectedOrderItem.DbId);
         if (order == null)
         {
             MessageBox.Show("Order data not loaded.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -1413,7 +1429,7 @@ public partial class MainWindow : Window
     {
         if (_selectedOrderItem == null) return;
 
-        var order = _selectedOrderItem.Order;
+        var order = _orders.GetFullOrder(_selectedOrderItem.DbId);
         if (order == null)
         {
             MessageBox.Show("Order data not loaded.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
