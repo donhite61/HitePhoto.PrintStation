@@ -1164,6 +1164,25 @@ public partial class MainWindow : Window
         await OpenEmailWindow(order);
     }
 
+    private async void ContextMenu_Email_Click(object sender, RoutedEventArgs e)
+    {
+        var order = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (order == null || order.IsParentOrder) return;
+
+        await OpenEmailWindow(order);
+    }
+
+    private async void SizeContextMenu_Print_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem mi || mi.Parent is not ContextMenu cm) return;
+        if (cm.PlacementTarget is not FrameworkElement fe) return;
+        if (fe.DataContext is not SizeTreeItem size) return;
+        if (size.IsParentSize || size.ParentOrder == null) return;
+
+        var filter = new HashSet<string> { $"{size.SizeLabel}|{size.MediaType}" };
+        await RunPrintAsync(size.ParentOrder, filter);
+    }
+
     private async Task OpenEmailWindow(OrderTreeItem order)
     {
         var fullOrder = _orders.GetFullOrder(order.DbId);
@@ -1180,10 +1199,7 @@ public partial class MainWindow : Window
             _settings.EmailTemplates.Add(new Core.Processing.EmailTemplate
                 { Name = "Pickup", Subject = "Your order {OrderId} is ready!", Body = "Hi {CustomerName},\n\nYour order is ready for pickup.\n\nThank you!" });
 
-        var isShipped = fullOrder.DeliveryMethodId == DeliveryMethodId.Ship;
-        var defaultTemplate = _settings.GetDefaultTemplate(isShipped);
-
-        var emailWin = new SendEmailWindow(fullOrder, _settings.EmailTemplates, defaultTemplate) { Owner = this };
+        var emailWin = new SendEmailWindow(fullOrder, _settings) { Owner = this };
         if (emailWin.ShowDialog() != true || emailWin.SelectedTemplate == null) return;
 
         // Persist template changes if any were made
@@ -1235,7 +1251,10 @@ public partial class MainWindow : Window
         UpdateStatusBar();
     }
 
-    private async Task<Core.Services.SendResult> PrintSingleOrder(OrderTreeItem order)
+    private Task<Core.Services.SendResult> PrintSingleOrder(OrderTreeItem order)
+        => RunPrintAsync(order, sizeFilter: null);
+
+    private async Task<Core.Services.SendResult> RunPrintAsync(OrderTreeItem order, HashSet<string>? sizeFilter)
     {
         // Transfer mismatch check
         if (order.IsTransfer)
@@ -1255,7 +1274,7 @@ public partial class MainWindow : Window
         try
         {
             var result = await Task.Run(() => _vm.PrintOrder(
-                order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode));
+                order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode, sizeFilter));
 
             if (result.Sent.Count > 0)
                 _vm.StatusText = $"Sent {result.Sent.Count} item(s) for {order.ExternalOrderId}";

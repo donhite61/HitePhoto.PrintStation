@@ -107,6 +107,7 @@
                     <ContextMenu Opened="OrderContextMenu_Opened">
                         <MenuItem x:Name="CtxPrint" Header="Print" Click="ContextMenu_Print_Click"/>
                         <MenuItem x:Name="CtxPrintEmail" Header="Print &amp; Email" Click="ContextMenu_PrintAndEmail_Click"/>
+                        <MenuItem x:Name="CtxEmail" Header="Email" Click="ContextMenu_Email_Click"/>
                         <Separator x:Name="CtxPrintSep"/>
                         <MenuItem x:Name="CtxMarkPrinted" Header="Mark Printed" Click="ContextMenu_MarkPrinted_Click"/>
                         <MenuItem x:Name="CtxMarkUnprinted" Header="Mark Unprinted" Click="ContextMenu_MarkUnprinted_Click"/>
@@ -157,6 +158,11 @@
         <!-- ── Size node template ── -->
         <DataTemplate DataType="{x:Type vm:SizeTreeItem}">
             <StackPanel Orientation="Horizontal" Margin="2,0,4,0">
+                <StackPanel.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Print" Click="SizeContextMenu_Print_Click"/>
+                    </ContextMenu>
+                </StackPanel.ContextMenu>
                 <TextBlock x:Name="SzText"
                            Text="{Binding DisplayLabel}"
                            Foreground="{DynamicResource TextPrimary}"

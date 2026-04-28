@@ -2,6 +2,8 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Processing;
 using HitePhoto.Shared.Models;
 
@@ -16,12 +18,15 @@ public class SendEmailWindow : Window
     private struct POINT { public int X; public int Y; }
 
     private readonly List<EmailTemplate> _templates;
+    private readonly AppSettings _settings;
     private readonly Order _order;
     private readonly ComboBox _templateCombo;
     private readonly TextBox _toBox;
     private readonly TextBox _subjectBox;
     private readonly TextBox _bodyBox;
     private readonly Button _sendBtn;
+    private readonly Button _pickupDefaultBtn;
+    private readonly Button _mailDefaultBtn;
 
     public EmailTemplate? SelectedTemplate { get; private set; }
     public string FinalSubject => _subjectBox.Text;
@@ -30,11 +35,11 @@ public class SendEmailWindow : Window
 
     public SendEmailWindow(
         Order order,
-        List<EmailTemplate> templates,
-        EmailTemplate? defaultTemplate)
+        AppSettings settings)
     {
         _order = order;
-        _templates = templates;
+        _settings = settings;
+        _templates = settings.EmailTemplates;
 
         Title = $"Email — {order.ExternalOrderId}";
         Width = 520;
@@ -55,13 +60,29 @@ public class SendEmailWindow : Window
         var managePanel = new StackPanel { Orientation = Orientation.Horizontal };
         DockPanel.SetDock(managePanel, Dock.Right);
 
-        var newBtn = new Button { Content = "New", Width = 45, Margin = new Thickness(4, 0, 0, 0), FontSize = 11 };
+        _pickupDefaultBtn = new Button
+        {
+            Content = "Pickup default",
+            Width = 100, Margin = new Thickness(4, 0, 0, 0), FontSize = 11
+        };
+        _pickupDefaultBtn.Click += PickupDefault_Click;
+
+        _mailDefaultBtn = new Button
+        {
+            Content = "Mail default",
+            Width = 90, Margin = new Thickness(4, 0, 0, 0), FontSize = 11
+        };
+        _mailDefaultBtn.Click += MailDefault_Click;
+
+        var newBtn = new Button { Content = "New", Width = 50, Margin = new Thickness(4, 0, 0, 0), FontSize = 12 };
         newBtn.Click += NewTemplate_Click;
-        var editBtn = new Button { Content = "Edit", Width = 45, Margin = new Thickness(4, 0, 0, 0), FontSize = 11 };
+        var editBtn = new Button { Content = "Edit", Width = 50, Margin = new Thickness(4, 0, 0, 0), FontSize = 12 };
         editBtn.Click += EditTemplate_Click;
-        var delBtn = new Button { Content = "Del", Width = 40, Margin = new Thickness(4, 0, 0, 0), FontSize = 11 };
+        var delBtn = new Button { Content = "Del", Width = 45, Margin = new Thickness(4, 0, 0, 0), FontSize = 12 };
         delBtn.Click += DeleteTemplate_Click;
 
+        managePanel.Children.Add(_pickupDefaultBtn);
+        managePanel.Children.Add(_mailDefaultBtn);
         managePanel.Children.Add(newBtn);
         managePanel.Children.Add(editBtn);
         managePanel.Children.Add(delBtn);
@@ -79,7 +100,10 @@ public class SendEmailWindow : Window
         _templateCombo = new ComboBox
         {
             DisplayMemberPath = "Name",
-            ItemsSource = _templates
+            ItemsSource = _templates,
+            MaxWidth = 200,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            MinWidth = 140
         };
         _templateCombo.SelectionChanged += TemplateCombo_SelectionChanged;
         templateRow.Children.Add(_templateCombo);
@@ -160,8 +184,9 @@ public class SendEmailWindow : Window
 
         Content = root;
 
-        // Select default template (triggers rendering)
-        _templateCombo.SelectedItem = defaultTemplate ?? _templates.FirstOrDefault();
+        // Select default template based on this order's delivery method
+        var isShipped = order.DeliveryMethodId == DeliveryMethodId.Ship;
+        _templateCombo.SelectedItem = _settings.GetDefaultTemplate(isShipped) ?? _templates.FirstOrDefault();
     }
 
     private void TemplateCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -169,6 +194,53 @@ public class SendEmailWindow : Window
         if (_templateCombo.SelectedItem is not EmailTemplate tmpl) return;
         _subjectBox.Text = EmailService.ReplacePlaceholders(tmpl.Subject, _order);
         _bodyBox.Text = EmailService.ReplacePlaceholders(tmpl.Body, _order);
+        UpdateDefaultButtonsState();
+    }
+
+    private void UpdateDefaultButtonsState()
+    {
+        var current = _templateCombo.SelectedItem as EmailTemplate;
+        var name = current?.Name ?? "";
+
+        bool isPickup = !string.IsNullOrEmpty(name)
+            && name.Equals(_settings.DefaultPickupTemplate, StringComparison.OrdinalIgnoreCase);
+        bool isMail = !string.IsNullOrEmpty(name)
+            && name.Equals(_settings.DefaultShippedTemplate, StringComparison.OrdinalIgnoreCase);
+
+        _pickupDefaultBtn.Background = isPickup ? Brushes.LightGreen : SystemColors.ControlBrush;
+        _pickupDefaultBtn.FontWeight = isPickup ? FontWeights.Bold : FontWeights.Normal;
+        _pickupDefaultBtn.ToolTip = isPickup
+            ? $"\"{name}\" is the pickup default — click to clear"
+            : $"Set \"{name}\" as the pickup default";
+
+        _mailDefaultBtn.Background = isMail ? Brushes.LightGreen : SystemColors.ControlBrush;
+        _mailDefaultBtn.FontWeight = isMail ? FontWeights.Bold : FontWeights.Normal;
+        _mailDefaultBtn.ToolTip = isMail
+            ? $"\"{name}\" is the mail default — click to clear"
+            : $"Set \"{name}\" as the mail default";
+
+        _pickupDefaultBtn.IsEnabled = current != null;
+        _mailDefaultBtn.IsEnabled = current != null;
+    }
+
+    private void PickupDefault_Click(object sender, RoutedEventArgs e)
+    {
+        if (_templateCombo.SelectedItem is not EmailTemplate current) return;
+
+        var alreadyDefault = current.Name.Equals(_settings.DefaultPickupTemplate, StringComparison.OrdinalIgnoreCase);
+        _settings.DefaultPickupTemplate = alreadyDefault ? "" : current.Name;
+        TemplatesChanged = true;
+        UpdateDefaultButtonsState();
+    }
+
+    private void MailDefault_Click(object sender, RoutedEventArgs e)
+    {
+        if (_templateCombo.SelectedItem is not EmailTemplate current) return;
+
+        var alreadyDefault = current.Name.Equals(_settings.DefaultShippedTemplate, StringComparison.OrdinalIgnoreCase);
+        _settings.DefaultShippedTemplate = alreadyDefault ? "" : current.Name;
+        TemplatesChanged = true;
+        UpdateDefaultButtonsState();
     }
 
     private void NewTemplate_Click(object sender, RoutedEventArgs e)
@@ -195,9 +267,17 @@ public class SendEmailWindow : Window
         var editor = new TemplateEditorWindow(copy) { Owner = this };
         if (editor.ShowDialog() != true) return;
 
+        var oldName = current.Name;
         current.Name = editor.Template.Name;
         current.Subject = editor.Template.Subject;
         current.Body = editor.Template.Body;
+
+        // Keep default pointers in sync if this template was a default
+        if (oldName.Equals(_settings.DefaultPickupTemplate, StringComparison.OrdinalIgnoreCase))
+            _settings.DefaultPickupTemplate = current.Name;
+        if (oldName.Equals(_settings.DefaultShippedTemplate, StringComparison.OrdinalIgnoreCase))
+            _settings.DefaultShippedTemplate = current.Name;
+
         TemplatesChanged = true;
         RefreshCombo(current);
 
@@ -221,6 +301,13 @@ public class SendEmailWindow : Window
         if (result != MessageBoxResult.Yes) return;
 
         _templates.Remove(current);
+
+        // Clear default pointers if they referenced the deleted template
+        if (current.Name.Equals(_settings.DefaultPickupTemplate, StringComparison.OrdinalIgnoreCase))
+            _settings.DefaultPickupTemplate = "";
+        if (current.Name.Equals(_settings.DefaultShippedTemplate, StringComparison.OrdinalIgnoreCase))
+            _settings.DefaultShippedTemplate = "";
+
         TemplatesChanged = true;
         RefreshCombo(_templates.FirstOrDefault());
     }
