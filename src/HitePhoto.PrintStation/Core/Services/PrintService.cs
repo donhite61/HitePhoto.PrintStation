@@ -34,7 +34,8 @@ public class PrintService : IPrintService
         _noritsuOutputRoot = noritsuOutputRoot;
     }
 
-    public SendResult SendToPrinter(string orderId, HashSet<string>? sizeFilter = null)
+    public SendResult SendToPrinter(string orderId, HashSet<string>? sizeFilter = null,
+        Action<string, int, int>? onProgress = null)
     {
         var sent = new List<SentItem>();
         var skipped = new List<SkippedItem>();
@@ -130,10 +131,8 @@ public class PrintService : IPrintService
                     sizeLabel = layout.TargetSizeLabel;
                     channelNumber = layout.TargetChannelNumber;
                     folderName = _writer.WritePrintJob(
-                        order.ExternalOrderId,
-                        sizeLabel,
-                        channelNumber,
-                        layoutItems);
+                        order.ExternalOrderId, sizeLabel, channelNumber, layoutItems,
+                        WrapProgress(onProgress, sizeLabel));
                 }
                 else
                 {
@@ -141,10 +140,8 @@ public class PrintService : IPrintService
                     sizeLabel = group.Key.SizeLabel;
                     channelNumber = channelResult.ChannelNumber;
                     folderName = _writer.WritePrintJob(
-                        order.ExternalOrderId,
-                        sizeLabel,
-                        channelNumber,
-                        groupItems);
+                        order.ExternalOrderId, sizeLabel, channelNumber, groupItems,
+                        WrapProgress(onProgress, sizeLabel));
                 }
 
                 // Mark items as printed
@@ -213,4 +210,7 @@ public class PrintService : IPrintService
                 detail: $"Folder: {folderPath}. Check Noritsu for error details.");
         }
     }
+
+    private static Action<int, int>? WrapProgress(Action<string, int, int>? onProgress, string sizeLabel)
+        => onProgress == null ? null : (done, total) => onProgress(sizeLabel, done, total);
 }

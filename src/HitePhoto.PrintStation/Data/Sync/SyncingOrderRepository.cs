@@ -126,6 +126,7 @@ public class SyncingOrderRepository : IOrderRepository
     public Dictionary<string, List<ItemRow>> BatchLoadItems(List<string> orderIds) => _inner.BatchLoadItems(orderIds);
     public void SetItemsUnprinted(string orderId) => _inner.SetItemsUnprinted(orderId);
     public void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates) => _inner.BatchUpdateFileStatus(updates);
+    public void UpdateItemFilepath(string itemId, string newFilepath) => _inner.UpdateItemFilepath(itemId, newFilepath);
     public void LinkChildItemsToParent(string parentOrderId, string childOrderId) => _inner.LinkChildItemsToParent(parentOrderId, childOrderId);
 
     public void SetDisplayTab(string orderId, int displayTab)

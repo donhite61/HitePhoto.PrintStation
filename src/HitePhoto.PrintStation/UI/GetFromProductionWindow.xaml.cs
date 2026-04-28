@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using HitePhoto.PrintStation.Core;
+using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Core.Services;
 using HitePhoto.PrintStation.Data.Repositories;
 
@@ -44,8 +45,7 @@ public partial class GetFromProductionWindow : Window
         _orders = orders;
         _settings = settings;
 
-        // Remote path is derived from the order's folder_path (stored as S:\... from the sending store)
-        _remotePath = folderPath?.Replace('\\', '/').Replace(settings.TransferNasPrefix, "") ?? "";
+        _remotePath = PathHelper.ToRemotePath(folderPath);
 
         OrderHeader.Text = $"Order: {externalOrderId}";
         OrderDetail.Text = folderPath;

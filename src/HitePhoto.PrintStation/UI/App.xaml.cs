@@ -114,7 +114,7 @@ public partial class App : Application
             sp.GetRequiredService<AppSettings>()));
 
         // Ingest — Pixfizz
-        services.AddSingleton<OhdApiSource>();
+        services.AddSingleton<PixfizzFtpScanner>();
         services.AddSingleton<PixfizzFtpDownloader>();
         services.AddSingleton<PixfizzArtworkDownloader>();
         services.AddSingleton<PixfizzOrderParser>();

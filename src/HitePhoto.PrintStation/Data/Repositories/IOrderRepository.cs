@@ -95,6 +95,9 @@ public interface IOrderRepository
     /// <summary>Batch update file_status on order_items. 0=unchecked, 1=OK, -1=error.</summary>
     void BatchUpdateFileStatus(List<(string ItemId, int Status)> updates);
 
+    /// <summary>Update a single item's image_filepath (e.g. after transfer download).</summary>
+    void UpdateItemFilepath(string itemId, string newFilepath);
+
     /// <summary>Pending tab: located here + not printed. See feedback_tab_query_locked.md.</summary>
     List<OrderRow> LoadPendingOrders(int storeId, bool testMode);
 

@@ -854,6 +854,16 @@ public class OrderRepository : IOrderRepository
 
 
 
+    public void UpdateItemFilepath(string itemId, string newFilepath)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE order_items SET image_filepath = @fp WHERE id = @id";
+        cmd.Parameters.AddWithValue("@fp", newFilepath);
+        cmd.Parameters.AddWithValue("@id", itemId);
+        cmd.ExecuteNonQuery();
+    }
+
     public void LinkChildItemsToParent(string parentOrderId, string childOrderId)
     {
         using var conn = _db.OpenConnection();

@@ -42,7 +42,9 @@ public class PixfizzOrderParser
             throw new InvalidOperationException($"Pixfizz order {raw.ExternalOrderId} missing folder_path");
         }
 
-        var jobId = raw.Metadata?.GetValueOrDefault("job_id");
+        // TODO: remove job_id fallback after existing orders cycle out
+        var jobId = raw.Metadata?.GetValueOrDefault("order_id")
+                   ?? raw.Metadata?.GetValueOrDefault("job_id");
 
         // ── Parse TXT (source of truth) ──
         var txtResult = PixfizzTxtParser.ParseContent(txtContent);

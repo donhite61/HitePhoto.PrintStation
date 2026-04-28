@@ -631,11 +631,11 @@ public class MainViewModel : ViewModelBase
     // ══════════════════════════════════════════════════════════════════════
 
     public SendResult PrintOrder(string orderId, string externalOrderId, string folderPath, string sourceCode,
-        HashSet<string>? sizeFilter = null)
+        HashSet<string>? sizeFilter = null, Action<string, int, int>? onProgress = null)
     {
         _verifier.VerifyOrder(externalOrderId, folderPath, sourceCode, orderId);
 
-        var result = _printService.SendToPrinter(orderId, sizeFilter);
+        var result = _printService.SendToPrinter(orderId, sizeFilter, onProgress);
         NeedsRefresh = true;
         return result;
     }

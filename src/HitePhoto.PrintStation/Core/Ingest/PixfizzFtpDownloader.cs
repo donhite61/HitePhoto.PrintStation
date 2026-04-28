@@ -15,13 +15,13 @@ public class PixfizzFtpDownloader
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
-    private AsyncFtpClient CreateClient()
+    public static AsyncFtpClient CreateClient(AppSettings settings)
     {
         var client = new AsyncFtpClient(
-            _settings.PixfizzFtpServer,
-            _settings.PixfizzFtpUsername,
-            _settings.PixfizzFtpPassword,
-            _settings.PixfizzFtpPort);
+            settings.PixfizzFtpServer,
+            settings.PixfizzFtpUsername,
+            settings.PixfizzFtpPassword,
+            settings.PixfizzFtpPort);
         client.Config.DataConnectionType = FtpDataConnectionType.AutoPassive;
         client.Config.EncryptionMode = FtpEncryptionMode.None;
         client.Config.ConnectTimeout = 15000;
@@ -31,13 +31,14 @@ public class PixfizzFtpDownloader
     }
 
     /// <summary>
-    /// Downloads the darkroom TXT file for a specific job from FTP.
-    /// Matches "{orderNumber}_{jobId}.txt" exactly.
+    /// Downloads the darkroom TXT file for an order from FTP.
+    /// The TXT filename uses the orderId (not jobId): "{orderNumber}_{orderId}.txt".
+    /// Falls back to matching by orderNumber prefix if orderId doesn't match.
     /// Returns TXT content or null if not found.
     /// </summary>
-    public async Task<string?> DownloadDarkroomTxtAsync(string orderNumber, CancellationToken ct, string? jobId = null)
+    public async Task<string?> DownloadDarkroomTxtAsync(string orderNumber, CancellationToken ct, string? orderId = null)
     {
-        using var client = CreateClient();
+        using var client = CreateClient(_settings);
         await client.Connect(ct);
 
         var remotePath = _settings.PixfizzFtpDarkroomFolder.TrimEnd('/');
@@ -49,32 +50,23 @@ public class PixfizzFtpDownloader
             f.Name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)).ToList();
 
         FtpListItem? match = null;
-        if (!string.IsNullOrEmpty(jobId))
+
+        // Try exact match with orderId first
+        if (!string.IsNullOrEmpty(orderId))
         {
-            var expectedName = $"{orderNumber}_{jobId}.txt";
+            var expectedName = $"{orderNumber}_{orderId}.txt";
             match = txtFiles.FirstOrDefault(f =>
                 f.Name.Equals(expectedName, StringComparison.OrdinalIgnoreCase));
-
-            if (match == null)
-            {
-                AlertCollector.Error(AlertCategory.Network,
-                    $"Darkroom TXT not found for job {jobId}",
-                    orderId: orderNumber,
-                    detail: $"Expected: '{expectedName}' in FTP {remotePath}. " +
-                            $"Available: [{string.Join(", ", txtFiles.Select(f => f.Name))}]");
-            }
         }
-        else
+
+        // Fall back to any TXT matching the order number
+        if (match == null && txtFiles.Count == 1)
+            match = txtFiles[0];
+        else if (match == null && txtFiles.Count > 1)
         {
-            if (txtFiles.Count == 1)
-                match = txtFiles[0];
-            else if (txtFiles.Count > 1)
-            {
-                AlertCollector.Error(AlertCategory.DataQuality,
-                    $"Multiple TXT files for order, no job ID to disambiguate",
-                    orderId: orderNumber,
-                    detail: $"Found {txtFiles.Count} files: [{string.Join(", ", txtFiles.Select(f => f.Name))}]");
-            }
+            // Multiple TXT files — take the most recent
+            match = txtFiles.OrderByDescending(f => f.Modified).First();
+            AppLog.Info($"Pixfizz: multiple TXT files for {orderNumber}, using {match.Name}");
         }
 
         if (match == null)
@@ -98,7 +90,7 @@ public class PixfizzFtpDownloader
     public async Task<List<string>> DownloadArtworkAsync(
         string orderNumber, string orderId, string localOrderFolder, CancellationToken ct)
     {
-        using var client = CreateClient();
+        using var client = CreateClient(_settings);
         await client.Connect(ct);
 
         var artworkRoot = _settings.PixfizzFtpArtworkFolder.TrimEnd('/');

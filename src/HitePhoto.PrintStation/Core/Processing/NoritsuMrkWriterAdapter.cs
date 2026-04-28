@@ -17,7 +17,7 @@ public class NoritsuMrkWriterAdapter : IPrinterWriter
     }
 
     public string WritePrintJob(string externalOrderId, string sizeLabel, int channelNumber,
-        List<OrderItemRecord> items)
+        List<OrderItemRecord> items, Action<int, int>? onProgress = null)
     {
         var order = new Order { ExternalOrderId = externalOrderId };
 
@@ -31,6 +31,6 @@ public class NoritsuMrkWriterAdapter : IPrinterWriter
             MediaType = r.MediaType
         }).ToList();
 
-        return _writer.WriteMrk(order, sizeLabel, channelNumber, orderItems);
+        return _writer.WriteMrk(order, sizeLabel, channelNumber, orderItems, onProgress);
     }
 }

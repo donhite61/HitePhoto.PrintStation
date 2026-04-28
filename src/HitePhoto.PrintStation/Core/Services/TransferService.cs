@@ -1,6 +1,7 @@
 using System.IO;
 using Renci.SshNet;
 using Renci.SshNet.Sftp;
+using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.PrintStation.Data.Repositories;
 
 namespace HitePhoto.PrintStation.Core.Services;
@@ -228,7 +229,9 @@ public class TransferService : ITransferService
             return "";
         }
 
-        var childFolderPath = _settings.TransferNasPrefix + remoteFolderBase.Replace('/', '\\');
+        // Store the SFTP remote path directly so the receiver doesn't need
+        // to know the sender's drive mapping.
+        var childFolderPath = remoteFolderBase;
         var childId = _orders.CreateAlteration(orderId, "split", comment, operatorName,
             newPickupStoreId: targetStoreId, newFolderPath: childFolderPath, itemIds: itemIds);
 
@@ -265,18 +268,17 @@ public class TransferService : ITransferService
 
         ValidateSftpSettings();
 
-        if (string.IsNullOrWhiteSpace(_settings.OrderOutputPath))
-            throw new InvalidOperationException("OrderOutputPath is not configured. Set it in Settings.");
+        if (string.IsNullOrWhiteSpace(_settings.TransferNasPrefix))
+            throw new InvalidOperationException("Local Root Folder is not configured. Set it in the Transfer tab in Settings.");
 
-        // Build remote path from the order's folder_path (stored as S:\... from the sending machine)
-        var remotePath = fullOrder.FolderPath?.Replace('\\', '/').Replace(_settings.TransferNasPrefix, "") ?? "";
+        // Build remote path from the order's folder_path
+        var remotePath = PathHelper.ToRemotePath(fullOrder.FolderPath);
         if (string.IsNullOrEmpty(remotePath))
             throw new InvalidOperationException($"Order {orderId} has no folder_path — cannot locate remote files.");
 
-        // Build local destination with date-time subfolder
+        // Build local destination: LocalRootFolder / month / customer / orderID timestamp
         var now = DateTime.Now;
         var monthFolder = now.ToString("MM-yy MMM").ToUpper();
-        var dateTimeFolder = now.ToString("MM-dd-yy HHmm");
         var lastName = fullOrder.CustomerLastName?.Trim() ?? "";
         var firstName = fullOrder.CustomerFirstName?.Trim() ?? "";
         var phone = FormatPhone(fullOrder.CustomerPhone?.Trim() ?? "");
@@ -284,18 +286,20 @@ public class TransferService : ITransferService
             ? $"{lastName} {firstName}".Trim()
             : $"{lastName} {firstName} {phone}".Trim();
         if (string.IsNullOrEmpty(customerFolder)) customerFolder = fullOrder.ExternalOrderId;
+        var orderFolder = $"{fullOrder.ExternalOrderId} {now:MM-dd-yy HHmm}";
 
-        var localBase = Path.Combine(_settings.OrderOutputPath, monthFolder, customerFolder, dateTimeFolder);
+        var localBase = Path.Combine(_settings.TransferNasPrefix, monthFolder, customerFolder, orderFolder);
         Directory.CreateDirectory(localBase);
 
-        // Download files
+        // Download files — track filename → local path for each file
+        var downloadedFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         using var client = CreateSftpClient();
         client.Connect();
         try
         {
             if (folderNames is { Count: > 0 })
             {
-                DownloadFolders(client, remotePath, localBase, folderNames);
+                downloadedFiles = DownloadFolders(client, remotePath, localBase, folderNames);
                 // Partial download — also grab root-level files (metadata, invoice, etc.)
                 if (RemoteDirectoryExists(client, remotePath))
                 {
@@ -306,19 +310,23 @@ public class TransferService : ITransferService
                             var localFile = Path.Combine(localBase, entry.Name);
                             using var fs = File.Create(localFile);
                             client.DownloadFile(entry.FullName, fs);
+                            downloadedFiles.TryAdd(entry.Name, localFile);
                         }
                     }
                 }
             }
             else
             {
-                // Full download — DownloadFolder already gets root files
-                DownloadFolder(client, remotePath, localBase);
+                downloadedFiles = DownloadFolder(client, remotePath, localBase);
             }
         }
         finally { client.Disconnect(); }
 
-        AppLog.Info($"GetFromProduction: downloaded order {orderId} to {localBase}");
+        AppLog.Info($"GetFromProduction: downloaded {downloadedFiles.Count} files for order {orderId} to {localBase}");
+
+        if (downloadedFiles.Count == 0)
+            throw new InvalidOperationException(
+                $"No files downloaded from remote path '{remotePath}'. The remote folder may not exist or may be empty.");
 
         if (!createOrder) return null;
 
@@ -326,9 +334,14 @@ public class TransferService : ITransferService
         var childId = _orders.CreateAlteration(orderId, "receive", comment, operatorName,
             newPickupStoreId: _settings.StoreId, newFolderPath: localBase, itemIds: itemIds);
 
-        // Rebase item paths from sender's folder to our local download folder
-        if (!string.IsNullOrEmpty(fullOrder.FolderPath))
-            _orders.RebaseChildItemPaths(childId, fullOrder.FolderPath, localBase);
+        // Set each item's image_filepath to where the file actually landed
+        var childItems = _orders.GetItems(childId);
+        foreach (var item in childItems)
+        {
+            var fileName = item.ImageFilename;
+            if (!string.IsNullOrEmpty(fileName) && downloadedFiles.TryGetValue(fileName, out var localPath))
+                _orders.UpdateItemFilepath(item.Id, localPath);
+        }
 
         // If no real items were selected, insert a Transfer service item
         var allItems = _orders.GetItems(orderId);
@@ -510,10 +523,16 @@ public class TransferService : ITransferService
         client.UploadFile(fs, remotePath, canOverride: true);
     }
 
-    /// <summary>Download all files from a remote folder recursively to a local folder.</summary>
-    private void DownloadFolder(SftpClient client, string remotePath, string localPath)
+    /// <summary>Download all files from a remote folder recursively to a local folder.
+    /// Returns a map of filename → local path for every file downloaded.</summary>
+    private Dictionary<string, string> DownloadFolder(SftpClient client, string remotePath, string localPath)
     {
-        if (!RemoteDirectoryExists(client, remotePath)) return;
+        var downloaded = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!RemoteDirectoryExists(client, remotePath))
+        {
+            AppLog.Info($"Transfer: remote directory not found, skipping: {remotePath}");
+            return downloaded;
+        }
 
         Directory.CreateDirectory(localPath);
 
@@ -523,26 +542,35 @@ public class TransferService : ITransferService
 
             if (entry.IsDirectory)
             {
-                DownloadFolder(client, entry.FullName, Path.Combine(localPath, entry.Name));
+                var subResults = DownloadFolder(client, entry.FullName, Path.Combine(localPath, entry.Name));
+                foreach (var kv in subResults)
+                    downloaded.TryAdd(kv.Key, kv.Value);
             }
             else if (entry.IsRegularFile)
             {
                 var localFile = Path.Combine(localPath, entry.Name);
                 using var fs = File.Create(localFile);
                 client.DownloadFile(entry.FullName, fs);
+                downloaded.TryAdd(entry.Name, localFile);
             }
         }
+        return downloaded;
     }
 
-    /// <summary>Download specific subfolders from a remote order folder.</summary>
-    private void DownloadFolders(SftpClient client, string remoteBase, string localBase, List<string> folderNames)
+    /// <summary>Download specific subfolders from a remote order folder.
+    /// Returns a map of filename → local path for every file downloaded.</summary>
+    private Dictionary<string, string> DownloadFolders(SftpClient client, string remoteBase, string localBase, List<string> folderNames)
     {
+        var downloaded = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var folder in folderNames)
         {
             var remoteSub = remoteBase + "/" + folder;
             var localSub = Path.Combine(localBase, folder);
-            DownloadFolder(client, remoteSub, localSub);
+            var subResults = DownloadFolder(client, remoteSub, localSub);
+            foreach (var kv in subResults)
+                downloaded.TryAdd(kv.Key, kv.Value);
         }
+        return downloaded;
     }
 
     /// <summary>List subfolder names in a remote directory (non-recursive).</summary>

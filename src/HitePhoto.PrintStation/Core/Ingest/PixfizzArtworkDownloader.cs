@@ -19,7 +19,7 @@ public class PixfizzArtworkDownloader
     }
 
     public async Task<ArtworkDownloadResult> DownloadAsync(
-        string orderNumber, string jobId, CancellationToken ct)
+        string orderNumber, string orderId, CancellationToken ct)
     {
         var localFolder = IngestConstants.GetOrderFolderPath(_settings.OrderOutputPath, orderNumber);
         Directory.CreateDirectory(localFolder);
@@ -30,7 +30,7 @@ public class PixfizzArtworkDownloader
         string? txtContent;
         try
         {
-            txtContent = await _ftp.DownloadDarkroomTxtAsync(orderNumber, ct, jobId);
+            txtContent = await _ftp.DownloadDarkroomTxtAsync(orderNumber, ct, orderId);
         }
         catch (Exception ex)
         {
@@ -53,7 +53,7 @@ public class PixfizzArtworkDownloader
         List<string> downloadedFiles;
         try
         {
-            downloadedFiles = await _ftp.DownloadArtworkAsync(orderNumber, jobId, localFolder, ct);
+            downloadedFiles = await _ftp.DownloadArtworkAsync(orderNumber, orderId, localFolder, ct);
         }
         catch (Exception ex)
         {
@@ -116,7 +116,7 @@ public class PixfizzArtworkDownloader
                 // Delete bad file and retry from FTP once
                 try { File.Delete(targetPath); } catch { }
 
-                var retryFiles = await RetryDownloadAsync(orderNumber, jobId, localFolder, ct);
+                var retryFiles = await RetryDownloadAsync(orderNumber, orderId, localFolder, ct);
                 var retryPath = retryFiles?.FirstOrDefault(f =>
                     Path.GetFileName(f).Equals(item.ImageFilename, StringComparison.OrdinalIgnoreCase));
 
@@ -142,11 +142,11 @@ public class PixfizzArtworkDownloader
     }
 
     private async Task<List<string>?> RetryDownloadAsync(
-        string orderNumber, string jobId, string localFolder, CancellationToken ct)
+        string orderNumber, string orderId, string localFolder, CancellationToken ct)
     {
         try
         {
-            return await _ftp.DownloadArtworkAsync(orderNumber, jobId, localFolder, ct);
+            return await _ftp.DownloadArtworkAsync(orderNumber, orderId, localFolder, ct);
         }
         catch (Exception ex)
         {

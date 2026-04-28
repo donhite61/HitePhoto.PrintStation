@@ -10,7 +10,8 @@ public interface IPrintService
     /// Returns what was sent and what was skipped (no channel).
     /// Does NOT mark is_printed — that happens when Noritsu confirms.
     /// </summary>
-    SendResult SendToPrinter(string orderId, HashSet<string>? sizeFilter = null);
+    SendResult SendToPrinter(string orderId, HashSet<string>? sizeFilter = null,
+        Action<string, int, int>? onProgress = null);
 
     /// <summary>
     /// Scan Noritsu output folder for completed (e) or rejected (q) folders.

@@ -11,5 +11,5 @@ public interface IPrinterWriter
     /// Write a print job for a size group. Returns the output folder name.
     /// </summary>
     string WritePrintJob(string externalOrderId, string sizeLabel, int channelNumber,
-        List<OrderItemRecord> items);
+        List<OrderItemRecord> items, Action<int, int>? onProgress = null);
 }

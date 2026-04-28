@@ -59,6 +59,7 @@ public partial class MainWindow : Window
     private OrderTreeItem? _selectedOrderItem;
     private SizeTreeItem? _selectedSizeItem;
     private OrderTreeItem? _lastClickedOrder; // anchor for shift-select
+    private bool _isPrinting;
     private SizeTreeItem? _lastClickedSize;
 
     public MainWindow(MainViewModel vm, AppSettings settings, SettingsManager settingsManager,
@@ -1244,6 +1245,12 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task<Core.Services.SendResult> RunPrintAsync(OrderTreeItem order, HashSet<string>? sizeFilter)
     {
+        if (_isPrinting)
+        {
+            _vm.StatusText = "Print already in progress...";
+            return new Core.Services.SendResult(new List<Core.Services.SentItem>(), new List<Core.Services.SkippedItem>());
+        }
+
         if (order.IsTransfer)
         {
             var mismatches = _vm.CheckTransferMismatches(order.DbId);
@@ -1258,10 +1265,17 @@ public partial class MainWindow : Window
             }
         }
 
+        _isPrinting = true;
+        _vm.StatusText = $"Printing {order.ExternalOrderId}...";
         try
         {
             var result = await Task.Run(() => _vm.PrintOrder(
-                order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode, sizeFilter));
+                order.DbId, order.ExternalOrderId, order.FolderPath, order.SourceCode, sizeFilter,
+                onProgress: (size, done, total) =>
+                {
+                    Dispatcher.BeginInvoke(() =>
+                        _vm.StatusText = $"Printing {order.ExternalOrderId} — {size}: {done}/{total}");
+                }));
 
             if (result.Sent.Count > 0)
                 _vm.StatusText = $"Sent {result.Sent.Count} item(s) for {order.ExternalOrderId}";
@@ -1276,6 +1290,10 @@ public partial class MainWindow : Window
             MessageBox.Show($"Print failed: {ex.Message}", "Error",
                 MessageBoxButton.OK, MessageBoxImage.Error);
             return new Core.Services.SendResult(new List<Core.Services.SentItem>(), new List<Core.Services.SkippedItem>());
+        }
+        finally
+        {
+            _isPrinting = false;
         }
     }
 
