@@ -78,6 +78,35 @@ public class AppSettings
         => GetTemplate(isShipped ? DefaultShippedTemplate : DefaultPickupTemplate)
            ?? EmailTemplates.FirstOrDefault();
 
+    public bool IsDefault(string templateName, bool isShipped)
+    {
+        if (string.IsNullOrEmpty(templateName)) return false;
+        var current = isShipped ? DefaultShippedTemplate : DefaultPickupTemplate;
+        return templateName.Equals(current, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void SetDefault(string templateName, bool isShipped)
+    {
+        if (isShipped) DefaultShippedTemplate = templateName;
+        else           DefaultPickupTemplate  = templateName;
+    }
+
+    public void RenameDefault(string oldName, string newName)
+    {
+        if (DefaultPickupTemplate.Equals(oldName, StringComparison.OrdinalIgnoreCase))
+            DefaultPickupTemplate = newName;
+        if (DefaultShippedTemplate.Equals(oldName, StringComparison.OrdinalIgnoreCase))
+            DefaultShippedTemplate = newName;
+    }
+
+    public void ClearDefaultIfMatches(string name)
+    {
+        if (DefaultPickupTemplate.Equals(name, StringComparison.OrdinalIgnoreCase))
+            DefaultPickupTemplate = "";
+        if (DefaultShippedTemplate.Equals(name, StringComparison.OrdinalIgnoreCase))
+            DefaultShippedTemplate = "";
+    }
+
     // ── Pixfizz ──
     public bool   PixfizzEnabled         { get; set; } = true;
     public string PixfizzApiUrl          { get; set; } = "https://nazkcvruighrhpgcarxg.supabase.co/functions/v1";

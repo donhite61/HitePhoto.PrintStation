@@ -716,8 +716,7 @@ public partial class MainWindow : Window
         ChannelSearchBox.Text = "";
 
         _channelEntriesLoaded = false;
-        _vm.LoadOrders();
-        UpdateStatusBar();
+        RefreshTreeAndStatus();
     }
 
     private void LoadOrderOptions(OrderTreeItem treeItem)
@@ -1034,8 +1033,7 @@ public partial class MainWindow : Window
             _vm.ToggleHold("operator");
             order.IsHeld = !order.IsHeld; // reflect immediately
         }
-        _vm.LoadOrders();
-        UpdateStatusBar();
+        RefreshTreeAndStatus();
     }
 
     private void MarkUnprintedBatch(List<OrderTreeItem> targets)
@@ -1057,8 +1055,7 @@ public partial class MainWindow : Window
             order.StatusCode = OrderStatusCode.New;
         }
 
-        _vm.LoadOrders();
-        UpdateStatusBar();
+        RefreshTreeAndStatus();
     }
 
     private async Task MarkPrintedBatch(List<OrderTreeItem> targets, bool cursorOverReady)
@@ -1094,8 +1091,7 @@ public partial class MainWindow : Window
                 await ApplyDoneAction(targets, cursorOverReady ? DoneAction.MarkDoneAndReady : DoneAction.MarkDone);
         }
 
-        _vm.LoadOrders();
-        UpdateStatusBar();
+        RefreshTreeAndStatus();
     }
 
     private async Task ApplyDoneAction(List<OrderTreeItem> orders, DoneAction action)
@@ -1138,6 +1134,24 @@ public partial class MainWindow : Window
         return null;
     }
 
+    private bool TryGetContextTargets(object sender, out List<OrderTreeItem> targets, bool excludeParents = true)
+    {
+        targets = new List<OrderTreeItem>();
+        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
+        if (rightClicked == null) return false;
+        if (excludeParents && rightClicked.IsParentOrder) return false;
+
+        var resolved = GetActionTargets(rightClicked);
+        targets = excludeParents ? resolved.Where(o => !o.IsParentOrder).ToList() : resolved;
+        return targets.Count > 0;
+    }
+
+    private void RefreshTreeAndStatus()
+    {
+        _vm.LoadOrders();
+        UpdateStatusBar();
+    }
+
     private void OrderContextMenu_Opened(object sender, RoutedEventArgs e)
     {
         if (sender is not ContextMenu cm) return;
@@ -1157,42 +1171,29 @@ public partial class MainWindow : Window
 
     private async void ContextMenu_Print_Click(object sender, RoutedEventArgs e)
     {
-        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (rightClicked == null || rightClicked.IsParentOrder) return;
-
-        var targets = GetActionTargets(rightClicked).Where(o => !o.IsParentOrder).ToList();
-        foreach (var order in targets)
-            await PrintSingleOrder(order);
+        if (!TryGetContextTargets(sender, out var targets)) return;
+        await PrintBatch(targets);
     }
 
     private async void ContextMenu_PrintAndEmail_Click(object sender, RoutedEventArgs e)
     {
-        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (rightClicked == null || rightClicked.IsParentOrder) return;
+        if (!TryGetContextTargets(sender, out var targets)) return;
 
-        var targets = GetActionTargets(rightClicked).Where(o => !o.IsParentOrder).ToList();
-
-        // Print all first, then email each that produced output
-        var emailable = new List<OrderTreeItem>();
-        foreach (var order in targets)
-        {
-            var printResult = await PrintSingleOrder(order);
-            if (printResult.Sent.Count > 0)
-                emailable.Add(order);
-        }
-
-        foreach (var order in emailable)
+        var printedAny = await PrintBatch(targets);
+        foreach (var order in printedAny)
             await OpenEmailWindow(order);
+
+        RefreshTreeAndStatus();
     }
 
     private async void ContextMenu_Email_Click(object sender, RoutedEventArgs e)
     {
-        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (rightClicked == null || rightClicked.IsParentOrder) return;
+        if (!TryGetContextTargets(sender, out var targets)) return;
 
-        var targets = GetActionTargets(rightClicked).Where(o => !o.IsParentOrder).ToList();
         foreach (var order in targets)
             await OpenEmailWindow(order);
+
+        RefreshTreeAndStatus();
     }
 
     private async void SizeContextMenu_Print_Click(object sender, RoutedEventArgs e)
@@ -1203,7 +1204,39 @@ public partial class MainWindow : Window
         if (size.IsParentSize || size.ParentOrder == null) return;
 
         var filter = new HashSet<string> { $"{size.SizeLabel}|{size.MediaType}" };
-        await RunPrintAsync(size.ParentOrder, filter);
+        var result = await RunPrintAsync(size.ParentOrder, filter);
+        ShowSkipsIfAny(result.Skipped.Select(s => $"{s.SizeLabel}: {s.Reason}"));
+        RefreshTreeAndStatus();
+    }
+
+    /// <summary>
+    /// Print each target sequentially, accumulating skip reasons into one summary dialog
+    /// at the end and refreshing the tree once. Returns the orders that produced output.
+    /// </summary>
+    private async Task<List<OrderTreeItem>> PrintBatch(List<OrderTreeItem> targets)
+    {
+        var printed = new List<OrderTreeItem>();
+        var skipReasons = new List<string>();
+
+        foreach (var order in targets)
+        {
+            var result = await RunPrintAsync(order, sizeFilter: null);
+            if (result.Sent.Count > 0) printed.Add(order);
+            foreach (var s in result.Skipped)
+                skipReasons.Add($"{order.ExternalOrderId} — {s.SizeLabel}: {s.Reason}");
+        }
+
+        ShowSkipsIfAny(skipReasons);
+        RefreshTreeAndStatus();
+        return printed;
+    }
+
+    private static void ShowSkipsIfAny(IEnumerable<string> reasons)
+    {
+        var list = reasons.ToList();
+        if (list.Count == 0) return;
+        MessageBox.Show($"Skipped {list.Count} size group(s):\n\n{string.Join("\n", list)}",
+            "Print — Some Sizes Skipped", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private async Task OpenEmailWindow(OrderTreeItem order)
@@ -1232,8 +1265,6 @@ public partial class MainWindow : Window
         try
         {
             await _notificationService.NotifyCustomerAsync(order.DbId, "operator", emailWin.SelectedTemplate);
-            _vm.LoadOrders();
-            UpdateStatusBar();
         }
         catch (Exception ex)
         {
@@ -1251,28 +1282,22 @@ public partial class MainWindow : Window
 
     private async void ContextMenu_MarkPrinted_Click(object sender, RoutedEventArgs e)
     {
-        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (rightClicked == null || rightClicked.IsParentOrder) return;
-
-        var targets = GetActionTargets(rightClicked).Where(o => !o.IsParentOrder).ToList();
+        if (!TryGetContextTargets(sender, out var targets)) return;
         await MarkPrintedBatch(targets, cursorOverReady: false);
     }
 
     private void ContextMenu_MarkUnprinted_Click(object sender, RoutedEventArgs e)
     {
-        var rightClicked = GetContextMenuOrder(sender) ?? _selectedOrderItem;
-        if (rightClicked == null) return;
-
-        var targets = GetActionTargets(rightClicked);
+        if (!TryGetContextTargets(sender, out var targets, excludeParents: false)) return;
         MarkUnprintedBatch(targets);
     }
 
-    private Task<Core.Services.SendResult> PrintSingleOrder(OrderTreeItem order)
-        => RunPrintAsync(order, sizeFilter: null);
-
+    /// <summary>
+    /// Run a print for a single order. Caller is responsible for surfacing skipped-size
+    /// summaries and refreshing the tree (so multi-order callers can aggregate).
+    /// </summary>
     private async Task<Core.Services.SendResult> RunPrintAsync(OrderTreeItem order, HashSet<string>? sizeFilter)
     {
-        // Transfer mismatch check
         if (order.IsTransfer)
         {
             var mismatches = _vm.CheckTransferMismatches(order.DbId);
@@ -1295,15 +1320,6 @@ public partial class MainWindow : Window
             if (result.Sent.Count > 0)
                 _vm.StatusText = $"Sent {result.Sent.Count} item(s) for {order.ExternalOrderId}";
 
-            if (result.Skipped.Count > 0)
-            {
-                var reasons = result.Skipped.Select(s => $"{s.SizeLabel}: {s.Reason}");
-                MessageBox.Show($"Skipped:\n\n{string.Join("\n", reasons)}",
-                    "Print — Some Sizes Skipped", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-
-            _vm.LoadOrders();
-            UpdateStatusBar();
             return result;
         }
         catch (Exception ex)
@@ -1421,8 +1437,7 @@ public partial class MainWindow : Window
         win.ShowDialog();
 
         // Refresh tree after changes
-        _vm.LoadOrders();
-        UpdateStatusBar();
+        RefreshTreeAndStatus();
     }
 
     private void ColorCorrectButton_Click(object sender, RoutedEventArgs e)

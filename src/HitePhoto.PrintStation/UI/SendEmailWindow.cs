@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 using HitePhoto.PrintStation.Core;
 using HitePhoto.PrintStation.Core.Processing;
@@ -21,10 +20,8 @@ public class SendEmailWindow : Window
     private readonly AppSettings _settings;
     private readonly Order _order;
     private readonly ComboBox _templateCombo;
-    private readonly TextBox _toBox;
     private readonly TextBox _subjectBox;
     private readonly TextBox _bodyBox;
-    private readonly Button _sendBtn;
     private readonly Button _pickupDefaultBtn;
     private readonly Button _mailDefaultBtn;
 
@@ -65,14 +62,14 @@ public class SendEmailWindow : Window
             Content = "Pickup default",
             Width = 100, Margin = new Thickness(4, 0, 0, 0), FontSize = 11
         };
-        _pickupDefaultBtn.Click += PickupDefault_Click;
+        _pickupDefaultBtn.Click += (_, _) => ToggleDefault(isShipped: false);
 
         _mailDefaultBtn = new Button
         {
             Content = "Mail default",
             Width = 90, Margin = new Thickness(4, 0, 0, 0), FontSize = 11
         };
-        _mailDefaultBtn.Click += MailDefault_Click;
+        _mailDefaultBtn.Click += (_, _) => ToggleDefault(isShipped: true);
 
         var newBtn = new Button { Content = "New", Width = 50, Margin = new Thickness(4, 0, 0, 0), FontSize = 12 };
         newBtn.Click += NewTemplate_Click;
@@ -111,20 +108,19 @@ public class SendEmailWindow : Window
         DockPanel.SetDock(templateRow, Dock.Top);
         root.Children.Add(templateRow);
 
-        // ── To ──
         var toLabel = new TextBlock { Text = "To:", Margin = new Thickness(0, 0, 0, 2) };
         DockPanel.SetDock(toLabel, Dock.Top);
         root.Children.Add(toLabel);
 
-        _toBox = new TextBox
+        var toBox = new TextBox
         {
             Text = order.CustomerEmail ?? "",
             IsReadOnly = true,
             Margin = new Thickness(0, 0, 0, 8),
             Background = System.Windows.Media.Brushes.WhiteSmoke
         };
-        DockPanel.SetDock(_toBox, Dock.Top);
-        root.Children.Add(_toBox);
+        DockPanel.SetDock(toBox, Dock.Top);
+        root.Children.Add(toBox);
 
         // ── Subject ──
         var subLabel = new TextBlock { Text = "Subject:", Margin = new Thickness(0, 0, 0, 2) };
@@ -135,7 +131,6 @@ public class SendEmailWindow : Window
         DockPanel.SetDock(_subjectBox, Dock.Top);
         root.Children.Add(_subjectBox);
 
-        // ── Buttons at bottom ──
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -144,7 +139,7 @@ public class SendEmailWindow : Window
         };
         DockPanel.SetDock(buttons, Dock.Bottom);
 
-        _sendBtn = new Button
+        var sendBtn = new Button
         {
             Content = "Send",
             Width = 80,
@@ -152,7 +147,7 @@ public class SendEmailWindow : Window
             IsDefault = true,
             FontWeight = FontWeights.SemiBold
         };
-        _sendBtn.Click += (_, _) =>
+        sendBtn.Click += (_, _) =>
         {
             SelectedTemplate = _templateCombo.SelectedItem as EmailTemplate;
             DialogResult = true;
@@ -165,11 +160,10 @@ public class SendEmailWindow : Window
             IsCancel = true
         };
 
-        buttons.Children.Add(_sendBtn);
+        buttons.Children.Add(sendBtn);
         buttons.Children.Add(cancelBtn);
         root.Children.Add(buttons);
 
-        // ── Body (fills remaining space) ──
         var bodyLabel = new TextBlock { Text = "Body:", Margin = new Thickness(0, 0, 0, 2) };
         DockPanel.SetDock(bodyLabel, Dock.Top);
         root.Children.Add(bodyLabel);
@@ -202,43 +196,28 @@ public class SendEmailWindow : Window
         var current = _templateCombo.SelectedItem as EmailTemplate;
         var name = current?.Name ?? "";
 
-        bool isPickup = !string.IsNullOrEmpty(name)
-            && name.Equals(_settings.DefaultPickupTemplate, StringComparison.OrdinalIgnoreCase);
-        bool isMail = !string.IsNullOrEmpty(name)
-            && name.Equals(_settings.DefaultShippedTemplate, StringComparison.OrdinalIgnoreCase);
-
-        _pickupDefaultBtn.Background = isPickup ? Brushes.LightGreen : SystemColors.ControlBrush;
-        _pickupDefaultBtn.FontWeight = isPickup ? FontWeights.Bold : FontWeights.Normal;
-        _pickupDefaultBtn.ToolTip = isPickup
-            ? $"\"{name}\" is the pickup default — click to clear"
-            : $"Set \"{name}\" as the pickup default";
-
-        _mailDefaultBtn.Background = isMail ? Brushes.LightGreen : SystemColors.ControlBrush;
-        _mailDefaultBtn.FontWeight = isMail ? FontWeights.Bold : FontWeights.Normal;
-        _mailDefaultBtn.ToolTip = isMail
-            ? $"\"{name}\" is the mail default — click to clear"
-            : $"Set \"{name}\" as the mail default";
+        StyleDefaultButton(_pickupDefaultBtn, _settings.IsDefault(name, isShipped: false), name, "pickup");
+        StyleDefaultButton(_mailDefaultBtn,   _settings.IsDefault(name, isShipped: true),  name, "mail");
 
         _pickupDefaultBtn.IsEnabled = current != null;
         _mailDefaultBtn.IsEnabled = current != null;
     }
 
-    private void PickupDefault_Click(object sender, RoutedEventArgs e)
+    private static void StyleDefaultButton(Button btn, bool isActive, string name, string label)
     {
-        if (_templateCombo.SelectedItem is not EmailTemplate current) return;
-
-        var alreadyDefault = current.Name.Equals(_settings.DefaultPickupTemplate, StringComparison.OrdinalIgnoreCase);
-        _settings.DefaultPickupTemplate = alreadyDefault ? "" : current.Name;
-        TemplatesChanged = true;
-        UpdateDefaultButtonsState();
+        btn.Background = isActive ? Brushes.LightGreen : SystemColors.ControlBrush;
+        btn.FontWeight = isActive ? FontWeights.Bold : FontWeights.Normal;
+        btn.ToolTip = isActive
+            ? $"\"{name}\" is the {label} default — click to clear"
+            : $"Set \"{name}\" as the {label} default";
     }
 
-    private void MailDefault_Click(object sender, RoutedEventArgs e)
+    private void ToggleDefault(bool isShipped)
     {
         if (_templateCombo.SelectedItem is not EmailTemplate current) return;
 
-        var alreadyDefault = current.Name.Equals(_settings.DefaultShippedTemplate, StringComparison.OrdinalIgnoreCase);
-        _settings.DefaultShippedTemplate = alreadyDefault ? "" : current.Name;
+        var newValue = _settings.IsDefault(current.Name, isShipped) ? "" : current.Name;
+        _settings.SetDefault(newValue, isShipped);
         TemplatesChanged = true;
         UpdateDefaultButtonsState();
     }
@@ -248,9 +227,9 @@ public class SendEmailWindow : Window
         var editor = new TemplateEditorWindow(new EmailTemplate()) { Owner = this };
         if (editor.ShowDialog() != true) return;
 
-        _templates.Add(editor.Template);
+        _templates.Add(editor.EditedTemplate);
         TemplatesChanged = true;
-        RefreshCombo(editor.Template);
+        RefreshCombo(editor.EditedTemplate);
     }
 
     private void EditTemplate_Click(object sender, RoutedEventArgs e)
@@ -268,20 +247,14 @@ public class SendEmailWindow : Window
         if (editor.ShowDialog() != true) return;
 
         var oldName = current.Name;
-        current.Name = editor.Template.Name;
-        current.Subject = editor.Template.Subject;
-        current.Body = editor.Template.Body;
+        current.Name = editor.EditedTemplate.Name;
+        current.Subject = editor.EditedTemplate.Subject;
+        current.Body = editor.EditedTemplate.Body;
 
-        // Keep default pointers in sync if this template was a default
-        if (oldName.Equals(_settings.DefaultPickupTemplate, StringComparison.OrdinalIgnoreCase))
-            _settings.DefaultPickupTemplate = current.Name;
-        if (oldName.Equals(_settings.DefaultShippedTemplate, StringComparison.OrdinalIgnoreCase))
-            _settings.DefaultShippedTemplate = current.Name;
-
+        _settings.RenameDefault(oldName, current.Name);
         TemplatesChanged = true;
         RefreshCombo(current);
 
-        // Re-render preview with updated template
         _subjectBox.Text = EmailService.ReplacePlaceholders(current.Subject, _order);
         _bodyBox.Text = EmailService.ReplacePlaceholders(current.Body, _order);
     }
@@ -301,12 +274,7 @@ public class SendEmailWindow : Window
         if (result != MessageBoxResult.Yes) return;
 
         _templates.Remove(current);
-
-        // Clear default pointers if they referenced the deleted template
-        if (current.Name.Equals(_settings.DefaultPickupTemplate, StringComparison.OrdinalIgnoreCase))
-            _settings.DefaultPickupTemplate = "";
-        if (current.Name.Equals(_settings.DefaultShippedTemplate, StringComparison.OrdinalIgnoreCase))
-            _settings.DefaultShippedTemplate = "";
+        _settings.ClearDefaultIfMatches(current.Name);
 
         TemplatesChanged = true;
         RefreshCombo(_templates.FirstOrDefault());
@@ -325,7 +293,7 @@ public class SendEmailWindow : Window
 /// </summary>
 public class TemplateEditorWindow : Window
 {
-    public new EmailTemplate Template { get; }
+    public EmailTemplate EditedTemplate { get; }
 
     private readonly TextBox _nameBox;
     private readonly TextBox _subjectBox;
@@ -333,7 +301,7 @@ public class TemplateEditorWindow : Window
 
     public TemplateEditorWindow(EmailTemplate template)
     {
-        Template = template;
+        EditedTemplate = template;
         Title = string.IsNullOrEmpty(template.Name) ? "New Template" : $"Edit — {template.Name}";
         Width = 480;
         Height = 420;
@@ -389,9 +357,9 @@ public class TemplateEditorWindow : Window
                 MessageBox.Show("Template name is required.", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-            Template.Name = _nameBox.Text.Trim();
-            Template.Subject = _subjectBox.Text;
-            Template.Body = _bodyBox.Text;
+            EditedTemplate.Name = _nameBox.Text.Trim();
+            EditedTemplate.Subject = _subjectBox.Text;
+            EditedTemplate.Body = _bodyBox.Text;
             DialogResult = true;
         };
 
