@@ -158,10 +158,15 @@ public class DakisIngestService : IDisposable
         // File verification happens in verify after insert — not here
         order = order with { DownloadStatus = IngestConstants.StatusReady };
 
-        // Resolve pickup store from Dakis billing_store ID (e.g. "881" → store 1)
+        // Resolve pickup store from Dakis billing_store ID (e.g. "881" → store 1).
+        // Parser guarantees BillingStoreId is non-empty (throws otherwise), so an
+        // unresolved value here means store_identifiers is missing a row.
         AppLog.Info($"Dakis ingest {order.ExternalOrderId}: billing='{order.BillingStoreId}' resolving...");
         var pickupStoreId = _orders.ResolveStoreId("dakis", order.BillingStoreId ?? "")
-                            ?? _settings.StoreId;
+            ?? throw new InvalidOperationException(
+                $"Dakis order '{order.ExternalOrderId}' has billing store " +
+                $"'{order.BillingStoreId}' that does not resolve to a known store " +
+                $"(check store_identifiers table)");
 
         if (order.IsMultiFulfiller)
         {

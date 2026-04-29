@@ -210,91 +210,39 @@ public class DakisOrderParser
                 }
             }
 
-            // Fulfillment
+            // Fulfillment — Dakis writes :billing_store: and :current_store: only on
+            // :multiple_fulfillers: orders. On :normal: orders neither field is present;
+            // the store that owns the order is the per-item :fulfillment_store_id:.
             var fulfillment = YGet(root, ":fulfillment:") ?? YGet(root, ":order_fulfillment:");
-            var currentStoreId = YStr(fulfillment, ":current_store:");
-            var billingStoreId = YStr(fulfillment, ":billing_store:");
+            var fulfillmentMode = YStr(fulfillment, ":order_fulfillment:");
+            string billingStoreId;
+            string currentStoreId;
 
-            if (string.IsNullOrEmpty(billingStoreId))
+            if (fulfillmentMode == ":multiple_fulfillers")
             {
-                var storePhotos = YList(root, ":photos:");
-                if (storePhotos != null)
-                {
-                    foreach (var photo in storePhotos)
-                    {
-                        var printsList = YList(photo, ":prints:");
-                        if (printsList == null) continue;
-                        foreach (var print in printsList)
-                        {
-                            var fsid = YStr(print, ":fulfillment_store_id:");
-                            if (!string.IsNullOrEmpty(fsid))
-                            {
-                                billingStoreId = fsid;
-                                break;
-                            }
-                        }
-                        if (!string.IsNullOrEmpty(billingStoreId)) break;
-                    }
-                }
-            }
+                billingStoreId = YStr(fulfillment, ":billing_store:");
+                if (string.IsNullOrEmpty(billingStoreId))
+                    throw new InvalidOperationException(
+                        $"Dakis order '{info.OrderId}' is :multiple_fulfillers: but " +
+                        $"has no :billing_store: in :fulfillment:");
 
-            if (string.IsNullOrEmpty(billingStoreId))
-            {
-                var storeName = YStr(YGet(root, ":store:"), ":name:");
-                if (!string.IsNullOrEmpty(storeName))
-                {
-                    var lookedUpId = LookupStoreIdByName(root, storeName);
-                    if (!string.IsNullOrEmpty(lookedUpId))
-                        billingStoreId = lookedUpId;
-                }
-            }
-
-            // For :normal fulfillment (single store), current_store is absent.
-            // Derive from first print/gift fulfillment_store_id, then billing_store.
-            if (string.IsNullOrEmpty(currentStoreId))
-            {
-                // Try prints first
-                var storePhotos = YList(root, ":photos:");
-                if (storePhotos != null)
-                {
-                    foreach (var photo in storePhotos)
-                    {
-                        var printsList = YList(photo, ":prints:");
-                        if (printsList == null) continue;
-                        foreach (var print in printsList)
-                        {
-                            var fsid = YStr(print, ":fulfillment_store_id:");
-                            if (!string.IsNullOrEmpty(fsid))
-                            {
-                                currentStoreId = fsid;
-                                break;
-                            }
-                        }
-                        if (!string.IsNullOrEmpty(currentStoreId)) break;
-                    }
-                }
-
-                // Try gift orders
+                currentStoreId = YStr(fulfillment, ":current_store:");
                 if (string.IsNullOrEmpty(currentStoreId))
-                {
-                    var gifts = YList(root, ":photo_gift_orders:");
-                    if (gifts != null)
-                    {
-                        foreach (var gift in gifts)
-                        {
-                            var fsid = YStr(gift, ":fulfillment_store_id:");
-                            if (!string.IsNullOrEmpty(fsid))
-                            {
-                                currentStoreId = fsid;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Last resort: use billing store
-                if (string.IsNullOrEmpty(currentStoreId))
-                    currentStoreId = billingStoreId;
+                    throw new InvalidOperationException(
+                        $"Dakis order '{info.OrderId}' is :multiple_fulfillers: but " +
+                        $"has no :current_store: in :fulfillment:");
+            }
+            else
+            {
+                // :normal fulfillment — single store. Read fulfillment_store_id from the
+                // first available item (prints first, then gifts).
+                var owningStoreId = FindFirstItemFulfillmentStore(root)
+                    ?? throw new InvalidOperationException(
+                        $"Dakis order '{info.OrderId}' is :normal: fulfillment but no " +
+                        $"item has :fulfillment_store_id: (checked :photos:[].:prints:[] " +
+                        $"and :photo_gift_orders:[])");
+                billingStoreId = owningStoreId;
+                currentStoreId = owningStoreId;
             }
 
             info.BillingStoreId = billingStoreId;
@@ -708,6 +656,41 @@ public class DakisOrderParser
             if (string.Equals(YStr(store, ":name:"), storeName, StringComparison.OrdinalIgnoreCase))
                 return YStr(store, ":id:");
         }
+        return null;
+    }
+
+    /// <summary>
+    /// For :normal: fulfillment orders, the only store info Dakis writes is per-item
+    /// :fulfillment_store_id:. Returns the first one found in :photos:[].:prints:[]
+    /// (print orders) or :photo_gift_orders:[] (gift orders), or null if neither has any.
+    /// </summary>
+    private static string? FindFirstItemFulfillmentStore(object? root)
+    {
+        var storePhotos = YList(root, ":photos:");
+        if (storePhotos != null)
+        {
+            foreach (var photo in storePhotos)
+            {
+                var printsList = YList(photo, ":prints:");
+                if (printsList == null) continue;
+                foreach (var print in printsList)
+                {
+                    var fsid = YStr(print, ":fulfillment_store_id:");
+                    if (!string.IsNullOrEmpty(fsid)) return fsid;
+                }
+            }
+        }
+
+        var gifts = YList(root, ":photo_gift_orders:");
+        if (gifts != null)
+        {
+            foreach (var gift in gifts)
+            {
+                var fsid = YStr(gift, ":fulfillment_store_id:");
+                if (!string.IsNullOrEmpty(fsid)) return fsid;
+            }
+        }
+
         return null;
     }
 
