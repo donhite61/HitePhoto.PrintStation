@@ -26,8 +26,6 @@
                         <TextBlock Text="Dakis" Foreground="{DynamicResource TextHeading}"
                                    FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
                         <CheckBox x:Name="DakisEnabledCheck" Content="Active" Margin="0,0,0,6"/>
-                        <Label Content="Dakis Store ID (e.g. 881, 882)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
-                        <TextBox x:Name="DakisStoreIdBox" Width="80" HorizontalAlignment="Left" Margin="0,0,0,8"/>
                         <Label Content="Incoming orders folder" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
                         <Grid Margin="0,0,0,14">
                             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -126,9 +124,7 @@
             <TabItem Header="Pixfizz">
                 <ScrollViewer Margin="12">
                     <StackPanel MaxWidth="650">
-                        <CheckBox x:Name="PixfizzEnabledCheck" Content="Pixfizz Active" Margin="0,0,0,6"/>
-                        <Label Content="Pixfizz Store ID (e.g. hitephoto, hitephotobh)" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
-                        <TextBox x:Name="PixfizzStoreIdBox" Width="200" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+                        <CheckBox x:Name="PixfizzEnabledCheck" Content="Pixfizz Active" Margin="0,0,0,12"/>
 
                         <TextBlock Text="API" Foreground="{DynamicResource TextHeading}"
                                    FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
