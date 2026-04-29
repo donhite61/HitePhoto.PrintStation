@@ -147,14 +147,27 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Repair all Pending tab orders from source files. Called on hourly timer.
+    /// Repair Pending tab orders from source files. Called on hourly timer.
+    /// Skips orders older than <paramref name="daysCutoff"/> — those belong to LabApi,
+    /// not the local print queue, so the parser shouldn't be re-touching their files.
     /// </summary>
-    public void RepairPendingOrders()
+    public void RepairPendingOrders(int daysCutoff)
     {
         var pending = _orders.LoadPendingOrders(_settings.StoreId, _settings.TestMode);
+        var cutoff = daysCutoff > 0 ? DateTime.Now.AddDays(-daysCutoff) : DateTime.MinValue;
+
         int totalRepairs = 0;
+        int skipped = 0;
         foreach (var order in pending)
         {
+            if (cutoff > DateTime.MinValue
+                && DateTime.TryParse(order.OrderedAt, out var ordered)
+                && ordered < cutoff)
+            {
+                skipped++;
+                continue;
+            }
+
             try
             {
                 totalRepairs += _verifier.RepairOrder(order.Id, order.FolderPath, order.SourceCode);
@@ -168,7 +181,7 @@ public class MainViewModel : ViewModelBase
         }
         if (totalRepairs > 0)
         {
-            AppLog.Info($"Pending repair: {totalRepairs} item(s) fixed across {pending.Count} orders");
+            AppLog.Info($"Pending repair: {totalRepairs} item(s) fixed across {pending.Count - skipped} orders ({skipped} skipped as older than cutoff)");
             NeedsRefresh = true;
         }
     }
@@ -728,9 +741,9 @@ public class MainViewModel : ViewModelBase
         LoadOrders();
     }
 
-    public void RunDakisScan()
+    public void RunDakisScan(int daysCutoff)
     {
-        _dakisIngest.ScanFolder();
+        _dakisIngest.ScanFolder(daysCutoff);
     }
 
     public void StartDakisWatcher() => _dakisIngest.StartWatching();

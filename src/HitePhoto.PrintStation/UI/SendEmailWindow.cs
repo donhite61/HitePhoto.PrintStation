@@ -44,10 +44,13 @@ public class SendEmailWindow : Window
         WindowStartupLocation = WindowStartupLocation.Manual;
         ResizeMode = ResizeMode.CanResizeWithGrip;
 
-        // Position so Send button lands under cursor
+        // Position so Send button lands under cursor, then clamp on-screen so the
+        // title bar doesn't disappear off the top when the cursor is near the top
+        // of the order list.
         GetCursorPos(out var pt);
-        Left = pt.X - 250;
-        Top = pt.Y - 460;
+        var work = SystemParameters.WorkArea;
+        Left = Math.Max(work.Left, Math.Min(pt.X - 250, work.Right  - Width));
+        Top  = Math.Max(work.Top,  Math.Min(pt.Y - 460, work.Bottom - Height));
 
         var root = new DockPanel { Margin = new Thickness(12) };
 

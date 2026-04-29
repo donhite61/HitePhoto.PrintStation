@@ -989,6 +989,58 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void TestPixfizzFtp_Click(object sender, RoutedEventArgs e)
+    {
+        PixfizzFtpTestStatus.Text = "Connecting...";
+        PixfizzFtpTestStatus.Foreground = (Brush)FindResource("TextSecondary");
+
+        var host = PixfizzFtpServerBox.Text.Trim();
+        var port = int.TryParse(PixfizzFtpPortBox.Text.Trim(), out int p) && p > 0 ? p : 21;
+        var user = PixfizzFtpUserBox.Text.Trim();
+        var pass = PixfizzFtpPassBox.Password;
+        var artwork = PixfizzFtpArtworkBox.Text.Trim();
+
+        if (string.IsNullOrEmpty(host) || string.IsNullOrEmpty(user))
+        {
+            PixfizzFtpTestStatus.Text = "Host and username required";
+            PixfizzFtpTestStatus.Foreground = (Brush)FindResource("AccentRed");
+            return;
+        }
+
+        var (error, fileCount) = await Task.Run<(string?, int)>(async () =>
+        {
+            try
+            {
+                using var client = new FluentFTP.AsyncFtpClient(host, user, pass, port);
+                client.Config.DataConnectionType = FluentFTP.FtpDataConnectionType.AutoPassive;
+                client.Config.EncryptionMode = FluentFTP.FtpEncryptionMode.None;
+                client.Config.ConnectTimeout = 10000;
+                client.Config.ReadTimeout = 10000;
+                await client.Connect();
+
+                if (string.IsNullOrEmpty(artwork))
+                    return (null, -1);
+
+                var listing = await client.GetListing(artwork.TrimEnd('/'));
+                return (null, listing.Length);
+            }
+            catch (Exception ex) { return (ex.Message, 0); }
+        });
+
+        if (error == null)
+        {
+            PixfizzFtpTestStatus.Text = fileCount < 0
+                ? "Connected! (Artwork folder not set — skipped listing)"
+                : $"Connected! {fileCount} entries in {artwork}.";
+            PixfizzFtpTestStatus.Foreground = (Brush)FindResource("AccentGreen");
+        }
+        else
+        {
+            PixfizzFtpTestStatus.Text = error;
+            PixfizzFtpTestStatus.Foreground = (Brush)FindResource("AccentRed");
+        }
+    }
+
     private async void TestTransferSftp_Click(object sender, RoutedEventArgs e)
     {
         TransferSftpTestStatus.Text = "Connecting...";

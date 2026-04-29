@@ -110,7 +110,7 @@ public partial class MainWindow : Window
             await Task.Run(() =>
             {
                 _vm.VerifyRecentOrders(_settings.DaysToVerify);
-                _vm.RepairPendingOrders();
+                _vm.RepairPendingOrders(_settings.DaysToVerify);
             });
             if (_vm.NeedsRefresh)
                 _vm.NeedsRefresh = false;
@@ -948,7 +948,7 @@ public partial class MainWindow : Window
             }
 
             // 2. Dakis scan
-            await Task.Run(() => _vm.RunDakisScan());
+            await Task.Run(() => _vm.RunDakisScan(_settings.DaysToVerify));
 
             // 3. Pixfizz poll
             await _vm.RunPixfizzPollAsync(_ingestCts.Token);

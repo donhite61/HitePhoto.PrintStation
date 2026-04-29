@@ -92,8 +92,10 @@ public class DakisIngestService : IDisposable
 
     /// <summary>
     /// Full scan of the Dakis watch folder. Timer fallback in case watcher misses an event.
+    /// Skips folders whose LastWriteTime is older than <paramref name="daysCutoff"/> days
+    /// — old orders are LabApi's responsibility, not the local print queue's.
     /// </summary>
-    public void ScanFolder()
+    public void ScanFolder(int daysCutoff)
     {
         if (!_settings.DakisEnabled) return;
 
@@ -101,11 +103,17 @@ public class DakisIngestService : IDisposable
         if (string.IsNullOrEmpty(watchFolder) || !Directory.Exists(watchFolder))
             return;
 
+        var cutoff = daysCutoff > 0 ? DateTime.Now.AddDays(-daysCutoff) : DateTime.MinValue;
+
         foreach (var orderDir in Directory.GetDirectories(watchFolder))
         {
             // Dakis order folders always start with "order " — skip anything else
             var folderName = Path.GetFileName(orderDir);
             if (!folderName.StartsWith("order ", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Skip folders older than the cutoff — handled by LabApi, not the local queue
+            if (cutoff > DateTime.MinValue && new DirectoryInfo(orderDir).LastWriteTime < cutoff)
                 continue;
 
             try

@@ -165,6 +165,14 @@
                         <TextBox x:Name="PixfizzFtpUserBox" Margin="0,0,0,6"/>
                         <Label Content="FTP Password" Foreground="{DynamicResource TextSecondary}" Padding="0,2"/>
                         <PasswordBox x:Name="PixfizzFtpPassBox" Margin="0,0,0,8"/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                            <Button Content="Test Pixfizz FTP" Width="160" Click="TestPixfizzFtp_Click"/>
+                            <TextBlock x:Name="PixfizzFtpTestStatus" Margin="12,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextSecondary}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
