@@ -1,15 +1,21 @@
-using System.IO;
-using System.Text.Json;
+using System.Text.RegularExpressions;
 using FluentFTP;
 
 namespace HitePhoto.PrintStation.Core.Ingest;
 
 /// <summary>
-/// Scans the Pixfizz FTP /Artwork folder for order JSON manifests.
-/// Returns discovered orders that can be downloaded without the API.
+/// Scans the Pixfizz FTP /Artwork folder for waiting orders.
+/// Pixfizz encodes the order identity in the folder name itself
+/// (e.g. <c>HITEPHOTO-MX5V8M_69f90c98a2473e8e</c>), so the scanner
+/// just lists /Artwork and parses each directory name — no JSON
+/// manifest, no nested listing, no OHD API call.
 /// </summary>
 public class PixfizzFtpScanner
 {
+    // {orderNumber}_{16-hex orderId hash}
+    private static readonly Regex FolderNameRegex =
+        new(@"^(HITEPHOTO-[^_]+)_([a-f0-9]+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly AppSettings _settings;
 
     public PixfizzFtpScanner(AppSettings settings)
@@ -17,10 +23,6 @@ public class PixfizzFtpScanner
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
-    /// <summary>
-    /// Scan /Artwork on FTP. Returns a list of orders found, each with
-    /// orderNumber, orderId, and the list of jobs from the JSON manifest.
-    /// </summary>
     public async Task<List<PixfizzFtpOrder>> ScanAsync(CancellationToken ct)
     {
         var results = new List<PixfizzFtpOrder>();
@@ -33,71 +35,26 @@ public class PixfizzFtpScanner
 
         foreach (var dir in listing.Where(f => f.Type == FtpObjectType.Directory))
         {
-            try
+            var match = FolderNameRegex.Match(dir.Name);
+            if (!match.Success)
             {
-                // Each order folder contains a JSON manifest: {orderNumber}.json
-                var folderContents = await client.GetListing($"{artworkRoot}/{dir.Name}", ct);
-                var jsonFile = folderContents.FirstOrDefault(f =>
-                    f.Type == FtpObjectType.File &&
-                    f.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
-
-                if (jsonFile == null) continue;
-
-                // Download and parse the JSON
-                using var ms = new MemoryStream();
-                if (!await client.DownloadStream(ms, $"{artworkRoot}/{dir.Name}/{jsonFile.Name}", token: ct))
-                    continue;
-
-                ms.Position = 0;
-                var manifest = await JsonSerializer.DeserializeAsync<PixfizzManifest>(ms,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ct);
-
-                if (manifest == null || string.IsNullOrEmpty(manifest.OrderNumber))
-                    continue;
-
-                results.Add(new PixfizzFtpOrder
-                {
-                    OrderNumber = manifest.OrderNumber,
-                    OrderId = manifest.OrderId ?? "",
-                    FolderName = dir.Name,
-                    Jobs = manifest.Jobs ?? []
-                });
+                AppLog.Info($"PixfizzFtpScanner: skipping unrecognized folder name '{dir.Name}'");
+                continue;
             }
-            catch (Exception ex)
+
+            results.Add(new PixfizzFtpOrder
             {
-                AppLog.Info($"PixfizzFtpScanner: failed to read manifest from {dir.Name}: {ex.Message}");
-            }
+                OrderNumber = match.Groups[1].Value,
+                OrderId = match.Groups[2].Value
+            });
         }
 
         return results;
     }
-
-}
-
-public class PixfizzManifest
-{
-    public string? OrderId { get; set; }
-    public string? OrderNumber { get; set; }
-    public List<PixfizzManifestJob>? Jobs { get; set; }
-}
-
-public class PixfizzManifestJob
-{
-    public string? JobId { get; set; }
-    public List<PixfizzManifestImage>? Images { get; set; }
-}
-
-public class PixfizzManifestImage
-{
-    public string? Filename { get; set; }
-    public string? Size { get; set; }
-    public int Quantity { get; set; }
 }
 
 public class PixfizzFtpOrder
 {
     public required string OrderNumber { get; init; }
     public required string OrderId { get; init; }
-    public required string FolderName { get; init; }
-    public List<PixfizzManifestJob> Jobs { get; init; } = [];
 }
