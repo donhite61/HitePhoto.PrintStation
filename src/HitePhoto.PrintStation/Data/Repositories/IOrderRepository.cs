@@ -77,6 +77,12 @@ public interface IOrderRepository
     /// Save or update a channel mapping. Upserts by routing_key.
     /// </summary>
     void UpdateOrderStatus(string orderId, string statusCode);
+
+    /// <summary>
+    /// Update an order's download_status. Local-only (no cross-store sync push) — the
+    /// status reflects per-instance ingest state which doesn't need to propagate.
+    /// </summary>
+    void UpdateDownloadStatus(string orderId, string downloadStatus);
     void SaveChannelMapping(string routingKey, int channelNumber, string? layoutName = null);
     void DeleteChannelMapping(string routingKey);
     string? GetLayoutName(string routingKey);

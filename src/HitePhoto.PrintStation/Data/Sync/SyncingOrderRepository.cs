@@ -74,6 +74,10 @@ public class SyncingOrderRepository : IOrderRepository
         _ = Task.Run(() => _sync.PushAsync("orders", orderId, "update_status", payload));
     }
 
+    public void UpdateDownloadStatus(string orderId, string downloadStatus)
+        => _inner.UpdateDownloadStatus(orderId, downloadStatus);
+    // Local-only: download_status reflects per-instance ingest state, not propagated.
+
     public void UpdateItem(string itemId, string sizeLabel, string mediaType,
         string imageFilename, string imageFilepath, int quantity,
         bool isNoritsu, string category, string subCategory)

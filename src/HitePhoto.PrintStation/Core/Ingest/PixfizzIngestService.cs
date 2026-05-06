@@ -133,11 +133,13 @@ public class PixfizzIngestService
         var manifest = await _manifestReader.FetchAsync(head.OrderNumber, head.OrderIdHash, ct);
         if (manifest == null)
         {
-            // No manifest yet (e.g. Pixfizz hasn't attached the JSON Fulfillment
-            // Template to this product category). Stub the new order so the
-            // operator sees it; existing stubs are left alone for the next poll.
+            // No manifest. For a fresh order: write a stub. For an existing stub:
+            // re-resolve download_status so the row tint reflects current OHD state
+            // (e.g. unpaid → paid flips an unpaid film-dev order from yellow to blue).
             if (existingOrderId == null)
                 IngestStubOrder(group, folderPath);
+            else
+                _orders.UpdateDownloadStatus(existingOrderId, ResolveStubStatusForPaid(head.Category));
             return;
         }
 
@@ -186,17 +188,32 @@ public class PixfizzIngestService
         _                                        => "",
     };
 
+    /// <summary>
+    /// Status for a paid order that doesn't have a manifest. Film-dev terminal
+    /// (no artwork ever); everything else is awaiting Pixfizz template emission.
+    /// </summary>
+    private static string ResolveStubStatusForPaid(string category) =>
+        string.Equals(category, IngestConstants.CategoryFilmProcessing, StringComparison.OrdinalIgnoreCase)
+            ? IngestConstants.StatusNoArtworkExpected
+            : IngestConstants.StatusAwaitingFiles;
+
     private async Task PushReceivedAsync(CancellationToken ct)
     {
         if (_settings.DeveloperMode) return;
 
-        // Pass DateTime.Now so the query returns every unreceived order — the
-        // 24h cutoff that used to live here was a belt-and-suspenders against
-        // download corruption (see topics/printstation-pixfizz-discovery.md).
         var unreceived = _orders.GetUnreceivedPixfizzOrders(DateTime.Now);
 
         foreach (var (id, externalOrderId, jobId) in unreceived)
         {
+            // Only acknowledge to Pixfizz if we actually have what we're supposed to
+            // have. Stubs (no expected files) and orders missing files on disk both
+            // skip — retry next cycle.
+            if (!HasAllExpectedFiles(id))
+            {
+                AppLog.Info($"Skipping /received for {externalOrderId} — files not all on disk");
+                continue;
+            }
+
             try
             {
                 await _receivedPusher.MarkReceivedAsync(externalOrderId, jobId, ct);
@@ -205,11 +222,16 @@ public class PixfizzIngestService
             }
             catch (Exception ex)
             {
-                // Log-only on failure — retry next cycle until pushed=true. Spam-guarded
-                // (one log line per cycle per order) so the operator alert window stays
-                // quiet when an external API misbehaves.
                 AppLog.Info($"Failed to mark received for {externalOrderId} (will retry next cycle): {ex.Message}");
             }
         }
+    }
+
+    private bool HasAllExpectedFiles(string orderId)
+    {
+        var items = _orders.GetItems(orderId);
+        var withFiles = items.Where(i => !string.IsNullOrEmpty(i.ImageFilepath)).ToList();
+        if (withFiles.Count == 0) return false;  // pure stub — no artwork expected
+        return withFiles.All(i => File.Exists(i.ImageFilepath));
     }
 }

@@ -626,6 +626,16 @@ public class OrderRepository : IOrderRepository
                         $"Context: statusCode={statusCode}. State: no matching order in SQLite");
     }
 
+    public void UpdateDownloadStatus(string orderId, string downloadStatus)
+    {
+        using var conn = _db.OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE orders SET download_status = @status, updated_at = datetime('now','localtime') WHERE id = @id";
+        cmd.Parameters.AddWithValue("@status", downloadStatus);
+        cmd.Parameters.AddWithValue("@id", orderId);
+        cmd.ExecuteNonQuery();
+    }
+
     public void SaveChannelMapping(string routingKey, int channelNumber, string? layoutName = null)
     {
         using var conn = _db.OpenConnection();
