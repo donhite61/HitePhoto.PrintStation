@@ -113,11 +113,15 @@ public partial class App : Application
             sp.GetRequiredService<IPixfizzNotifier>(),
             sp.GetRequiredService<AppSettings>()));
 
-        // Ingest — Pixfizz
+        // Ingest — Pixfizz (API + JSON manifest path; legacy TXT-based scanner/downloader/parser retained
+        // for now as DI registrations only — not injected anywhere — pending the cleanup pass that deletes them).
         services.AddSingleton<PixfizzFtpScanner>();
         services.AddSingleton<PixfizzFtpDownloader>();
         services.AddSingleton<PixfizzArtworkDownloader>();
         services.AddSingleton<PixfizzOrderParser>();
+        services.AddSingleton<OhdJobsPoller>();
+        services.AddSingleton<PixfizzManifestReader>();
+        services.AddSingleton<PixfizzApiJsonParser>();
         services.AddSingleton<OhdReceivedPusher>();
         services.AddSingleton<PixfizzIngestService>();
 
@@ -175,11 +179,8 @@ public partial class App : Application
         try { alertRepo.PurgeOlderThan(30); }
         catch (Exception ex) { AppLog.Error($"Failed to purge old alerts: {ex.Message}"); }
 
-        var mariaDb = Services.GetRequiredService<PrintStationDb>();
-        AlertCollector.AddSink(new MariaDbAlertSink(mariaDb, settings.StoreId));
-        _ = mariaDb.EnsureAlertsTableAsync();
-
-        // SFTP/NAS alert upload — batches errors, uploads JSON reports + log file
+        // Alerts are NOT pushed to MariaDB — local SQLite is the per-instance scratchpad,
+        // NAS bundles are the authoritative cross-store record (see rules/02-errors.md §2.4).
         AlertCollector.AddSink(new SftpAlertSink(settings));
 
         // Show main window

@@ -13,9 +13,17 @@ public static class IngestConstants
     public const string MarkerReceivedPushed = "received_pushed";
 
     // Download status values
-    public const string StatusReady = "ready";
-    public const string StatusPending = "pending";
+    public const string StatusReady = "ready";                 // manifest fetched + files downloaded
+    public const string StatusPending = "pending";             // legacy generic — prefer the more specific values below
+    public const string StatusUnpaid = "unpaid";               // paid==false; Pixfizz withholds artwork until paid
+    public const string StatusAwaitingFiles = "awaiting_files"; // paid, but Pixfizz hasn't emitted the JSON manifest yet (template config gap)
+    public const string StatusNoArtworkExpected = "no_artwork_expected"; // paid, but no artwork is coming (e.g. Film Processing — lab does the work)
     public const string StatusDownloadError = "download_error";
+
+    // OHD API enum values (referenced from PixfizzApiJsonParser + PixfizzPathHelpers)
+    public const string OhdOrderStatusConfirmed = "confirmed";        // paid + ready to fulfill
+    public const string CategoryFilmProcessing  = "Film Processing";  // lab-side workflow, no artwork download expected
+    public const string ProcessNoritsu          = "Noritsu";          // job routes to the Noritsu printer
 
     /// <summary>Writes a timestamp marker file in the metadata/ subfolder.</summary>
     public static void WriteMarker(string orderFolderPath, string markerName)

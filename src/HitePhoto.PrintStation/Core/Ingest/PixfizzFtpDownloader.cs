@@ -140,4 +140,70 @@ public class PixfizzFtpDownloader
         AppLog.Info($"Downloaded {downloaded.Count} artwork files for {orderNumber}");
         return downloaded;
     }
+
+    /// <summary>
+    /// Downloads each image referenced in a JSON manifest directly into its
+    /// final prints/&lt;format&gt;/&lt;qty&gt; prints/&lt;filename&gt; destination —
+    /// no flat-then-move step. Path computation matches PixfizzApiJsonParser
+    /// (both call PixfizzPathHelpers.ComputeImagePath with the same inputs).
+    /// Skips images whose destination file already exists.
+    /// Returns the list of local destination paths actually present after the run
+    /// (downloaded + already-present).
+    /// </summary>
+    public async Task<List<string>> DownloadByManifestAsync(
+        string orderNumber, string orderIdHash,
+        PixfizzOrderManifest manifest,
+        IReadOnlyDictionary<string, OhdJobRecord> apiJobsByJobId,
+        string folderPath,
+        CancellationToken ct)
+    {
+        using var client = CreateClient(_settings);
+        await client.Connect(ct);
+
+        var artworkRoot = _settings.PixfizzFtpArtworkFolder.TrimEnd('/');
+        var orderFolderRemote = $"{artworkRoot}/{orderNumber}_{orderIdHash}";
+        var present = new List<string>();
+
+        foreach (var manifestJob in manifest.Jobs)
+        {
+            if (!apiJobsByJobId.TryGetValue(manifestJob.JobId, out var apiJob))
+                continue; // PixfizzApiJsonParser already alerts on this; downloader stays quiet
+
+            foreach (var img in manifestJob.Images)
+            {
+                var format = PixfizzPathHelpers.ComputeFormat(apiJob, img.Size);
+                var fileName = Path.GetFileName(img.Filename);
+                var localPath = PixfizzPathHelpers.ComputeImagePath(folderPath, format, img.Quantity, fileName);
+                if (string.IsNullOrEmpty(localPath)) continue;
+
+                Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
+
+                if (File.Exists(localPath))
+                {
+                    present.Add(localPath);
+                    continue;
+                }
+
+                var remotePath = $"{orderFolderRemote}/{img.Filename.Replace('\\', '/')}";
+                var status = await client.DownloadFile(localPath, remotePath, token: ct);
+
+                if (status == FtpStatus.Success)
+                {
+                    present.Add(localPath);
+                }
+                else
+                {
+                    AlertCollector.Error(AlertCategory.Network,
+                        $"Pixfizz manifest download failed for {fileName}",
+                        orderId: orderNumber,
+                        detail: $"Attempted: download '{remotePath}' to '{localPath}'. " +
+                                $"Expected: FtpStatus.Success. Found: {status}. " +
+                                $"Context: order {orderNumber}, job {manifestJob.JobId}.");
+                }
+            }
+        }
+
+        AppLog.Info($"Pixfizz: downloaded {present.Count} files for {orderNumber} via manifest");
+        return present;
+    }
 }

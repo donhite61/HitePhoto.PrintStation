@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows.Media;
 using HitePhoto.PrintStation.Core;
+using HitePhoto.PrintStation.Core.Ingest;
 using HitePhoto.Shared.Models;
 
 namespace HitePhoto.PrintStation.UI.ViewModels;
@@ -138,6 +140,14 @@ public class OrderTreeItem : INotifyPropertyChanged
         };
     }
 
+    // Pale row tints by download_status. Frozen for thread-safety + perf.
+    private static readonly Brush BgUnpaid              = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0xFD, 0xE7))); // soft yellow
+    private static readonly Brush BgAwaitingFiles       = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0xE0, 0xB2))); // soft orange
+    private static readonly Brush BgNoArtworkExpected   = Freeze(new SolidColorBrush(Color.FromRgb(0xE1, 0xF5, 0xFE))); // soft blue
+    private static readonly Brush BgDownloadError       = Freeze(new SolidColorBrush(Color.FromRgb(0xFF, 0xCD, 0xD2))); // soft red
+
+    private static Brush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
+
     private string _dbId = "";
     private string _externalOrderId = "";
     private string _customerName = "";
@@ -146,6 +156,7 @@ public class OrderTreeItem : INotifyPropertyChanged
     private string _sourceCode = "";
     private string _statusCode = "";
     private string _storeName = "";
+    private string _downloadStatus = "";
     private DateTime? _orderedAt;
     private DateTime? _printedAt;
     private DateTime? _notifiedAt;
@@ -206,6 +217,22 @@ public class OrderTreeItem : INotifyPropertyChanged
         get => _storeName;
         set { _storeName = value; OnPropertyChanged(); }
     }
+
+    public string DownloadStatus
+    {
+        get => _downloadStatus;
+        set { _downloadStatus = value ?? ""; OnPropertyChanged(); OnPropertyChanged(nameof(RowBackground)); }
+    }
+
+    /// <summary>Pale row tint derived from DownloadStatus. Transparent when ready/unknown.</summary>
+    public Brush RowBackground => _downloadStatus switch
+    {
+        IngestConstants.StatusUnpaid             => BgUnpaid,
+        IngestConstants.StatusAwaitingFiles      => BgAwaitingFiles,
+        IngestConstants.StatusNoArtworkExpected  => BgNoArtworkExpected,
+        IngestConstants.StatusDownloadError      => BgDownloadError,
+        _                                        => Brushes.Transparent,
+    };
 
     public DateTime? OrderedAt
     {

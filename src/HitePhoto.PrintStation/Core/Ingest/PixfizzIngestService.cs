@@ -5,163 +5,183 @@ using HitePhoto.PrintStation.Data.Repositories;
 namespace HitePhoto.PrintStation.Core.Ingest;
 
 /// <summary>
-/// Pixfizz ingest pipeline. Follows the flow:
-/// 1. Scan FTP /Artwork for order folders with JSON manifests
-/// 2. Check disk for existing folder — if exists, verify; if not, download
-/// 3. Download artwork + darkroom TXT from FTP using orderId from JSON
-/// 4. Parse TXT from disk via PixfizzOrderParser (source of truth)
-/// 5. Write to SQLite via unified IngestOrderWriter
-/// 6. Background: mark /received after 24 hours verified
+/// Pixfizz ingest pipeline (API + JSON manifest).
+///
+/// Pre-rebuild this service used the legacy /Darkroom TXT path. After 2026-05-05
+/// it sources everything from OHD API + the order-folder JSON manifest:
+///
+///   1. OhdJobsPoller.PollAsync()         → groups of jobs by order_number
+///   2. PixfizzManifestReader.FetchAsync() → per-image filename / size / qty
+///   3. PixfizzFtpDownloader.DownloadByManifestAsync() → files into prints/format/qty
+///   4. PixfizzApiJsonParser.Parse()       → UnifiedOrder
+///   5. IngestOrderWriter.WriteToSqlite()  → DB
+///
+/// Stub orders (unpaid OR paid-but-Pixfizz-hasn't-emitted-JSON-yet) skip steps
+/// 2–3 and produce a stub UnifiedOrder with IsNoritsu=false items (bypasses the
+/// writer's file-existence validation). They show in the order tree so the
+/// operator knows about them.
+///
+/// Stub upgrade: when a paid stub already in the DB has its manifest appear on
+/// FTP on a later poll, this service swaps the stub items for full items via
+/// IOrderRepository.ReplaceItems. The marker file 'download_complete' is the
+/// stub-vs-full discriminator.
 /// </summary>
 public class PixfizzIngestService
 {
-    private readonly PixfizzFtpScanner _scanner;
-    private readonly PixfizzArtworkDownloader _downloader;
-    private readonly PixfizzOrderParser _parser;
+    private readonly OhdJobsPoller _poller;
+    private readonly PixfizzManifestReader _manifestReader;
+    private readonly PixfizzFtpDownloader _ftpDownloader;
+    private readonly PixfizzApiJsonParser _parser;
     private readonly OhdReceivedPusher _receivedPusher;
     private readonly IngestOrderWriter _writer;
-    private readonly IOrderVerifier _verifier;
     private readonly IOrderRepository _orders;
+    private readonly IHistoryRepository _history;
     private readonly AppSettings _settings;
 
     public PixfizzIngestService(
-        PixfizzFtpScanner scanner,
-        PixfizzArtworkDownloader downloader,
-        PixfizzOrderParser parser,
+        OhdJobsPoller poller,
+        PixfizzManifestReader manifestReader,
+        PixfizzFtpDownloader ftpDownloader,
+        PixfizzApiJsonParser parser,
         OhdReceivedPusher receivedPusher,
         IngestOrderWriter writer,
-        IOrderVerifier verifier,
         IOrderRepository orders,
+        IHistoryRepository history,
         AppSettings settings)
     {
-        _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
-        _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
+        _poller = poller ?? throw new ArgumentNullException(nameof(poller));
+        _manifestReader = manifestReader ?? throw new ArgumentNullException(nameof(manifestReader));
+        _ftpDownloader = ftpDownloader ?? throw new ArgumentNullException(nameof(ftpDownloader));
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
         _receivedPusher = receivedPusher ?? throw new ArgumentNullException(nameof(receivedPusher));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
-        _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _history = history ?? throw new ArgumentNullException(nameof(history));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
-    /// <summary>
-    /// Run one poll cycle. Called on a timer from the main app.
-    /// </summary>
     public async Task PollAsync(CancellationToken ct)
     {
         if (!_settings.PixfizzEnabled) return;
 
-        // Step 1: Scan FTP for orders
-        List<PixfizzFtpOrder> ftpOrders;
+        IReadOnlyList<OhdOrderGroup> groups;
         try
         {
-            ftpOrders = await _scanner.ScanAsync(ct);
+            groups = await _poller.PollAsync(ct);
         }
         catch (Exception ex)
         {
-            AlertCollector.Error(AlertCategory.Network,
-                "Pixfizz FTP scan failed", ex: ex);
+            // OHD API can return transient 401s / 5xxs that recover on the next 30s tick.
+            // Log-only here; dedup/backoff layer (topics/alert-system.md) will alert when
+            // the failure persists across multiple cycles.
+            AppLog.Info($"OHD poll failed (will retry next cycle): {ex.Message}");
             return;
         }
 
-        if (ftpOrders.Count == 0) return;
-
-        foreach (var ftpOrder in ftpOrders)
+        foreach (var group in groups)
         {
             try
             {
-                await ProcessFtpOrderAsync(ftpOrder, ct);
+                await ProcessGroupAsync(group, ct);
             }
             catch (Exception ex)
             {
                 AlertCollector.Error(AlertCategory.General,
-                    $"Failed to process Pixfizz order {ftpOrder.OrderNumber}",
-                    orderId: ftpOrder.OrderNumber, ex: ex);
+                    $"Failed to process Pixfizz order {group.OrderNumber}",
+                    orderId: group.OrderNumber, ex: ex);
             }
         }
 
-        // Background: mark /received for orders verified > 24 hours
+        // Auto-/received push for orders verified > 24h (kept from pre-rebuild;
+        // Phase C will replace this with operator-driven push at Mark Printed time).
         await MarkOldOrdersReceivedAsync(ct);
     }
 
-    private async Task ProcessFtpOrderAsync(PixfizzFtpOrder ftpOrder, CancellationToken ct)
+    private async Task ProcessGroupAsync(OhdOrderGroup group, CancellationToken ct)
     {
-        var orderNumber = ftpOrder.OrderNumber;
-        var orderId = ftpOrder.OrderId;
+        var orderNumber = group.OrderNumber;
+        var head = group.Jobs[0];
+        bool isPaid = head.OrderStatus.Equals(IngestConstants.OhdOrderStatusConfirmed, StringComparison.OrdinalIgnoreCase);
         var folderPath = IngestConstants.GetOrderFolderPath(_settings.OrderOutputPath, orderNumber);
 
-        // Already downloaded and ingested? Just verify.
-        if (Directory.Exists(folderPath) &&
-            IngestConstants.MarkerExists(folderPath, IngestConstants.MarkerDownloadComplete))
+        var existingId = _orders.FindOrderId(orderNumber, _settings.StoreId);
+
+        if (existingId != null)
         {
-            VerifyAndRepair(orderNumber, folderPath);
+            // Stub upgrade path: paid order in DB without download_complete marker.
+            bool downloaded = IngestConstants.MarkerExists(folderPath, IngestConstants.MarkerDownloadComplete);
+            if (downloaded || !isPaid) return;
+
+            await IngestPaidAsync(group, folderPath, existingId, ct);
             return;
         }
 
-        // Download artwork + TXT using the orderId (matches FTP filenames)
-        var result = await _downloader.DownloadAsync(orderNumber, orderId, ct);
+        if (isPaid)
+            await IngestPaidAsync(group, folderPath, existingOrderId: null, ct);
+        else
+            IngestStubOrder(group, folderPath);
+    }
 
-        if (!result.Success)
+    private async Task IngestPaidAsync(OhdOrderGroup group, string folderPath, string? existingOrderId, CancellationToken ct)
+    {
+        var head = group.Jobs[0];
+
+        var manifest = await _manifestReader.FetchAsync(head.OrderNumber, head.OrderIdHash, ct);
+        if (manifest == null)
         {
-            AlertCollector.Error(AlertCategory.Network,
-                $"Pixfizz download failed for {orderNumber}",
-                orderId: orderNumber,
-                detail: $"Attempted: download order {orderNumber} (orderId={orderId}). " +
-                        $"Expected: successful download. " +
-                        $"Found: {string.Join(", ", result.Errors)}. " +
-                        $"Context: FTP scan. State: order will retry next poll.");
+            // No manifest yet (e.g. Pixfizz hasn't attached the JSON Fulfillment
+            // Template to this product category). Stub the new order so the
+            // operator sees it; existing stubs are left alone for the next poll.
+            if (existingOrderId == null)
+                IngestStubOrder(group, folderPath);
             return;
         }
 
-        folderPath = result.FolderPath;
+        Directory.CreateDirectory(folderPath);
+        var apiJobsByJobId = group.Jobs.ToDictionary(j => j.JobId);
+        await _ftpDownloader.DownloadByManifestAsync(
+            head.OrderNumber, head.OrderIdHash, manifest, apiJobsByJobId, folderPath, ct);
 
-        // Write download_complete marker
         IngestConstants.WriteMarker(folderPath, IngestConstants.MarkerDownloadComplete);
 
-        // Read TXT from disk, parse via PixfizzOrderParser
-        var txtPath = Path.Combine(folderPath, "darkroom_ticket.txt");
-        if (!File.Exists(txtPath))
+        var unified = _parser.Parse(group.Jobs, manifest, folderPath);
+
+        if (existingOrderId == null)
         {
-            AlertCollector.Error(AlertCategory.DataQuality,
-                $"Pixfizz darkroom_ticket.txt missing after download",
-                orderId: orderNumber,
-                detail: $"Attempted: read TXT from '{txtPath}'. Expected: file exists after download. " +
-                        $"Found: file missing. Context: order {orderNumber}, folder '{folderPath}'. " +
-                        $"State: cannot parse order without TXT.");
-            return;
+            _writer.WriteToSqlite(unified, _settings.StoreId, "pixfizz", folderPath);
+            AppLog.Info($"Pixfizz ingested order {head.OrderNumber} ({unified.Items.Count} items)");
         }
-
-        var txtContent = await File.ReadAllTextAsync(txtPath, ct);
-
-        var parseRaw = new RawOrder(
-            ExternalOrderId: orderNumber,
-            SourceName: "pixfizz",
-            RawData: txtContent,
-            Metadata: new Dictionary<string, string>
-            {
-                ["folder_path"] = folderPath,
-                ["order_id"] = orderId
-            });
-
-        var order = _parser.Parse(parseRaw);
-
-        // Write to SQLite
-        _writer.WriteToSqlite(order, _settings.StoreId, "pixfizz", order.FolderPath ?? "");
-
-        AppLog.Info($"Pixfizz ingested order {orderNumber} ({order.Items.Count} items)");
+        else
+        {
+            _orders.ReplaceItems(existingOrderId, unified.Items);
+            _history.AddNoteIfNew(existingOrderId, "Files received from Pixfizz — stub replaced with full items", "ingest");
+            AppLog.Info($"Pixfizz upgraded stub {head.OrderNumber} → full order ({unified.Items.Count} items)");
+        }
     }
 
-    private void VerifyAndRepair(string orderNumber, string folderPath)
+    private void IngestStubOrder(OhdOrderGroup group, string folderPath)
     {
-        var existingId = _orders.FindOrderId(orderNumber, _settings.StoreId);
-        if (existingId == null) return;
+        var unified = _parser.Parse(group.Jobs, manifest: null, folderPath);
+        _writer.WriteToSqlite(unified, _settings.StoreId, "pixfizz", folderPath);
 
-        _verifier.VerifyOrder(orderNumber, folderPath, "pixfizz", existingId);
+        // The row tint shows there's a reason; this records what the reason is.
+        // AddNoteIfNew dedupes — won't spam on repeat polls.
+        var orderId = _orders.FindOrderId(unified.ExternalOrderId, _settings.StoreId);
+        var note = ExplainStubStatus(unified.DownloadStatus);
+        if (orderId != null && !string.IsNullOrEmpty(note))
+            _history.AddNoteIfNew(orderId, note, "ingest");
+
+        AppLog.Info($"Pixfizz ingested stub for {group.OrderNumber} ({unified.Items.Count} jobs, status={unified.DownloadStatus})");
     }
 
-    /// <summary>
-    /// Find Pixfizz orders older than 24 hours that haven't been marked received on the OHD API.
-    /// </summary>
+    private static string ExplainStubStatus(string downloadStatus) => downloadStatus switch
+    {
+        IngestConstants.StatusUnpaid             => "Unpaid — Pixfizz withholds artwork until paid",
+        IngestConstants.StatusAwaitingFiles      => "Paid, but Pixfizz hasn't emitted the JSON manifest for this category yet",
+        IngestConstants.StatusNoArtworkExpected  => "No artwork expected — Film Processing (lab will produce)",
+        _                                        => "",
+    };
+
     private async Task MarkOldOrdersReceivedAsync(CancellationToken ct)
     {
         if (_settings.DeveloperMode) return;
@@ -182,7 +202,6 @@ public class PixfizzIngestService
                 AlertCollector.Error(AlertCategory.Network,
                     $"Failed to mark received for {externalOrderId}",
                     orderId: externalOrderId, ex: ex);
-                // Will retry next cycle
             }
         }
     }

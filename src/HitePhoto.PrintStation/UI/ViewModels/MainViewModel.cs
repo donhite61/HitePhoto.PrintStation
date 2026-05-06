@@ -390,6 +390,7 @@ public class MainViewModel : ViewModelBase
         SourceCode = order.SourceCode,
         StatusCode = order.StatusCode,
         StoreName = order.StoreName,
+        DownloadStatus = order.DownloadStatus,
         OrderedAt = order.OrderedAt != null && DateTime.TryParse(order.OrderedAt, out var dt) ? dt : null,
         PrintedAt = order.PrintedAt != null && DateTime.TryParse(order.PrintedAt, out var pt) ? pt : null,
         NotifiedAt = order.NotifiedAt != null && DateTime.TryParse(order.NotifiedAt, out var nt) ? nt : null,
@@ -410,6 +411,7 @@ public class MainViewModel : ViewModelBase
         if (existing.SourceCode != row.SourceCode) existing.SourceCode = row.SourceCode;
         if (existing.StatusCode != row.StatusCode) existing.StatusCode = row.StatusCode;
         if (existing.StoreName != row.StoreName) existing.StoreName = row.StoreName;
+        if (existing.DownloadStatus != row.DownloadStatus) existing.DownloadStatus = row.DownloadStatus;
         if (existing.IsHeld != row.IsHeld) existing.IsHeld = row.IsHeld;
         if (existing.IsTransfer != row.IsTransfer) existing.IsTransfer = row.IsTransfer;
         if (existing.FolderPath != row.FolderPath) existing.FolderPath = row.FolderPath;
