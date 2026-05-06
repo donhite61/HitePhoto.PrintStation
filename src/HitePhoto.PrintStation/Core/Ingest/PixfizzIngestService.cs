@@ -25,6 +25,10 @@ namespace HitePhoto.PrintStation.Core.Ingest;
 /// FTP on a later poll, this service swaps the stub items for full items via
 /// IOrderRepository.ReplaceItems. The marker file 'download_complete' is the
 /// stub-vs-full discriminator.
+///
+/// `/received` push: fires on every poll for any order with received_pushed=false.
+/// Failures log-only, retry next cycle. The 24h cutoff that used to gate this
+/// (ADR 0011 §9) was removed — see topics/printstation-pixfizz-discovery.md.
 /// </summary>
 public class PixfizzIngestService
 {
@@ -92,9 +96,9 @@ public class PixfizzIngestService
             }
         }
 
-        // Auto-/received push for orders verified > 24h (kept from pre-rebuild;
-        // Phase C will replace this with operator-driven push at Mark Printed time).
-        await MarkOldOrdersReceivedAsync(ct);
+        // Push /received for any order with received_pushed=false. Runs every poll;
+        // failed pushes log-only and retry next cycle until the flag flips.
+        await PushReceivedAsync(ct);
     }
 
     private async Task ProcessGroupAsync(OhdOrderGroup group, CancellationToken ct)
@@ -182,26 +186,29 @@ public class PixfizzIngestService
         _                                        => "",
     };
 
-    private async Task MarkOldOrdersReceivedAsync(CancellationToken ct)
+    private async Task PushReceivedAsync(CancellationToken ct)
     {
         if (_settings.DeveloperMode) return;
 
-        var cutoff = DateTime.Now.AddHours(-24);
-        var unreceived = _orders.GetUnreceivedPixfizzOrders(cutoff);
+        // Pass DateTime.Now so the query returns every unreceived order — the
+        // 24h cutoff that used to live here was a belt-and-suspenders against
+        // download corruption (see topics/printstation-pixfizz-discovery.md).
+        var unreceived = _orders.GetUnreceivedPixfizzOrders(DateTime.Now);
 
         foreach (var (id, externalOrderId, jobId) in unreceived)
         {
             try
             {
-                await _receivedPusher.MarkReceivedAsync(jobId, ct);
+                await _receivedPusher.MarkReceivedAsync(externalOrderId, jobId, ct);
                 _orders.MarkReceivedPushed(id);
                 AppLog.Info($"Marked Pixfizz order {externalOrderId} (job {jobId}) as received");
             }
             catch (Exception ex)
             {
-                AlertCollector.Error(AlertCategory.Network,
-                    $"Failed to mark received for {externalOrderId}",
-                    orderId: externalOrderId, ex: ex);
+                // Log-only on failure — retry next cycle until pushed=true. Spam-guarded
+                // (one log line per cycle per order) so the operator alert window stays
+                // quiet when an external API misbehaves.
+                AppLog.Info($"Failed to mark received for {externalOrderId} (will retry next cycle): {ex.Message}");
             }
         }
     }

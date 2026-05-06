@@ -21,11 +21,16 @@ public class OhdReceivedPusher
 
     /// <summary>
     /// Marks a job as received on the OHD API.
-    /// jobId is the Pixfizz job_id (not the order number).
+    /// Pixfizz requires the path segment to be either ORDER-NUMBER_JOB-NUMBER (e.g.
+    /// HITEPHOTO-MX5V8M_38367763) or a UUID — the bare numeric job_id is rejected
+    /// (BadRequest "Invalid job_id format"). Composing from orderNumber + "_" + jobId
+    /// is the simplest path; we keep this format requirement documented in
+    /// runbooks/references.md alongside the OHD endpoint inventory.
     /// </summary>
-    public async Task MarkReceivedAsync(string jobId, CancellationToken ct)
+    public async Task MarkReceivedAsync(string orderNumber, string jobId, CancellationToken ct)
     {
-        var url = $"{_settings.PixfizzApiUrl.TrimEnd('/')}/ohd-api/jobs/{jobId}/received";
+        var pathSegment = $"{orderNumber}_{jobId}";
+        var url = $"{_settings.PixfizzApiUrl.TrimEnd('/')}/ohd-api/jobs/{pathSegment}/received";
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         request.Content = new StringContent(
@@ -49,13 +54,13 @@ public class OhdReceivedPusher
             if (response.StatusCode == System.Net.HttpStatusCode.BadRequest &&
                 body.Contains("already", StringComparison.OrdinalIgnoreCase))
             {
-                AppLog.Info($"Job {jobId} already marked as received");
+                AppLog.Info($"Job {pathSegment} already marked as received");
                 return;
             }
 
             throw new Exception($"OHD /received failed {response.StatusCode}: {body}");
         }
 
-        AppLog.Info($"Marked job {jobId} as received on OHD API");
+        AppLog.Info($"Marked job {pathSegment} as received on OHD API");
     }
 }
